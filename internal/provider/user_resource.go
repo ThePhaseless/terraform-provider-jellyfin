@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -35,13 +36,13 @@ type UserResource struct {
 
 // UserResourceModel describes the resource data model.
 type UserResourceModel struct {
-	ID               types.String `tfsdk:"id"`
-	Name             types.String `tfsdk:"name"`
-	Password         types.String `tfsdk:"password"`
-	IsAdministrator  types.Bool   `tfsdk:"is_administrator"`
-	IsDisabled       types.Bool   `tfsdk:"is_disabled"`
-	EnableAllFolders types.Bool   `tfsdk:"enable_all_folders"`
-	PolicyJSON       types.String `tfsdk:"policy_json"`
+	ID               types.String         `tfsdk:"id"`
+	Name             types.String         `tfsdk:"name"`
+	Password         types.String         `tfsdk:"password"`
+	IsAdministrator  types.Bool           `tfsdk:"is_administrator"`
+	IsDisabled       types.Bool           `tfsdk:"is_disabled"`
+	EnableAllFolders types.Bool           `tfsdk:"enable_all_folders"`
+	PolicyJSON       jsontypes.Normalized `tfsdk:"policy_json"`
 }
 
 func (r *UserResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -91,7 +92,8 @@ func (r *UserResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 					"the existing policy. This allows configuring all policy fields including access schedules, " +
 					"parental controls, transcoding permissions, and more. Individual policy attributes like " +
 					"`is_administrator` take precedence over values in this JSON.",
-				Optional: true,
+				Optional:   true,
+				CustomType: jsontypes.NormalizedType{},
 			},
 		},
 	}
@@ -188,7 +190,12 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 			resp.Diagnostics.AddError("Failed to serialize user policy", err.Error())
 			return
 		}
-		data.PolicyJSON = types.StringValue(string(policyBytes))
+		normalizedPolicy, err := normalizeJSON(string(policyBytes))
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to normalize user policy", err.Error())
+			return
+		}
+		data.PolicyJSON = jsontypes.NewNormalizedValue(normalizedPolicy)
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

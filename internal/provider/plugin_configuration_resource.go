@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -27,8 +28,8 @@ type PluginConfigurationResource struct {
 
 // PluginConfigurationResourceModel describes the resource data model.
 type PluginConfigurationResourceModel struct {
-	PluginID      types.String `tfsdk:"plugin_id"`
-	Configuration types.String `tfsdk:"configuration_json"`
+	PluginID      types.String         `tfsdk:"plugin_id"`
+	Configuration jsontypes.Normalized `tfsdk:"configuration_json"`
 }
 
 func (r *PluginConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -48,7 +49,8 @@ func (r *PluginConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				MarkdownDescription: "The plugin configuration as a JSON string. " +
 					"For SSO-Auth, this would include SAML/OIDC configuration. " +
 					"This allows universal configuration of any plugin.",
-				Required: true,
+				Required:   true,
+				CustomType: jsontypes.NormalizedType{},
 			},
 		},
 	}
@@ -99,7 +101,13 @@ func (r *PluginConfigurationResource) Read(ctx context.Context, req resource.Rea
 		return
 	}
 
-	data.Configuration = types.StringValue(configJSON)
+	normalized, err := normalizeJSON(configJSON)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to normalize plugin configuration", err.Error())
+		return
+	}
+
+	data.Configuration = jsontypes.NewNormalizedValue(normalized)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

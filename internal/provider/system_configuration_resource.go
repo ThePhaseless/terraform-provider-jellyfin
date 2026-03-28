@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -30,8 +31,8 @@ type SystemConfigurationResource struct {
 
 // SystemConfigurationResourceModel describes the resource data model.
 type SystemConfigurationResourceModel struct {
-	ServerName        types.String `tfsdk:"server_name"`
-	ConfigurationJSON types.String `tfsdk:"configuration_json"`
+	ServerName        types.String         `tfsdk:"server_name"`
+	ConfigurationJSON jsontypes.Normalized `tfsdk:"configuration_json"`
 }
 
 func (r *SystemConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -52,8 +53,9 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			"configuration_json": schema.StringAttribute{
 				MarkdownDescription: "The full system configuration as a JSON string. " +
 					"When provided, it will be merged with the existing configuration.",
-				Optional: true,
-				Computed: true,
+				Optional:   true,
+				Computed:   true,
+				CustomType: jsontypes.NormalizedType{},
 			},
 		},
 	}
@@ -100,7 +102,12 @@ func (r *SystemConfigurationResource) Read(ctx context.Context, req resource.Rea
 	}
 
 	data.ServerName = types.StringValue(config.ServerName)
-	data.ConfigurationJSON = types.StringValue(config.RawJSON)
+	normalized, err := normalizeJSON(config.RawJSON)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to normalize system configuration", err.Error())
+		return
+	}
+	data.ConfigurationJSON = jsontypes.NewNormalizedValue(normalized)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -166,7 +173,12 @@ func (r *SystemConfigurationResource) applyConfiguration(ctx context.Context, da
 	}
 
 	data.ServerName = types.StringValue(updated.ServerName)
-	data.ConfigurationJSON = types.StringValue(updated.RawJSON)
+	normalizedUpdated, normErr := normalizeJSON(updated.RawJSON)
+	if normErr != nil {
+		diagnostics.AddError("Failed to normalize system configuration", normErr.Error())
+		return
+	}
+	data.ConfigurationJSON = jsontypes.NewNormalizedValue(normalizedUpdated)
 
 	diagnostics.Append(state.Set(ctx, data)...)
 }
@@ -192,5 +204,18 @@ func mergeJSON(base, override string) (string, error) {
 		return "", fmt.Errorf("serializing merged JSON: %w", err)
 	}
 
+	return string(result), nil
+}
+
+// normalizeJSON re-encodes JSON through interface{} to produce canonical key ordering.
+func normalizeJSON(raw string) (string, error) {
+	var generic interface{}
+	if err := json.Unmarshal([]byte(raw), &generic); err != nil {
+		return "", fmt.Errorf("parsing JSON for normalization: %w", err)
+	}
+	result, err := json.Marshal(generic)
+	if err != nil {
+		return "", fmt.Errorf("serializing normalized JSON: %w", err)
+	}
 	return string(result), nil
 }

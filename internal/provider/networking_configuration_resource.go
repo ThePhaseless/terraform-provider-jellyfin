@@ -8,9 +8,9 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 var _ resource.Resource = &NetworkingConfigurationResource{}
@@ -27,7 +27,7 @@ type NetworkingConfigurationResource struct {
 
 // NetworkingConfigurationResourceModel describes the resource data model.
 type NetworkingConfigurationResourceModel struct {
-	ConfigurationJSON types.String `tfsdk:"configuration_json"`
+	ConfigurationJSON jsontypes.Normalized `tfsdk:"configuration_json"`
 }
 
 func (r *NetworkingConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -44,7 +44,8 @@ func (r *NetworkingConfigurationResource) Schema(_ context.Context, _ resource.S
 				MarkdownDescription: "The networking configuration as a JSON string. Supports all Jellyfin network settings " +
 					"including BaseUrl, EnableHttps, RequireHttps, CertificatePath, InternalHttpPort, PublicHttpPort, " +
 					"EnableRemoteAccess, KnownProxies, RemoteIPFilter, and more.",
-				Required: true,
+				Required:   true,
+				CustomType: jsontypes.NormalizedType{},
 			},
 		},
 	}
@@ -96,7 +97,13 @@ func (r *NetworkingConfigurationResource) Read(ctx context.Context, req resource
 		return
 	}
 
-	data.ConfigurationJSON = types.StringValue(config.RawJSON)
+	normalized, err := normalizeJSON(config.RawJSON)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to normalize networking configuration", err.Error())
+		return
+	}
+
+	data.ConfigurationJSON = jsontypes.NewNormalizedValue(normalized)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

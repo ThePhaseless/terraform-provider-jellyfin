@@ -8,9 +8,9 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 var _ resource.Resource = &EncodingConfigurationResource{}
@@ -27,7 +27,7 @@ type EncodingConfigurationResource struct {
 
 // EncodingConfigurationResourceModel describes the resource data model.
 type EncodingConfigurationResourceModel struct {
-	ConfigurationJSON types.String `tfsdk:"configuration_json"`
+	ConfigurationJSON jsontypes.Normalized `tfsdk:"configuration_json"`
 }
 
 func (r *EncodingConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -42,6 +42,7 @@ func (r *EncodingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 			"configuration_json": schema.StringAttribute{
 				MarkdownDescription: "The encoding configuration as a JSON string.",
 				Required:            true,
+				CustomType:          jsontypes.NormalizedType{},
 			},
 		},
 	}
@@ -93,7 +94,13 @@ func (r *EncodingConfigurationResource) Read(ctx context.Context, req resource.R
 		return
 	}
 
-	data.ConfigurationJSON = types.StringValue(config.RawJSON)
+	normalized, err := normalizeJSON(config.RawJSON)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to normalize encoding configuration", err.Error())
+		return
+	}
+
+	data.ConfigurationJSON = jsontypes.NewNormalizedValue(normalized)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

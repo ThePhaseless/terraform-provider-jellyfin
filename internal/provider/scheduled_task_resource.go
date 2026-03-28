@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -34,8 +35,8 @@ type ScheduledTaskResource struct {
 
 // ScheduledTaskResourceModel describes the resource data model.
 type ScheduledTaskResourceModel struct {
-	ID           types.String `tfsdk:"id"`
-	TriggersJSON types.String `tfsdk:"triggers_json"`
+	ID           types.String         `tfsdk:"id"`
+	TriggersJSON jsontypes.Normalized `tfsdk:"triggers_json"`
 }
 
 func (r *ScheduledTaskResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -58,7 +59,8 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 				MarkdownDescription: "The task triggers as a JSON array string. Each trigger object can have " +
 					"Type (DailyTrigger, IntervalTrigger, StartupTrigger, WeeklyTrigger), " +
 					"TimeOfDayTicks, IntervalTicks, DayOfWeek, MaxRuntimeTicks.",
-				Required: true,
+				Required:   true,
+				CustomType: jsontypes.NormalizedType{},
 			},
 		},
 	}
@@ -116,13 +118,19 @@ func (r *ScheduledTaskResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
-	triggersBytes, err := json.Marshal(task.Triggers)
+	rawTriggers, err := json.Marshal(task.Triggers)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to serialize task triggers", err.Error())
 		return
 	}
 
-	data.TriggersJSON = types.StringValue(string(triggersBytes))
+	normalizedTriggers, err := normalizeJSON(string(rawTriggers))
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to normalize task triggers", err.Error())
+		return
+	}
+
+	data.TriggersJSON = jsontypes.NewNormalizedValue(normalizedTriggers)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

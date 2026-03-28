@@ -8,9 +8,9 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 var _ resource.Resource = &BrandingConfigurationResource{}
@@ -27,7 +27,7 @@ type BrandingConfigurationResource struct {
 
 // BrandingConfigurationResourceModel describes the resource data model.
 type BrandingConfigurationResourceModel struct {
-	ConfigurationJSON types.String `tfsdk:"configuration_json"`
+	ConfigurationJSON jsontypes.Normalized `tfsdk:"configuration_json"`
 }
 
 func (r *BrandingConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -42,7 +42,8 @@ func (r *BrandingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 			"configuration_json": schema.StringAttribute{
 				MarkdownDescription: "The branding configuration as a JSON string. " +
 					"Supports settings like SplashscreenEnabled.",
-				Required: true,
+				Required:   true,
+				CustomType: jsontypes.NormalizedType{},
 			},
 		},
 	}
@@ -94,7 +95,13 @@ func (r *BrandingConfigurationResource) Read(ctx context.Context, req resource.R
 		return
 	}
 
-	data.ConfigurationJSON = types.StringValue(config.RawJSON)
+	normalized, err := normalizeJSON(config.RawJSON)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to normalize branding configuration", err.Error())
+		return
+	}
+
+	data.ConfigurationJSON = jsontypes.NewNormalizedValue(normalized)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
