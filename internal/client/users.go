@@ -4,7 +4,11 @@
 package client
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 )
 
@@ -17,9 +21,11 @@ type User struct {
 
 // UserPolicy represents the policy/permissions for a user.
 type UserPolicy struct {
-	IsAdministrator  bool `json:"IsAdministrator"`
-	IsDisabled       bool `json:"IsDisabled"`
-	EnableAllFolders bool `json:"EnableAllFolders"`
+	IsAdministrator          bool   `json:"IsAdministrator"`
+	IsDisabled               bool   `json:"IsDisabled"`
+	EnableAllFolders         bool   `json:"EnableAllFolders"`
+	AuthenticationProviderId string `json:"AuthenticationProviderId"`
+	PasswordResetProviderId  string `json:"PasswordResetProviderId"`
 }
 
 // AuthResult represents the result of a user authentication.
@@ -97,14 +103,42 @@ func (c *Client) UpdateUserPolicy(id string, policy *UserPolicy) error {
 }
 
 // AuthenticateByName authenticates a user by username and password.
+// This endpoint requires a special MediaBrowser header with client info, not a token.
 func (c *Client) AuthenticateByName(username, password string) (*AuthResult, error) {
 	body := map[string]string{
 		"Username": username,
 		"Pw":       password,
 	}
-	var result AuthResult
-	if err := c.postAndDecode("/Users/AuthenticateByName", body, &result); err != nil {
-		return nil, fmt.Errorf("authenticating user %s: %w", username, err)
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling auth request: %w", err)
 	}
+
+	url := c.BaseURL + "/Users/AuthenticateByName"
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("creating auth request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", `MediaBrowser Client="Terraform", Device="Provider", DeviceId="terraform-provider-jellyfin", Version="1.0.0"`)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("executing auth request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("authentication failed for user %s (status %d): %s", username, resp.StatusCode, string(bodyBytes))
+	}
+
+	var result AuthResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding auth response: %w", err)
+	}
+
 	return &result, nil
 }

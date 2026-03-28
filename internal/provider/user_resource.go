@@ -125,12 +125,19 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 
 	data.ID = types.StringValue(user.Id)
 
-	// Update user policy.
-	user.Policy.IsAdministrator = data.IsAdministrator.ValueBool()
-	user.Policy.IsDisabled = data.IsDisabled.ValueBool()
-	user.Policy.EnableAllFolders = data.EnableAllFolders.ValueBool()
+	// Read back the user to get the full policy with provider IDs.
+	freshUser, err := r.client.GetUserByID(user.Id)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read user after creation", err.Error())
+		return
+	}
 
-	if err := r.client.UpdateUserPolicy(user.Id, &user.Policy); err != nil {
+	// Update user policy, preserving required fields.
+	freshUser.Policy.IsAdministrator = data.IsAdministrator.ValueBool()
+	freshUser.Policy.IsDisabled = data.IsDisabled.ValueBool()
+	freshUser.Policy.EnableAllFolders = data.EnableAllFolders.ValueBool()
+
+	if err := r.client.UpdateUserPolicy(freshUser.Id, &freshUser.Policy); err != nil {
 		resp.Diagnostics.AddError("Failed to update user policy", err.Error())
 		return
 	}
@@ -172,29 +179,33 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		return
 	}
 
-	user := &client.User{
-		Id:   state.ID.ValueString(),
-		Name: data.Name.ValueString(),
-		Policy: client.UserPolicy{
-			IsAdministrator:  data.IsAdministrator.ValueBool(),
-			IsDisabled:       data.IsDisabled.ValueBool(),
-			EnableAllFolders: data.EnableAllFolders.ValueBool(),
-		},
+	// Read current user to get existing policy with required fields.
+	currentUser, err := r.client.GetUserByID(state.ID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read current user", err.Error())
+		return
 	}
 
-	if err := r.client.UpdateUser(user); err != nil {
+	currentUser.Name = data.Name.ValueString()
+
+	if err := r.client.UpdateUser(currentUser); err != nil {
 		resp.Diagnostics.AddError("Failed to update user", err.Error())
 		return
 	}
 
-	if err := r.client.UpdateUserPolicy(user.Id, &user.Policy); err != nil {
+	// Update policy fields while preserving required provider IDs.
+	currentUser.Policy.IsAdministrator = data.IsAdministrator.ValueBool()
+	currentUser.Policy.IsDisabled = data.IsDisabled.ValueBool()
+	currentUser.Policy.EnableAllFolders = data.EnableAllFolders.ValueBool()
+
+	if err := r.client.UpdateUserPolicy(currentUser.Id, &currentUser.Policy); err != nil {
 		resp.Diagnostics.AddError("Failed to update user policy", err.Error())
 		return
 	}
 
 	// Update password if changed.
 	if !data.Password.IsNull() && !data.Password.Equal(state.Password) {
-		if err := r.client.UpdateUserPassword(user.Id, "", data.Password.ValueString()); err != nil {
+		if err := r.client.UpdateUserPassword(currentUser.Id, "", data.Password.ValueString()); err != nil {
 			resp.Diagnostics.AddError("Failed to update user password", err.Error())
 			return
 		}

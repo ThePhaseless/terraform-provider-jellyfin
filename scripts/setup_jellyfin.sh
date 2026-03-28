@@ -1,67 +1,73 @@
 #!/usr/bin/env bash
 # setup_jellyfin.sh - Sets up a fresh Jellyfin instance for testing.
 # This script completes the startup wizard and creates an API key.
-set -euo pipefail
+set -uo pipefail
 
 JELLYFIN_URL="${JELLYFIN_ENDPOINT:-http://localhost:8096}"
-MAX_WAIT=60
+MAX_WAIT=120
 
-echo "Waiting for Jellyfin to start at ${JELLYFIN_URL}..."
+echo "Waiting for Jellyfin to become ready at ${JELLYFIN_URL}..."
 for i in $(seq 1 "$MAX_WAIT"); do
-    if curl -sf "${JELLYFIN_URL}/System/Info/Public" > /dev/null 2>&1; then
-        echo "Jellyfin is up!"
+    # Wait until the server is fully initialized.
+    # /Startup/User returns JSON when not configured, or 401 when already configured.
+    HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "${JELLYFIN_URL}/Startup/User" 2>/dev/null || echo "000")
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "401" ]; then
+        echo "Jellyfin is ready! (waited ${i}s)"
         break
     fi
     if [ "$i" -eq "$MAX_WAIT" ]; then
-        echo "ERROR: Jellyfin did not start within ${MAX_WAIT}s"
+        echo "ERROR: Jellyfin did not become ready within ${MAX_WAIT}s"
         exit 1
     fi
     sleep 1
 done
 
 # Check if startup wizard is already completed.
-WIZARD_COMPLETED=$(curl -sf "${JELLYFIN_URL}/System/Info/Public" | python3 -c "import sys,json; print(json.load(sys.stdin).get('StartupWizardCompleted', False))" 2>/dev/null || echo "False")
+WIZARD_COMPLETED=$(curl -s "${JELLYFIN_URL}/System/Info/Public" | python3 -c "import sys,json; print(json.load(sys.stdin).get('StartupWizardCompleted', False))" 2>/dev/null || echo "False")
 
 if [ "$WIZARD_COMPLETED" = "True" ]; then
     echo "Startup wizard already completed."
 else
     echo "Completing startup wizard..."
 
-    # Set startup configuration.
-    curl -sf -X POST "${JELLYFIN_URL}/Startup/Configuration" \
+    curl -s -o /dev/null -X POST "${JELLYFIN_URL}/Startup/Configuration" \
         -H "Content-Type: application/json" \
         -d '{"UICulture":"en-US","MetadataCountryCode":"US","PreferredMetadataLanguage":"en"}'
+    echo "  - Configuration set"
 
-    # Set startup user.
-    curl -sf -X POST "${JELLYFIN_URL}/Startup/User" \
+    curl -s -o /dev/null -X POST "${JELLYFIN_URL}/Startup/User" \
         -H "Content-Type: application/json" \
-        -d '{"Name":"admin","Password":"admin123"}'
+        -d '{"Name":"admin","Password":"Admin123!"}'
+    echo "  - User set"
 
-    # Complete startup.
-    curl -sf -X POST "${JELLYFIN_URL}/Startup/Complete"
+    curl -s -o /dev/null -X POST "${JELLYFIN_URL}/Startup/Complete"
+    echo "  - Wizard completed"
 
-    echo "Startup wizard completed."
+    # Wait for wizard completion to propagate.
+    sleep 2
 fi
 
 # Authenticate to get a token.
 echo "Authenticating..."
-AUTH_RESPONSE=$(curl -sf -X POST "${JELLYFIN_URL}/Users/AuthenticateByName" \
+AUTH_RESPONSE=$(curl -s -X POST "${JELLYFIN_URL}/Users/AuthenticateByName" \
     -H "Content-Type: application/json" \
     -H 'Authorization: MediaBrowser Client="Terraform", Device="Setup", DeviceId="setup-script", Version="1.0.0"' \
-    -d '{"Username":"admin","Pw":"admin123"}')
+    -d '{"Username":"admin","Pw":"Admin123!"}')
 
 ACCESS_TOKEN=$(echo "$AUTH_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['AccessToken'])")
+if [ -z "$ACCESS_TOKEN" ]; then
+    echo "ERROR: Failed to authenticate. Response: $AUTH_RESPONSE"
+    exit 1
+fi
 echo "Got access token."
 
 # Create an API key.
 echo "Creating API key..."
-curl -sf -X POST "${JELLYFIN_URL}/Auth/Keys" \
-    -H "Authorization: MediaBrowser Token=\"${ACCESS_TOKEN}\"" \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "app=terraform-provider-test"
+curl -s -o /dev/null -X POST "${JELLYFIN_URL}/Auth/Keys?app=terraform-provider-test" \
+    -H "Authorization: MediaBrowser Token=\"${ACCESS_TOKEN}\""
 
 # Fetch the API key.
-API_KEYS_RESPONSE=$(curl -sf "${JELLYFIN_URL}/Auth/Keys" \
+API_KEYS_RESPONSE=$(curl -s "${JELLYFIN_URL}/Auth/Keys" \
     -H "Authorization: MediaBrowser Token=\"${ACCESS_TOKEN}\"")
 
 API_KEY=$(echo "$API_KEYS_RESPONSE" | python3 -c "import sys,json; items=json.load(sys.stdin)['Items']; print(items[-1]['AccessToken'])")
