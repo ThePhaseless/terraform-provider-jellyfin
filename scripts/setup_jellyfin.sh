@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # setup_jellyfin.sh - Sets up a fresh Jellyfin instance for testing.
 # This script completes the startup wizard and creates an API key.
-set -uo pipefail
+set -euo pipefail
 
 JELLYFIN_URL="${JELLYFIN_ENDPOINT:-http://localhost:8096}"
 MAX_WAIT=120
