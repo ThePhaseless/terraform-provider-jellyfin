@@ -4,6 +4,7 @@
 package provider
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -33,7 +34,7 @@ func TestAccNetworkingConfigurationResource(t *testing.T) {
 }
 
 func testAccNetworkingConfigurationResourceConfig(enableIPv6 bool) string {
-	return `
+	return fmt.Sprintf(`
 resource "jellyfin_networking_configuration" "test" {
   configuration_json = jsonencode({
     BaseUrl            = ""
@@ -45,7 +46,7 @@ resource "jellyfin_networking_configuration" "test" {
     PublicHttpsPort    = 8920
     AutoDiscovery      = true
     EnableIPv4         = true
-    EnableIPv6         = ` + boolToString(enableIPv6) + `
+    EnableIPv6         = %t
     EnableRemoteAccess = true
     KnownProxies       = []
     LocalNetworkSubnets    = []
@@ -61,12 +62,5 @@ resource "jellyfin_networking_configuration" "test" {
     PublishedServerUriBySubnet = []
   })
 }
-`
-}
-
-func boolToString(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
+`, enableIPv6)
 }
