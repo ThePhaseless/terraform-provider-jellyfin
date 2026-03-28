@@ -21,11 +21,49 @@ type User struct {
 
 // UserPolicy represents the policy/permissions for a user.
 type UserPolicy struct {
-	IsAdministrator          bool   `json:"IsAdministrator"`
-	IsDisabled               bool   `json:"IsDisabled"`
-	EnableAllFolders         bool   `json:"EnableAllFolders"`
-	AuthenticationProviderId string `json:"AuthenticationProviderId"`
-	PasswordResetProviderId  string `json:"PasswordResetProviderId"`
+	IsAdministrator                  bool     `json:"IsAdministrator"`
+	IsHidden                         bool     `json:"IsHidden"`
+	IsDisabled                       bool     `json:"IsDisabled"`
+	MaxParentalRating                *int     `json:"MaxParentalRating,omitempty"`
+	BlockedTags                      []string `json:"BlockedTags"`
+	AllowedTags                      []string `json:"AllowedTags"`
+	EnableUserPreferenceAccess       bool     `json:"EnableUserPreferenceAccess"`
+	AccessSchedules                  []any    `json:"AccessSchedules"`
+	BlockUnratedItems                []string `json:"BlockUnratedItems"`
+	EnableRemoteControlOfOtherUsers  bool     `json:"EnableRemoteControlOfOtherUsers"`
+	EnableSharedDeviceControl        bool     `json:"EnableSharedDeviceControl"`
+	EnableRemoteAccess               bool     `json:"EnableRemoteAccess"`
+	EnableLiveTvManagement           bool     `json:"EnableLiveTvManagement"`
+	EnableLiveTvAccess               bool     `json:"EnableLiveTvAccess"`
+	EnableMediaPlayback              bool     `json:"EnableMediaPlayback"`
+	EnableAudioPlaybackTranscoding   bool     `json:"EnableAudioPlaybackTranscoding"`
+	EnableVideoPlaybackTranscoding   bool     `json:"EnableVideoPlaybackTranscoding"`
+	EnablePlaybackRemuxing           bool     `json:"EnablePlaybackRemuxing"`
+	ForceRemoteSourceTranscoding     bool     `json:"ForceRemoteSourceTranscoding"`
+	EnableContentDeletion            bool     `json:"EnableContentDeletion"`
+	EnableContentDeletionFromFolders []string `json:"EnableContentDeletionFromFolders"`
+	EnableContentDownloading         bool     `json:"EnableContentDownloading"`
+	EnableSyncTranscoding            bool     `json:"EnableSyncTranscoding"`
+	EnableMediaConversion            bool     `json:"EnableMediaConversion"`
+	EnabledDevices                   []string `json:"EnabledDevices"`
+	EnableAllDevices                 bool     `json:"EnableAllDevices"`
+	EnabledChannels                  []string `json:"EnabledChannels"`
+	EnableAllChannels                bool     `json:"EnableAllChannels"`
+	EnabledFolders                   []string `json:"EnabledFolders"`
+	EnableAllFolders                 bool     `json:"EnableAllFolders"`
+	InvalidLoginAttemptCount         int      `json:"InvalidLoginAttemptCount"`
+	LoginAttemptsBeforeLockout       int      `json:"LoginAttemptsBeforeLockout"`
+	MaxActiveSessions                int      `json:"MaxActiveSessions"`
+	EnablePublicSharing              bool     `json:"EnablePublicSharing"`
+	BlockedMediaFolders              []string `json:"BlockedMediaFolders"`
+	BlockedChannels                  []string `json:"BlockedChannels"`
+	RemoteClientBitrateLimit         int      `json:"RemoteClientBitrateLimit"`
+	AuthenticationProviderId         string   `json:"AuthenticationProviderId"`
+	PasswordResetProviderId          string   `json:"PasswordResetProviderId"`
+	SyncPlayAccess                   string   `json:"SyncPlayAccess"`
+	EnableCollectionManagement       bool     `json:"EnableCollectionManagement"`
+	EnableSubtitleManagement         bool     `json:"EnableSubtitleManagement"`
+	EnableLyricManagement            bool     `json:"EnableLyricManagement"`
 }
 
 // AuthResult represents the result of a user authentication.

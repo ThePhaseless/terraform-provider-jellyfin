@@ -5,6 +5,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
@@ -40,6 +41,7 @@ type UserResourceModel struct {
 	IsAdministrator  types.Bool   `tfsdk:"is_administrator"`
 	IsDisabled       types.Bool   `tfsdk:"is_disabled"`
 	EnableAllFolders types.Bool   `tfsdk:"enable_all_folders"`
+	PolicyJSON       types.String `tfsdk:"policy_json"`
 }
 
 func (r *UserResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -83,6 +85,13 @@ func (r *UserResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(true),
+			},
+			"policy_json": schema.StringAttribute{
+				MarkdownDescription: "The full user policy as a JSON string. When provided, this will be merged with " +
+					"the existing policy. This allows configuring all policy fields including access schedules, " +
+					"parental controls, transcoding permissions, and more. Individual policy attributes like " +
+					"`is_administrator` take precedence over values in this JSON.",
+				Optional: true,
 			},
 		},
 	}
@@ -133,6 +142,15 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 
 	// Update user policy, preserving required fields.
+	// First apply policy_json if provided (merge into existing policy).
+	if !data.PolicyJSON.IsNull() && data.PolicyJSON.ValueString() != "" {
+		if err := json.Unmarshal([]byte(data.PolicyJSON.ValueString()), &freshUser.Policy); err != nil {
+			resp.Diagnostics.AddError("Failed to parse policy_json", err.Error())
+			return
+		}
+	}
+
+	// Explicit fields take precedence over policy_json values.
 	freshUser.Policy.IsAdministrator = data.IsAdministrator.ValueBool()
 	freshUser.Policy.IsDisabled = data.IsDisabled.ValueBool()
 	freshUser.Policy.EnableAllFolders = data.EnableAllFolders.ValueBool()
@@ -162,6 +180,16 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	data.IsAdministrator = types.BoolValue(user.Policy.IsAdministrator)
 	data.IsDisabled = types.BoolValue(user.Policy.IsDisabled)
 	data.EnableAllFolders = types.BoolValue(user.Policy.EnableAllFolders)
+
+	// Only populate policy_json if the user originally set it.
+	if !data.PolicyJSON.IsNull() {
+		policyBytes, err := json.Marshal(user.Policy)
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to serialize user policy", err.Error())
+			return
+		}
+		data.PolicyJSON = types.StringValue(string(policyBytes))
+	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -194,6 +222,15 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	}
 
 	// Update policy fields while preserving required provider IDs.
+	// First apply policy_json if provided (merge into existing policy).
+	if !data.PolicyJSON.IsNull() && data.PolicyJSON.ValueString() != "" {
+		if err := json.Unmarshal([]byte(data.PolicyJSON.ValueString()), &currentUser.Policy); err != nil {
+			resp.Diagnostics.AddError("Failed to parse policy_json", err.Error())
+			return
+		}
+	}
+
+	// Explicit fields take precedence over policy_json values.
 	currentUser.Policy.IsAdministrator = data.IsAdministrator.ValueBool()
 	currentUser.Policy.IsDisabled = data.IsDisabled.ValueBool()
 	currentUser.Policy.EnableAllFolders = data.EnableAllFolders.ValueBool()
