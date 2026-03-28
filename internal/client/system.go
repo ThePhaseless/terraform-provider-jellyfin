@@ -20,11 +20,11 @@ type SystemInfo struct {
 
 // PublicSystemInfo represents public system information from /System/Info/Public.
 type PublicSystemInfo struct {
-	Id                      string `json:"Id"`
-	ServerName              string `json:"ServerName"`
-	Version                 string `json:"Version"`
-	LocalAddress            string `json:"LocalAddress"`
-	StartupWizardCompleted  bool   `json:"StartupWizardCompleted"`
+	Id                     string `json:"Id"`
+	ServerName             string `json:"ServerName"`
+	Version                string `json:"Version"`
+	LocalAddress           string `json:"LocalAddress"`
+	StartupWizardCompleted bool   `json:"StartupWizardCompleted"`
 }
 
 // SystemConfiguration represents the server configuration.

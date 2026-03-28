@@ -88,6 +88,14 @@ func (c *Client) UpdateUserPassword(id, currentPassword, newPassword string) err
 	return nil
 }
 
+// UpdateUserPolicy updates a user's policy/permissions.
+func (c *Client) UpdateUserPolicy(id string, policy *UserPolicy) error {
+	if err := c.post(fmt.Sprintf("/Users/%s/Policy", url.PathEscape(id)), policy); err != nil {
+		return fmt.Errorf("updating policy for user %s: %w", id, err)
+	}
+	return nil
+}
+
 // AuthenticateByName authenticates a user by username and password.
 func (c *Client) AuthenticateByName(username, password string) (*AuthResult, error) {
 	body := map[string]string{

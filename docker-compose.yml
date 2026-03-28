@@ -1,0 +1,15 @@
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    ports:
+      - "8096:8096"
+    volumes:
+      - jellyfin-config:/config
+      - jellyfin-cache:/cache
+    environment:
+      - JELLYFIN_PublishedServerUrl=http://localhost:8096
+    restart: unless-stopped
+
+volumes:
+  jellyfin-config:
+  jellyfin-cache:
