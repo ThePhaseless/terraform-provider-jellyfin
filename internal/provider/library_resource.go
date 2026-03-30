@@ -66,6 +66,7 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			"library_options_json": schema.StringAttribute{
 				MarkdownDescription: "Library options as a JSON string. Allows full customization of library settings.",
 				Optional:            true,
+				Computed:            true,
 			},
 			"item_id": schema.StringAttribute{
 				MarkdownDescription: "The internal item ID assigned by Jellyfin.",
@@ -127,6 +128,11 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 
 	data.ItemID = types.StringValue(folder.ItemId)
 
+	opts := folder.GetLibraryOptions()
+	if opts.RawJSON != "" && opts.RawJSON != "{}" {
+		data.LibraryOptions = types.StringValue(opts.RawJSON)
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -183,6 +189,11 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 	}
 
 	data.ItemID = types.StringValue(folder.ItemId)
+
+	opts := folder.GetLibraryOptions()
+	if opts.RawJSON != "" && opts.RawJSON != "{}" {
+		data.LibraryOptions = types.StringValue(opts.RawJSON)
+	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

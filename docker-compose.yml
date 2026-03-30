@@ -6,6 +6,7 @@ services:
     volumes:
       - jellyfin-config:/config
       - jellyfin-cache:/cache
+      - jellyfin-media:/media
     environment:
       - JELLYFIN_PublishedServerUrl=http://localhost:8096
     restart: unless-stopped
@@ -13,3 +14,4 @@ services:
 volumes:
   jellyfin-config:
   jellyfin-cache:
+  jellyfin-media:
