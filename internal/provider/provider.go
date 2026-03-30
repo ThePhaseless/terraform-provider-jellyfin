@@ -135,6 +135,9 @@ func (p *JellyfinProvider) Resources(_ context.Context) []func() resource.Resour
 		NewNetworkingConfigurationResource,
 		NewBrandingConfigurationResource,
 		NewScheduledTaskResource,
+		NewLiveTVConfigurationResource,
+		NewMetadataConfigurationResource,
+		NewAPIKeyResource,
 	}
 }
 
