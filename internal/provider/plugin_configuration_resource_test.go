@@ -50,4 +50,3 @@ resource "jellyfin_plugin_configuration" "test" {
 		},
 	})
 }
-
