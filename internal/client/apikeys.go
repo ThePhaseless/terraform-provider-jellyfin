@@ -45,18 +45,26 @@ func (c *Client) DeleteAPIKey(accessToken string) error {
 	return nil
 }
 
-// GetAPIKeyByAppName finds an API key by app name.
+// GetAPIKeyByAppName finds an API key by app name. Returns an error if multiple keys share the same name.
 func (c *Client) GetAPIKeyByAppName(appName string) (*APIKey, error) {
 	keys, err := c.GetAPIKeys()
 	if err != nil {
 		return nil, err
 	}
 
+	var matches []APIKey
 	for _, key := range keys {
 		if key.AppName == appName {
-			return &key, nil
+			matches = append(matches, key)
 		}
 	}
 
-	return nil, fmt.Errorf("API key with app name %q not found", appName)
+	switch len(matches) {
+	case 0:
+		return nil, fmt.Errorf("API key with app name %q not found", appName)
+	case 1:
+		return &matches[0], nil
+	default:
+		return nil, fmt.Errorf("found %d API keys with app name %q; use access_token to identify the key", len(matches), appName)
+	}
 }

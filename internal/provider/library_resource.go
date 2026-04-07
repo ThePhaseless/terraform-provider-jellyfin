@@ -8,8 +8,10 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -29,11 +31,11 @@ type LibraryResource struct {
 
 // LibraryResourceModel describes the resource data model.
 type LibraryResourceModel struct {
-	Name           types.String `tfsdk:"name"`
-	CollectionType types.String `tfsdk:"collection_type"`
-	Paths          types.List   `tfsdk:"paths"`
-	LibraryOptions types.String `tfsdk:"library_options_json"`
-	ItemID         types.String `tfsdk:"item_id"`
+	Name           types.String         `tfsdk:"name"`
+	CollectionType types.String         `tfsdk:"collection_type"`
+	Paths          types.List           `tfsdk:"paths"`
+	LibraryOptions jsontypes.Normalized `tfsdk:"library_options_json"`
+	ItemID         types.String         `tfsdk:"item_id"`
 }
 
 func (r *LibraryResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -62,11 +64,15 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				MarkdownDescription: "List of file system paths for this library.",
 				Required:            true,
 				ElementType:         types.StringType,
+				PlanModifiers: []planmodifier.List{
+					listplanmodifier.RequiresReplace(),
+				},
 			},
 			"library_options_json": schema.StringAttribute{
 				MarkdownDescription: "Library options as a JSON string. Allows full customization of library settings.",
 				Optional:            true,
 				Computed:            true,
+				CustomType:          jsontypes.NormalizedType{},
 			},
 			"item_id": schema.StringAttribute{
 				MarkdownDescription: "The internal item ID assigned by Jellyfin.",
@@ -110,7 +116,7 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	var libraryOpts *client.LibraryOptions
-	if !data.LibraryOptions.IsNull() && data.LibraryOptions.ValueString() != "" {
+	if !data.LibraryOptions.IsNull() && !data.LibraryOptions.IsUnknown() && data.LibraryOptions.ValueString() != "" {
 		libraryOpts = &client.LibraryOptions{RawJSON: data.LibraryOptions.ValueString()}
 	}
 
@@ -130,7 +136,9 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 
 	opts := folder.GetLibraryOptions()
 	if opts.RawJSON != "" && opts.RawJSON != "{}" {
-		data.LibraryOptions = types.StringValue(opts.RawJSON)
+		data.LibraryOptions = jsontypes.NewNormalizedValue(opts.RawJSON)
+	} else {
+		data.LibraryOptions = jsontypes.NewNormalizedNull()
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -158,7 +166,9 @@ func (r *LibraryResource) Read(ctx context.Context, req resource.ReadRequest, re
 
 	opts := folder.GetLibraryOptions()
 	if opts.RawJSON != "" && opts.RawJSON != "{}" {
-		data.LibraryOptions = types.StringValue(opts.RawJSON)
+		data.LibraryOptions = jsontypes.NewNormalizedValue(opts.RawJSON)
+	} else {
+		data.LibraryOptions = jsontypes.NewNormalizedNull()
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -172,7 +182,7 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 	}
 
 	var libraryOpts *client.LibraryOptions
-	if !data.LibraryOptions.IsNull() && data.LibraryOptions.ValueString() != "" {
+	if !data.LibraryOptions.IsNull() && !data.LibraryOptions.IsUnknown() && data.LibraryOptions.ValueString() != "" {
 		libraryOpts = &client.LibraryOptions{RawJSON: data.LibraryOptions.ValueString()}
 	}
 
@@ -192,7 +202,9 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	opts := folder.GetLibraryOptions()
 	if opts.RawJSON != "" && opts.RawJSON != "{}" {
-		data.LibraryOptions = types.StringValue(opts.RawJSON)
+		data.LibraryOptions = jsontypes.NewNormalizedValue(opts.RawJSON)
+	} else {
+		data.LibraryOptions = jsontypes.NewNormalizedNull()
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

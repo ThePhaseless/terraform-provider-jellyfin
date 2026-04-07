@@ -158,13 +158,23 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 	}
 
 	updated := make([]client.PluginRepository, 0, len(repos))
+	found := false
 	for _, repo := range repos {
 		if repo.Name == state.Name.ValueString() {
 			repo.Name = data.Name.ValueString()
 			repo.Url = data.URL.ValueString()
 			repo.Enabled = data.Enabled.ValueBool()
+			found = true
 		}
 		updated = append(updated, repo)
+	}
+
+	if !found {
+		resp.Diagnostics.AddError(
+			"Plugin repository not found",
+			fmt.Sprintf("Plugin repository %q was not found on the server. It may have been removed outside of Terraform.", state.Name.ValueString()),
+		)
+		return
 	}
 
 	if err := r.client.SetPluginRepositories(updated); err != nil {

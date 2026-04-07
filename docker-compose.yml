@@ -3,7 +3,7 @@
 
 services:
   jellyfin:
-    image: jellyfin/jellyfin:latest
+    image: jellyfin/jellyfin:10.10.7
     ports:
       - "8096:8096"
     volumes:

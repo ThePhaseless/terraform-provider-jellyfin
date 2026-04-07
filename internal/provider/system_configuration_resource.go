@@ -13,6 +13,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
@@ -49,6 +51,9 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				MarkdownDescription: "The server display name.",
 				Optional:            true,
 				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"configuration_json": schema.StringAttribute{
 				MarkdownDescription: "The full system configuration as a JSON string. " +
@@ -144,7 +149,7 @@ func (r *SystemConfigurationResource) applyConfiguration(ctx context.Context, da
 		rawJSON = merged
 	}
 
-	if !data.ServerName.IsNull() {
+	if !data.ServerName.IsNull() && !data.ServerName.IsUnknown() {
 		var parsed map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(rawJSON), &parsed); err != nil {
 			diagnostics.AddError("Failed to parse configuration JSON", err.Error())

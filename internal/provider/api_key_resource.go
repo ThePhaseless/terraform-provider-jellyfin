@@ -85,19 +85,43 @@ func (r *APIKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
+	// Snapshot existing keys before creation so we can identify the new one.
+	before, err := r.client.GetAPIKeys()
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to list API keys before creation", err.Error())
+		return
+	}
+	existingTokens := make(map[string]struct{}, len(before))
+	for _, k := range before {
+		existingTokens[k.AccessToken] = struct{}{}
+	}
+
 	if err := r.client.CreateAPIKey(data.AppName.ValueString()); err != nil {
 		resp.Diagnostics.AddError("Failed to create API key", err.Error())
 		return
 	}
 
-	// Read back the key to get the generated access token.
-	key, err := r.client.GetAPIKeyByAppName(data.AppName.ValueString())
+	// Find the newly created key by diffing against the pre-creation snapshot.
+	after, err := r.client.GetAPIKeys()
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to read created API key", err.Error())
+		resp.Diagnostics.AddError("Failed to list API keys after creation", err.Error())
 		return
 	}
 
-	data.AccessToken = types.StringValue(key.AccessToken)
+	var newKey *client.APIKey
+	for i := range after {
+		if _, existed := existingTokens[after[i].AccessToken]; !existed {
+			newKey = &after[i]
+			break
+		}
+	}
+
+	if newKey == nil {
+		resp.Diagnostics.AddError("Failed to find created API key", "The newly created API key was not found in the server response.")
+		return
+	}
+
+	data.AccessToken = types.StringValue(newKey.AccessToken)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

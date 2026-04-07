@@ -108,6 +108,14 @@ func (p *JellyfinProvider) Configure(ctx context.Context, req provider.Configure
 
 	// If no API key is set but we have credentials, authenticate to get one.
 	if apiKey == "" && username != "" {
+		if password == "" {
+			resp.Diagnostics.AddError(
+				"Missing Jellyfin Password",
+				"A username was provided but no password was set. "+
+					"Set the password in the provider configuration or via the JELLYFIN_PASSWORD environment variable.",
+			)
+			return
+		}
 		authResult, err := c.AuthenticateByName(username, password)
 		if err != nil {
 			resp.Diagnostics.AddError(
