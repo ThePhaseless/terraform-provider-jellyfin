@@ -7,13 +7,13 @@ resource "jellyfin_plugin_configuration" "sso_auth" {
     SamlConfigs = []
     OidConfigs = [
       {
-        OidClientId     = "jellyfin"
-        OidSecret       = "your-secret"
-        OidEndpoint     = "https://auth.example.com"
-        Enabled         = true
-        EnableAllFolders = true
-        AdminRoles      = ["admin"]
-        Roles           = ["user"]
+        OidClientId       = "jellyfin"
+        OidSecret         = "your-secret"
+        OidEndpoint       = "https://auth.example.com"
+        Enabled           = true
+        EnableAllFolders  = true
+        AdminRoles        = ["admin"]
+        Roles             = ["user"]
         EnableFolderRoles = false
         FolderRoleMapping = []
       }

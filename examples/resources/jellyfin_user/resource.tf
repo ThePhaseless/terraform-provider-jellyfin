@@ -6,9 +6,9 @@ resource "jellyfin_user" "example" {
 
 # User with full policy control via policy_json
 resource "jellyfin_user" "restricted" {
-  name              = "restricted_user"
-  password          = "secret456"
-  is_administrator  = false
+  name               = "restricted_user"
+  password           = "secret456"
+  is_administrator   = false
   enable_all_folders = false
 
   policy_json = jsonencode({

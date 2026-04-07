@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: MPL-2.0
+
 # setup_jellyfin.sh - Sets up a fresh Jellyfin instance for testing.
 # This script completes the startup wizard and creates an API key.
 set -euo pipefail
