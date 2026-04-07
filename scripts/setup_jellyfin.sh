@@ -66,11 +66,8 @@ echo "Got access token."
 
 # Create test media directories inside the container.
 echo "Creating test media directories..."
-CONTAINER_ID=$(docker ps -q --filter "ancestor=jellyfin/jellyfin" | head -1)
-if [ -n "$CONTAINER_ID" ]; then
-    docker exec "$CONTAINER_ID" mkdir -p /media/movies /media/tvshows
-    echo "  - Media directories created"
-fi
+docker compose exec -T jellyfin mkdir -p /media/movies /media/tvshows
+echo "  - Media directories created"
 
 # Create an API key.
 echo "Creating API key..."
