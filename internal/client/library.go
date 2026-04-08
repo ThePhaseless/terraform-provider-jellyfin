@@ -48,27 +48,26 @@ func (c *Client) GetVirtualFolders() ([]VirtualFolder, error) {
 	return folders, nil
 }
 
-// AddVirtualFolderDto is the request body for adding a virtual folder.
-type AddVirtualFolderDto struct {
-	LibraryOptions *LibraryOptions `json:"LibraryOptions"`
-	Paths          []string        `json:"Paths"`
-}
-
 // AddVirtualFolder creates a new virtual folder (library).
 func (c *Client) AddVirtualFolder(name, collectionType string, paths []string, libraryOptions *LibraryOptions) error {
 	params := url.Values{}
 	params.Set("name", name)
 	params.Set("collectionType", collectionType)
-	params.Set("refreshLibrary", "false")
+	params.Set("refreshLibrary", "true")
+	for _, p := range paths {
+		params.Add("paths", p)
+	}
 
 	apiPath := "/Library/VirtualFolders?" + params.Encode()
 
-	dto := AddVirtualFolderDto{
-		Paths:          paths,
-		LibraryOptions: libraryOptions,
+	var body interface{}
+	if libraryOptions != nil {
+		body = struct {
+			LibraryOptions *LibraryOptions `json:"LibraryOptions"`
+		}{LibraryOptions: libraryOptions}
 	}
 
-	if err := c.post(apiPath, dto); err != nil {
+	if err := c.post(apiPath, body); err != nil {
 		return fmt.Errorf("adding virtual folder %s: %w", name, err)
 	}
 	return nil
