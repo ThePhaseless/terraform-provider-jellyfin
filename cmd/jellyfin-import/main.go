@@ -8,11 +8,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
+
+var sanitizeRe = regexp.MustCompile(`[^a-zA-Z0-9]+`)
 
 func main() {
 	endpoint := flag.String("endpoint", os.Getenv("JELLYFIN_ENDPOINT"), "Jellyfin server URL (or JELLYFIN_ENDPOINT env)")
@@ -39,6 +42,7 @@ func main() {
 	g := &generator{
 		client:    c,
 		outputDir: *outputDir,
+		usedNames: make(map[string]int),
 	}
 
 	if err := g.Generate(); err != nil {
@@ -52,6 +56,18 @@ func main() {
 type generator struct {
 	client    *client.Client
 	outputDir string
+	usedNames map[string]int // tracks used resource addresses to avoid collisions
+}
+
+// uniqueName returns a unique Terraform resource name, appending a numeric suffix on collision.
+func (g *generator) uniqueName(resourceType, baseName string) string {
+	key := resourceType + "." + baseName
+	count := g.usedNames[key]
+	g.usedNames[key] = count + 1
+	if count == 0 {
+		return baseName
+	}
+	return fmt.Sprintf("%s_%d", baseName, count)
 }
 
 // Generate generates all Terraform files.
@@ -140,13 +156,13 @@ func (g *generator) generateUsers() ([]string, []string, error) {
 
 	var imports, resources []string
 	for _, user := range users {
-		name := sanitizeName(user.Name)
+		name := g.uniqueName("jellyfin_user", sanitizeName(user.Name))
 		imports = append(imports, importBlock("jellyfin_user", name, user.Id))
 
 		attrs := map[string]string{
-			"name":             quote(user.Name),
-			"is_administrator": fmt.Sprintf("%t", user.Policy.IsAdministrator),
-			"is_disabled":      fmt.Sprintf("%t", user.Policy.IsDisabled),
+			"name":               quote(user.Name),
+			"is_administrator":   fmt.Sprintf("%t", user.Policy.IsAdministrator),
+			"is_disabled":        fmt.Sprintf("%t", user.Policy.IsDisabled),
 			"enable_all_folders": fmt.Sprintf("%t", user.Policy.EnableAllFolders),
 		}
 		resources = append(resources, resourceBlock("jellyfin_user", name, attrs))
@@ -163,7 +179,7 @@ func (g *generator) generateLibraries() ([]string, []string, error) {
 
 	var imports, resources []string
 	for _, folder := range folders {
-		name := sanitizeName(folder.Name)
+		name := g.uniqueName("jellyfin_library", sanitizeName(folder.Name))
 		imports = append(imports, importBlock("jellyfin_library", name, folder.Name))
 
 		paths := make([]string, len(folder.Locations))
@@ -190,7 +206,7 @@ func (g *generator) generateAPIKeys() ([]string, []string, error) {
 
 	var imports, resources []string
 	for _, key := range keys {
-		name := sanitizeName(key.AppName)
+		name := g.uniqueName("jellyfin_api_key", sanitizeName(key.AppName))
 		imports = append(imports, importBlock("jellyfin_api_key", name, key.AccessToken))
 
 		attrs := map[string]string{
@@ -210,7 +226,7 @@ func (g *generator) generatePluginRepositories() ([]string, []string, error) {
 
 	var imports, resources []string
 	for _, repo := range repos {
-		name := sanitizeName(repo.Name)
+		name := g.uniqueName("jellyfin_plugin_repository", sanitizeName(repo.Name))
 		imports = append(imports, importBlock("jellyfin_plugin_repository", name, repo.Name))
 
 		attrs := map[string]string{
@@ -230,19 +246,64 @@ func (g *generator) generatePlugins() ([]string, []string, error) {
 		return nil, nil, err
 	}
 
+	// Try to resolve repository URLs from available packages.
+	repoURLs := g.resolvePluginRepoURLs(plugins)
+
 	var imports, resources []string
 	for _, plugin := range plugins {
-		name := sanitizeName(plugin.Name)
+		name := g.uniqueName("jellyfin_plugin", sanitizeName(plugin.Name))
 		imports = append(imports, importBlock("jellyfin_plugin", name, plugin.Id))
 
+		repoURL := repoURLs[plugin.Id]
+
 		attrs := map[string]string{
-			"name":    quote(plugin.Name),
-			"version": quote(plugin.Version),
+			"name":           quote(plugin.Name),
+			"version":        quote(plugin.Version),
+			"repository_url": quote(repoURL),
 		}
 		resources = append(resources, resourceBlock("jellyfin_plugin", name, attrs))
 	}
 
 	return imports, resources, nil
+}
+
+// resolvePluginRepoURLs tries to find the repository URL for each installed plugin
+// by cross-referencing with available packages from configured repositories.
+func (g *generator) resolvePluginRepoURLs(plugins []client.InstalledPlugin) map[string]string {
+	result := make(map[string]string)
+	for _, p := range plugins {
+		result[p.Id] = ""
+	}
+
+	packages, err := g.client.GetAvailablePackages()
+	if err != nil {
+		// Non-fatal: we'll use empty repository URLs.
+		return result
+	}
+
+	for _, p := range plugins {
+		for _, pkg := range packages {
+			if pkg.Name != p.Name {
+				continue
+			}
+			for _, v := range pkg.Versions {
+				if v.Version == p.Version {
+					result[p.Id] = v.RepositoryUrl
+					break
+				}
+			}
+			if result[p.Id] != "" {
+				break
+			}
+			// Fallback: use any version's repository URL for this package.
+			if len(pkg.Versions) > 0 {
+				result[p.Id] = pkg.Versions[0].RepositoryUrl
+			}
+			break
+		}
+	}
+
+	return result
 }
 
 func (g *generator) generateScheduledTasks() ([]string, []string, error) {
@@ -257,7 +318,7 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 			continue
 		}
 
-		name := sanitizeName(task.Name)
+		name := g.uniqueName("jellyfin_scheduled_task", sanitizeName(task.Name))
 		imports = append(imports, importBlock("jellyfin_scheduled_task", name, task.Id))
 
 		triggersJSON, err := json.Marshal(task.Triggers)
@@ -372,21 +433,19 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 }
 
 func (g *generator) writeFile(name, content string) error {
-	path := g.outputDir + "/" + name
-	return os.WriteFile(path, []byte(content+"\n"), 0o644)
+	p := filepath.Join(g.outputDir, name)
+	return os.WriteFile(p, []byte(content+"\n"), 0o644)
 }
 
 // sanitizeName converts a human-readable name to a valid Terraform identifier.
 func sanitizeName(name string) string {
-	// Replace non-alphanumeric characters with underscores.
-	re := regexp.MustCompile(`[^a-zA-Z0-9]+`)
-	result := re.ReplaceAllString(strings.ToLower(strings.TrimSpace(name)), "_")
+	result := sanitizeRe.ReplaceAllString(strings.ToLower(strings.TrimSpace(name)), "_")
 	result = strings.Trim(result, "_")
 	if result == "" {
 		result = "unnamed"
 	}
 	// Ensure it starts with a letter.
-	if len(result) > 0 && result[0] >= '0' && result[0] <= '9' {
+	if result[0] >= '0' && result[0] <= '9' {
 		result = "r_" + result
 	}
 	return result
@@ -406,11 +465,9 @@ func resourceBlock(resourceType, name string, attrs map[string]string) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("resource %s %s {\n", quote(resourceType), quote(name)))
 
-	// Write attributes in a consistent order
 	keys := sortedKeys(attrs)
 	for _, k := range keys {
-		v := attrs[k]
-		b.WriteString(fmt.Sprintf("  %s = %s\n", k, v))
+		b.WriteString(fmt.Sprintf("  %s = %s\n", k, attrs[k]))
 	}
 
 	b.WriteString("}\n")
@@ -423,7 +480,6 @@ func sortedKeys(m map[string]string) []string {
 	for k := range m {
 		keys = append(keys, k)
 	}
-	// Simple insertion sort for small maps.
 	for i := 1; i < len(keys); i++ {
 		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
 			keys[j], keys[j-1] = keys[j-1], keys[j]

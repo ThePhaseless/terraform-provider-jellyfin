@@ -1,0 +1,1 @@
+terraform import jellyfin_networking_configuration.example singleton

@@ -32,3 +32,13 @@ resource "jellyfin_plugin" "example" {
 ### Read-Only
 
 - `id` (String) The plugin ID assigned by Jellyfin after installation.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import jellyfin_plugin.example <plugin-id>
+```

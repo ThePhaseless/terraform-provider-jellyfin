@@ -126,8 +126,8 @@ func setupTestServer(t *testing.T) *httptest.Server {
 				"Id":   "user-id-1",
 				"Name": "admin",
 				"Policy": map[string]interface{}{
-					"IsAdministrator": true,
-					"IsDisabled":      false,
+					"IsAdministrator":  true,
+					"IsDisabled":       false,
 					"EnableAllFolders": true,
 				},
 			},
@@ -135,8 +135,8 @@ func setupTestServer(t *testing.T) *httptest.Server {
 				"Id":   "user-id-2",
 				"Name": "viewer",
 				"Policy": map[string]interface{}{
-					"IsAdministrator": false,
-					"IsDisabled":      false,
+					"IsAdministrator":  false,
+					"IsDisabled":       false,
 					"EnableAllFolders": false,
 				},
 			},
@@ -185,6 +185,21 @@ func setupTestServer(t *testing.T) *httptest.Server {
 		})
 	})
 
+	mux.HandleFunc("/Packages", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]interface{}{
+			{
+				"name": "MusicBrainz",
+				"versions": []map[string]interface{}{
+					{
+						"version":        "14.0.0.0",
+						"repositoryUrl":  "https://repo.jellyfin.org/files/plugin/manifest.json",
+						"repositoryName": "Jellyfin Stable",
+					},
+				},
+			},
+		})
+	})
+
 	mux.HandleFunc("/ScheduledTasks", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode([]map[string]interface{}{
 			{
@@ -209,7 +224,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 
 	mux.HandleFunc("/System/Configuration", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"ServerName": "Test Server",
+			"ServerName":               "Test Server",
 			"IsStartupWizardCompleted": true,
 		})
 	})
@@ -222,7 +237,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 
 	mux.HandleFunc("/System/Configuration/network", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"BaseUrl":    "",
+			"BaseUrl":     "",
 			"EnableHttps": false,
 		})
 	})
@@ -255,6 +270,7 @@ func TestGenerateUsers(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
+		usedNames: make(map[string]int),
 	}
 
 	imports, resources, err := g.generateUsers()
@@ -290,6 +306,7 @@ func TestGenerateLibraries(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
+		usedNames: make(map[string]int),
 	}
 
 	imports, resources, err := g.generateLibraries()
@@ -319,6 +336,7 @@ func TestGenerateAPIKeys(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
+		usedNames: make(map[string]int),
 	}
 
 	imports, resources, err := g.generateAPIKeys()
@@ -344,6 +362,7 @@ func TestGenerateScheduledTasks(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
+		usedNames: make(map[string]int),
 	}
 
 	imports, resources, err := g.generateScheduledTasks()
@@ -371,6 +390,7 @@ func TestGenerateSingletonConfigs(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
+		usedNames: make(map[string]int),
 	}
 
 	imports, resources, err := g.generateSingletonConfigs()
@@ -399,6 +419,7 @@ func TestGeneratePlugins(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
+		usedNames: make(map[string]int),
 	}
 
 	imports, resources, err := g.generatePlugins()
@@ -415,6 +436,9 @@ func TestGeneratePlugins(t *testing.T) {
 	if !strings.Contains(resources[0], `name = "MusicBrainz"`) {
 		t.Errorf("expected plugin name MusicBrainz: %s", resources[0])
 	}
+	if !strings.Contains(resources[0], `repository_url = "https://repo.jellyfin.org/files/plugin/manifest.json"`) {
+		t.Errorf("expected repository_url resolved from packages: %s", resources[0])
+	}
 }
 
 func TestGeneratePluginRepositories(t *testing.T) {
@@ -424,6 +448,7 @@ func TestGeneratePluginRepositories(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
+		usedNames: make(map[string]int),
 	}
 
 	imports, resources, err := g.generatePluginRepositories()
@@ -447,6 +472,7 @@ func TestFullGenerate(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: outputDir,
+		usedNames: make(map[string]int),
 	}
 
 	if err := g.Generate(); err != nil {
@@ -532,6 +558,7 @@ func TestGenerateWithServerError(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
+		usedNames: make(map[string]int),
 	}
 
 	err := g.Generate()
@@ -561,5 +588,73 @@ func TestSanitizeNameEdgeCases(t *testing.T) {
 				t.Errorf("sanitizeName(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestUniqueName(t *testing.T) {
+	g := &generator{usedNames: make(map[string]int)}
+
+	// First use: no suffix
+	name1 := g.uniqueName("jellyfin_user", "admin")
+	if name1 != "admin" {
+		t.Errorf("first uniqueName() = %q, want %q", name1, "admin")
+	}
+
+	// Second use of same type+name: gets suffix _1
+	name2 := g.uniqueName("jellyfin_user", "admin")
+	if name2 != "admin_1" {
+		t.Errorf("second uniqueName() = %q, want %q", name2, "admin_1")
+	}
+
+	// Third use: suffix _2
+	name3 := g.uniqueName("jellyfin_user", "admin")
+	if name3 != "admin_2" {
+		t.Errorf("third uniqueName() = %q, want %q", name3, "admin_2")
+	}
+
+	// Different resource type: no suffix
+	name4 := g.uniqueName("jellyfin_library", "admin")
+	if name4 != "admin" {
+		t.Errorf("different type uniqueName() = %q, want %q", name4, "admin")
+	}
+}
+
+func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
+	// Server that has /Plugins but returns 500 for /Packages
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]interface{}{
+			{
+				"Name":    "TestPlugin",
+				"Version": "1.0.0",
+				"Id":      "test-plugin-id",
+			},
+		})
+	})
+	mux.HandleFunc("/Packages", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, "error")
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	g := &generator{
+		client:    client.NewClient(server.URL, "test-key"),
+		outputDir: t.TempDir(),
+		usedNames: make(map[string]int),
+	}
+
+	imports, resources, err := g.generatePlugins()
+	if err != nil {
+		t.Fatalf("generatePlugins() should not fail when /Packages is unavailable: %v", err)
+	}
+
+	if len(imports) != 1 {
+		t.Errorf("expected 1 import block, got %d", len(imports))
+	}
+
+	// repository_url should be empty string (graceful degradation)
+	if !strings.Contains(resources[0], `repository_url = ""`) {
+		t.Errorf("expected empty repository_url: %s", resources[0])
 	}
 }
