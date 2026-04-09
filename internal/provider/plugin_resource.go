@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -17,7 +18,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-var _ resource.Resource = &PluginResource{}
+var (
+	_ resource.Resource                = &PluginResource{}
+	_ resource.ResourceWithImportState = &PluginResource{}
+)
 
 // NewPluginResource creates a new plugin resource.
 func NewPluginResource() resource.Resource {
@@ -183,4 +187,8 @@ func (r *PluginResource) waitForPlugin(ctx context.Context, name string, timeout
 		time.Sleep(2 * time.Second)
 	}
 	return "", fmt.Errorf("plugin %q did not appear within %s", name, timeout)
+}
+
+func (r *PluginResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }

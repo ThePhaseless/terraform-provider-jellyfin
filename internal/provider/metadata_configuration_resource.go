@@ -13,7 +13,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 )
 
-var _ resource.Resource = &MetadataConfigurationResource{}
+var (
+	_ resource.Resource                = &MetadataConfigurationResource{}
+	_ resource.ResourceWithImportState = &MetadataConfigurationResource{}
+)
 
 // NewMetadataConfigurationResource creates a new metadata configuration resource.
 func NewMetadataConfigurationResource() resource.Resource {
@@ -124,4 +127,12 @@ func (r *MetadataConfigurationResource) Update(ctx context.Context, req resource
 
 func (r *MetadataConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
 	// Metadata configuration cannot be deleted. We just remove from state.
+}
+
+func (r *MetadataConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	// Singleton resource — the import ID is not used. Read will populate all fields.
+	data := MetadataConfigurationResourceModel{
+		ConfigurationJSON: jsontypes.NewNormalizedValue("{}"),
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

@@ -13,7 +13,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 )
 
-var _ resource.Resource = &EncodingConfigurationResource{}
+var (
+	_ resource.Resource                = &EncodingConfigurationResource{}
+	_ resource.ResourceWithImportState = &EncodingConfigurationResource{}
+)
 
 // NewEncodingConfigurationResource creates a new encoding configuration resource.
 func NewEncodingConfigurationResource() resource.Resource {
@@ -123,4 +126,12 @@ func (r *EncodingConfigurationResource) Update(ctx context.Context, req resource
 
 func (r *EncodingConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
 	// Encoding configuration cannot be deleted. We just remove from state.
+}
+
+func (r *EncodingConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	// Singleton resource — the import ID is not used. Read will populate all fields.
+	data := EncodingConfigurationResourceModel{
+		ConfigurationJSON: jsontypes.NewNormalizedValue("{}"),
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

@@ -19,7 +19,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-var _ resource.Resource = &SystemConfigurationResource{}
+var (
+	_ resource.Resource                = &SystemConfigurationResource{}
+	_ resource.ResourceWithImportState = &SystemConfigurationResource{}
+)
 
 // NewSystemConfigurationResource creates a new system configuration resource.
 func NewSystemConfigurationResource() resource.Resource {
@@ -223,4 +226,13 @@ func normalizeJSON(raw string) (string, error) {
 		return "", fmt.Errorf("serializing normalized JSON: %w", err)
 	}
 	return string(result), nil
+}
+
+func (r *SystemConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	// Singleton resource — the import ID is not used. Read will populate all fields.
+	data := SystemConfigurationResourceModel{
+		ServerName:        types.StringNull(),
+		ConfigurationJSON: jsontypes.NewNormalizedNull(),
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

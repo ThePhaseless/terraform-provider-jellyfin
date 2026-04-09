@@ -13,7 +13,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 )
 
-var _ resource.Resource = &NetworkingConfigurationResource{}
+var (
+	_ resource.Resource                = &NetworkingConfigurationResource{}
+	_ resource.ResourceWithImportState = &NetworkingConfigurationResource{}
+)
 
 // NewNetworkingConfigurationResource creates a new networking configuration resource.
 func NewNetworkingConfigurationResource() resource.Resource {
@@ -126,4 +129,12 @@ func (r *NetworkingConfigurationResource) Update(ctx context.Context, req resour
 
 func (r *NetworkingConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
 	// Networking configuration cannot be deleted. We just remove from state.
+}
+
+func (r *NetworkingConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	// Singleton resource — the import ID is not used. Read will populate all fields.
+	data := NetworkingConfigurationResourceModel{
+		ConfigurationJSON: jsontypes.NewNormalizedValue("{}"),
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

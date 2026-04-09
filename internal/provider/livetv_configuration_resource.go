@@ -13,7 +13,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 )
 
-var _ resource.Resource = &LiveTVConfigurationResource{}
+var (
+	_ resource.Resource                = &LiveTVConfigurationResource{}
+	_ resource.ResourceWithImportState = &LiveTVConfigurationResource{}
+)
 
 // NewLiveTVConfigurationResource creates a new Live TV configuration resource.
 func NewLiveTVConfigurationResource() resource.Resource {
@@ -125,4 +128,12 @@ func (r *LiveTVConfigurationResource) Update(ctx context.Context, req resource.U
 
 func (r *LiveTVConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
 	// Live TV configuration cannot be deleted. We just remove from state.
+}
+
+func (r *LiveTVConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	// Singleton resource — the import ID is not used. Read will populate all fields.
+	data := LiveTVConfigurationResourceModel{
+		ConfigurationJSON: jsontypes.NewNormalizedValue("{}"),
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

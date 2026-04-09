@@ -13,7 +13,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 )
 
-var _ resource.Resource = &BrandingConfigurationResource{}
+var (
+	_ resource.Resource                = &BrandingConfigurationResource{}
+	_ resource.ResourceWithImportState = &BrandingConfigurationResource{}
+)
 
 // NewBrandingConfigurationResource creates a new branding configuration resource.
 func NewBrandingConfigurationResource() resource.Resource {
@@ -124,4 +127,12 @@ func (r *BrandingConfigurationResource) Update(ctx context.Context, req resource
 
 func (r *BrandingConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
 	// Branding configuration cannot be deleted. We just remove from state.
+}
+
+func (r *BrandingConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	// Singleton resource — the import ID is not used. Read will populate all fields.
+	data := BrandingConfigurationResourceModel{
+		ConfigurationJSON: jsontypes.NewNormalizedValue("{}"),
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
