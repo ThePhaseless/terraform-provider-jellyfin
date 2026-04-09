@@ -1,8 +1,6 @@
 # Terraform Provider testing workflow.
 name: Tests
 
-# This GitHub action runs your tests for each pull request and push.
-# Optionally, you can turn it on using a schedule for regular testing.
 on:
   pull_request:
     paths-ignore:
@@ -11,12 +9,10 @@ on:
     paths-ignore:
       - 'README.md'
 
-# Testing only needs permissions to read the repository contents.
 permissions:
   contents: read
 
 jobs:
-  # Ensure project builds before running testing matrix
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -42,7 +38,6 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
-      # We need the latest version of Terraform for our documentation generation to use
       - uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4.0.0
         with:
           terraform_wrapper: false
@@ -52,19 +47,11 @@ jobs:
           git diff --compact-summary --exit-code || \
             (echo; echo "Unexpected difference in directories after code generation. Run 'make generate' command and commit."; exit 1)
 
-  # Run acceptance tests in a matrix with Terraform CLI versions
   test:
-    name: 'Acceptance Tests: Terraform ${{ matrix.terraform }}'
+    name: Test
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        # Terraform versions
-        terraform:
-          - '1.13.*'
-          - '1.14.*'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
@@ -73,10 +60,24 @@ jobs:
           cache: true
       - uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4.0.0
         with:
-          terraform_version: ${{ matrix.terraform }}
           terraform_wrapper: false
       - run: go mod download
-      - env:
+
+      - name: Start Jellyfin
+        run: docker compose up -d
+
+      - name: Setup Jellyfin
+        run: |
+          chmod +x scripts/setup_jellyfin.sh
+          eval "$(scripts/setup_jellyfin.sh 2>/dev/null | grep '^export ')"
+          echo "JELLYFIN_ENDPOINT=${JELLYFIN_ENDPOINT}" >> "$GITHUB_ENV"
+          echo "JELLYFIN_API_KEY=${JELLYFIN_API_KEY}" >> "$GITHUB_ENV"
+
+      - name: Run acceptance tests
+        env:
           TF_ACC: "1"
-        run: go test -v -cover ./internal/provider/
-        timeout-minutes: 10
+        run: go test -v -cover -timeout 10m ./internal/provider/
+
+      - name: Stop Jellyfin
+        if: always()
+        run: docker compose down -v

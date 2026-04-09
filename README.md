@@ -1,47 +1,156 @@
-# Terraform Provider Scaffolding (Terraform Plugin Framework)
+# Terraform Provider for Jellyfin
 
-_This template repository is built on the [Terraform Plugin Framework](https://github.com/hashicorp/terraform-plugin-framework). The template repository built on the [Terraform Plugin SDK](https://github.com/hashicorp/terraform-plugin-sdk) can be found at [terraform-provider-scaffolding](https://github.com/hashicorp/terraform-provider-scaffolding). See [Which SDK Should I Use?](https://developer.hashicorp.com/terraform/plugin/framework-benefits) in the Terraform documentation for additional information._
+A [Terraform](https://www.terraform.io) provider for managing [Jellyfin](https://jellyfin.org/) media server instances.
 
-This repository is a *template* for a [Terraform](https://www.terraform.io) provider. It is intended as a starting point for creating Terraform providers, containing:
+## Features
 
-- A resource and a data source (`internal/provider/`),
-- Examples (`examples/`) and generated documentation (`docs/`),
-- Miscellaneous meta files.
-
-These files contain boilerplate code that you will need to edit to create your own Terraform provider. Tutorials for creating Terraform providers can be found on the [HashiCorp Developer](https://developer.hashicorp.com/terraform/tutorials/providers-plugin-framework) platform. _Terraform Plugin Framework specific guides are titled accordingly._
-
-Please see the [GitHub template repository documentation](https://help.github.com/en/github/creating-cloning-and-archiving-repositories/creating-a-repository-from-a-template) for how to create a new repository from this template on GitHub.
-
-Once you've written your provider, you'll want to [publish it on the Terraform Registry](https://developer.hashicorp.com/terraform/registry/providers/publishing) so that others can use it.
+- **User Management** — Create, update, and delete users with policy control
+- **Library Management** — Configure media libraries with custom paths and options
+- **Plugin Repositories** — Manage plugin repository sources
+- **Plugin Installation** — Install and uninstall plugins from repositories
+- **Plugin Configuration** — Universal plugin settings via JSON (supports SSO-Auth, and any other plugin)
+- **System Configuration** — Full server configuration management
+- **Encoding Configuration** — Transcoding and hardware acceleration settings
+- **Initial Setup** — Configure a fresh Jellyfin instance after installation
+- **Data Sources** — Read server information and status
 
 ## Requirements
 
 - [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.0
 - [Go](https://golang.org/doc/install) >= 1.24
+- A running Jellyfin server instance
 
-## Building The Provider
+## Quick Start
 
-1. Clone the repository
-1. Enter the repository directory
-1. Build the provider using the Go `install` command:
+```hcl
+terraform {
+  required_providers {
+    jellyfin = {
+      source = "ThePhaseless/jellyfin"
+    }
+  }
+}
+
+provider "jellyfin" {
+  endpoint = "http://localhost:8096"
+  api_key  = var.jellyfin_api_key
+}
+
+# Read server info
+data "jellyfin_system_info" "server" {}
+
+# Create a user
+resource "jellyfin_user" "viewer" {
+  name             = "viewer"
+  password         = "secret123"
+  is_administrator = false
+}
+
+# Add a movie library
+resource "jellyfin_library" "movies" {
+  name            = "Movies"
+  collection_type = "movies"
+  paths           = ["/media/movies"]
+}
+
+# Add a plugin repository
+resource "jellyfin_plugin_repository" "stable" {
+  name    = "Jellyfin Stable"
+  url     = "https://repo.jellyfin.org/files/plugin/manifest.json"
+  enabled = true
+}
+
+# Configure the server
+resource "jellyfin_system_configuration" "main" {
+  server_name = "My Jellyfin"
+}
+```
+
+## Authentication
+
+The provider supports two authentication methods:
+
+### API Key (Recommended)
+
+```hcl
+provider "jellyfin" {
+  endpoint = "http://localhost:8096"
+  api_key  = "your-api-key"
+}
+```
+
+### Username/Password
+
+```hcl
+provider "jellyfin" {
+  endpoint = "http://localhost:8096"
+  username = "admin"
+  password = "password"
+}
+```
+
+### Environment Variables
+
+All provider attributes can be set via environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `JELLYFIN_ENDPOINT` | Jellyfin server URL |
+| `JELLYFIN_API_KEY` | API key for authentication |
+| `JELLYFIN_USERNAME` | Username for authentication |
+| `JELLYFIN_PASSWORD` | Password for authentication |
+
+## Universal Plugin Configuration
+
+Any plugin can be configured using the `jellyfin_plugin_configuration` resource with JSON:
+
+```hcl
+# SSO-Auth Plugin Configuration
+resource "jellyfin_plugin_configuration" "sso" {
+  plugin_id = jellyfin_plugin.sso_auth.id
+
+  configuration_json = jsonencode({
+    SamlConfigs = []
+    OidConfigs = [{
+      OidClientId = "jellyfin"
+      OidSecret   = var.oidc_secret
+      OidEndpoint = "https://auth.example.com"
+      Enabled     = true
+    }]
+  })
+}
+```
+
+## Development
+
+### Building
 
 ```shell
 go install
 ```
 
-## Adding Dependencies
+### Testing
 
-This provider uses [Go modules](https://github.com/golang/go/wiki/Modules).
-Please see the Go documentation for the most up to date information about using Go modules.
-
-To add a new dependency `github.com/author/dependency` to your Terraform provider:
+Start a local Jellyfin instance:
 
 ```shell
-go get github.com/author/dependency
-go mod tidy
+docker compose up -d
+./scripts/setup_jellyfin.sh
 ```
 
-Then commit the changes to `go.mod` and `go.sum`.
+Run acceptance tests:
+
+```shell
+export JELLYFIN_ENDPOINT=http://localhost:8096
+export JELLYFIN_API_KEY=<from setup script>
+TF_ACC=1 go test -v ./internal/provider/
+```
+
+### Linting
+
+```shell
+golangci-lint run
+```
 
 ## Using the provider
 
