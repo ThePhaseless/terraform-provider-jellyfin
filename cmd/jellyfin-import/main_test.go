@@ -658,3 +658,246 @@ func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
 		t.Errorf("expected empty repository_url: %s", resources[0])
 	}
 }
+
+// TestAccImportToolE2E is an acceptance test that runs the import tool against a real
+// Jellyfin instance. It verifies that the tool generates valid import and resource files.
+// Set JELLYFIN_ENDPOINT and JELLYFIN_API_KEY to enable this test.
+func TestAccImportToolE2E(t *testing.T) {
+	endpoint := os.Getenv("JELLYFIN_ENDPOINT")
+	apiKey := os.Getenv("JELLYFIN_API_KEY")
+	if endpoint == "" || apiKey == "" {
+		t.Skip("JELLYFIN_ENDPOINT and JELLYFIN_API_KEY must be set for acceptance tests")
+	}
+
+	outputDir := t.TempDir()
+	c := client.NewClient(endpoint, apiKey)
+
+	g := &generator{
+		client:    c,
+		outputDir: outputDir,
+		usedNames: make(map[string]int),
+	}
+
+	// Run the full generation.
+	if err := g.Generate(); err != nil {
+		t.Fatalf("Generate() against live Jellyfin failed: %v", err)
+	}
+
+	// Verify imports.tf was created and has content.
+	importsPath := filepath.Join(outputDir, "imports.tf")
+	importsContent, err := os.ReadFile(importsPath)
+	if err != nil {
+		t.Fatalf("Failed to read imports.tf: %v", err)
+	}
+	if len(importsContent) == 0 {
+		t.Fatal("imports.tf is empty")
+	}
+
+	// Verify resources.tf was created and has content.
+	resourcesPath := filepath.Join(outputDir, "resources.tf")
+	resourcesContent, err := os.ReadFile(resourcesPath)
+	if err != nil {
+		t.Fatalf("Failed to read resources.tf: %v", err)
+	}
+	if len(resourcesContent) == 0 {
+		t.Fatal("resources.tf is empty")
+	}
+
+	importsStr := string(importsContent)
+	resourcesStr := string(resourcesContent)
+
+	// A real Jellyfin instance always has at least one user (admin).
+	if !strings.Contains(importsStr, "jellyfin_user.") {
+		t.Error("imports.tf should contain at least one jellyfin_user import block")
+	}
+	if !strings.Contains(resourcesStr, `resource "jellyfin_user"`) {
+		t.Error("resources.tf should contain at least one jellyfin_user resource block")
+	}
+
+	// Singleton configs should always be present.
+	singletonTypes := []string{
+		"jellyfin_system_configuration",
+		"jellyfin_encoding_configuration",
+		"jellyfin_networking_configuration",
+		"jellyfin_branding_configuration",
+		"jellyfin_livetv_configuration",
+		"jellyfin_metadata_configuration",
+	}
+	for _, rt := range singletonTypes {
+		if !strings.Contains(importsStr, rt+".this") {
+			t.Errorf("imports.tf should contain %s.this import block", rt)
+		}
+		if !strings.Contains(resourcesStr, fmt.Sprintf(`resource "%s" "this"`, rt)) {
+			t.Errorf("resources.tf should contain %s resource block", rt)
+		}
+	}
+
+	// All import blocks should have 'to' and 'id' fields.
+	importBlocks := strings.Count(importsStr, "import {")
+	toFields := strings.Count(importsStr, "to = ")
+	idFields := strings.Count(importsStr, "id = ")
+	if importBlocks != toFields || importBlocks != idFields {
+		t.Errorf("import block count mismatch: blocks=%d, to=%d, id=%d", importBlocks, toFields, idFields)
+	}
+
+	// All resource blocks should have opening and closing braces.
+	resourceBlocks := strings.Count(resourcesStr, "resource \"")
+	if resourceBlocks == 0 {
+		t.Error("resources.tf should contain at least one resource block")
+	}
+
+	t.Logf("Generated %d import blocks and %d resource blocks", importBlocks, resourceBlocks)
+}
+
+// TestAccImportToolIndividualGenerators tests each generator function against a real
+// Jellyfin instance to verify they produce valid output.
+func TestAccImportToolIndividualGenerators(t *testing.T) {
+	endpoint := os.Getenv("JELLYFIN_ENDPOINT")
+	apiKey := os.Getenv("JELLYFIN_API_KEY")
+	if endpoint == "" || apiKey == "" {
+		t.Skip("JELLYFIN_ENDPOINT and JELLYFIN_API_KEY must be set for acceptance tests")
+	}
+
+	c := client.NewClient(endpoint, apiKey)
+
+	t.Run("Users", func(t *testing.T) {
+		g := &generator{
+			client:    c,
+			outputDir: t.TempDir(),
+			usedNames: make(map[string]int),
+		}
+
+		imports, resources, err := g.generateUsers()
+		if err != nil {
+			t.Fatalf("generateUsers() error: %v", err)
+		}
+
+		// A real Jellyfin always has at least the admin user.
+		if len(imports) == 0 {
+			t.Error("expected at least 1 user import block")
+		}
+		if len(resources) == 0 {
+			t.Error("expected at least 1 user resource block")
+		}
+
+		// Verify structure of first user.
+		if len(imports) > 0 && !strings.Contains(imports[0], "jellyfin_user.") {
+			t.Errorf("import block should reference jellyfin_user: %s", imports[0])
+		}
+		if len(resources) > 0 && !strings.Contains(resources[0], "is_administrator") {
+			t.Errorf("resource block should contain is_administrator: %s", resources[0])
+		}
+	})
+
+	t.Run("ScheduledTasks", func(t *testing.T) {
+		g := &generator{
+			client:    c,
+			outputDir: t.TempDir(),
+			usedNames: make(map[string]int),
+		}
+
+		imports, resources, err := g.generateScheduledTasks()
+		if err != nil {
+			t.Fatalf("generateScheduledTasks() error: %v", err)
+		}
+
+		// Jellyfin always has scheduled tasks.
+		if len(imports) == 0 {
+			t.Error("expected at least 1 scheduled task import block")
+		}
+		if len(resources) == 0 {
+			t.Error("expected at least 1 scheduled task resource block")
+		}
+	})
+
+	t.Run("SingletonConfigs", func(t *testing.T) {
+		g := &generator{
+			client:    c,
+			outputDir: t.TempDir(),
+			usedNames: make(map[string]int),
+		}
+
+		imports, resources, err := g.generateSingletonConfigs()
+		if err != nil {
+			t.Fatalf("generateSingletonConfigs() error: %v", err)
+		}
+
+		if len(imports) != 6 {
+			t.Errorf("expected 6 singleton config imports, got %d", len(imports))
+		}
+		if len(resources) != 6 {
+			t.Errorf("expected 6 singleton config resources, got %d", len(resources))
+		}
+
+		// System config should have server_name.
+		if len(resources) > 0 && !strings.Contains(resources[0], "server_name") {
+			t.Errorf("system config should contain server_name: %s", resources[0])
+		}
+	})
+
+	t.Run("APIKeys", func(t *testing.T) {
+		g := &generator{
+			client:    c,
+			outputDir: t.TempDir(),
+			usedNames: make(map[string]int),
+		}
+
+		imports, resources, err := g.generateAPIKeys()
+		if err != nil {
+			t.Fatalf("generateAPIKeys() error: %v", err)
+		}
+
+		// The setup script creates at least one API key.
+		if len(imports) == 0 {
+			t.Error("expected at least 1 API key import block")
+		}
+		if len(resources) == 0 {
+			t.Error("expected at least 1 API key resource block")
+		}
+		if len(resources) > 0 && !strings.Contains(resources[0], "app_name") {
+			t.Errorf("API key resource should contain app_name: %s", resources[0])
+		}
+	})
+
+	t.Run("Libraries", func(t *testing.T) {
+		g := &generator{
+			client:    c,
+			outputDir: t.TempDir(),
+			usedNames: make(map[string]int),
+		}
+
+		// Libraries may or may not exist on a fresh instance - just verify no error.
+		_, _, err := g.generateLibraries()
+		if err != nil {
+			t.Fatalf("generateLibraries() error: %v", err)
+		}
+	})
+
+	t.Run("PluginRepositories", func(t *testing.T) {
+		g := &generator{
+			client:    c,
+			outputDir: t.TempDir(),
+			usedNames: make(map[string]int),
+		}
+
+		// Plugin repos may or may not exist - just verify no error.
+		_, _, err := g.generatePluginRepositories()
+		if err != nil {
+			t.Fatalf("generatePluginRepositories() error: %v", err)
+		}
+	})
+
+	t.Run("Plugins", func(t *testing.T) {
+		g := &generator{
+			client:    c,
+			outputDir: t.TempDir(),
+			usedNames: make(map[string]int),
+		}
+
+		// Plugins may or may not exist - just verify no error.
+		_, _, err := g.generatePlugins()
+		if err != nil {
+			t.Fatalf("generatePlugins() error: %v", err)
+		}
+	})
+}

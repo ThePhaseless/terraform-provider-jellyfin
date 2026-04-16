@@ -26,6 +26,12 @@ resource "jellyfin_api_key" "test" {
 					resource.TestCheckResourceAttrSet("jellyfin_api_key.test", "access_token"),
 				),
 			},
+			// ImportState.
+			{
+				ResourceName:      "jellyfin_api_key.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
 		},
 	})
 }

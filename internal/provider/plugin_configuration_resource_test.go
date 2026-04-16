@@ -31,6 +31,12 @@ resource "jellyfin_plugin_configuration" "test" {
 					resource.TestCheckResourceAttrSet("jellyfin_plugin_configuration.test", "configuration_json"),
 				),
 			},
+			// ImportState.
+			{
+				ResourceName:      "jellyfin_plugin_configuration.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
 			// Update: change rate limit.
 			{
 				Config: `

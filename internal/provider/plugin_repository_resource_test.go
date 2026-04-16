@@ -23,6 +23,12 @@ func TestAccPluginRepositoryResource(t *testing.T) {
 					resource.TestCheckResourceAttr("jellyfin_plugin_repository.test", "enabled", "true"),
 				),
 			},
+			// ImportState.
+			{
+				ResourceName:      "jellyfin_plugin_repository.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
 			// Update.
 			{
 				Config: testAccPluginRepositoryResourceConfigUpdated(),

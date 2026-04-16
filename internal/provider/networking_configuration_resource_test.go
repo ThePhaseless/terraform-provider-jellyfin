@@ -22,6 +22,12 @@ func TestAccNetworkingConfigurationResource(t *testing.T) {
 					resource.TestCheckResourceAttrSet("jellyfin_networking_configuration.test", "configuration_json"),
 				),
 			},
+			// ImportState.
+			{
+				ResourceName:      "jellyfin_networking_configuration.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
 			// Update.
 			{
 				Config: testAccNetworkingConfigurationResourceConfig(true),

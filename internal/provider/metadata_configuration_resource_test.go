@@ -27,6 +27,12 @@ resource "jellyfin_metadata_configuration" "test" {
 					resource.TestCheckResourceAttrSet("jellyfin_metadata_configuration.test", "configuration_json"),
 				),
 			},
+			// ImportState.
+			{
+				ResourceName:      "jellyfin_metadata_configuration.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
 			// Update.
 			{
 				Config: `

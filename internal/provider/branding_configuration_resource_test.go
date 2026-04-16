@@ -27,6 +27,12 @@ resource "jellyfin_branding_configuration" "test" {
 					resource.TestCheckResourceAttrSet("jellyfin_branding_configuration.test", "configuration_json"),
 				),
 			},
+			// ImportState.
+			{
+				ResourceName:      "jellyfin_branding_configuration.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
 			// Update.
 			{
 				Config: `
