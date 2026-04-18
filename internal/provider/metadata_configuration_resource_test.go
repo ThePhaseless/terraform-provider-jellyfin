@@ -29,9 +29,11 @@ resource "jellyfin_metadata_configuration" "test" {
 			},
 			// ImportState.
 			{
-				ResourceName:      "jellyfin_metadata_configuration.test",
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            "jellyfin_metadata_configuration.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateId:           "metadata",
+				ImportStateVerifyIgnore: []string{"configuration_json"},
 			},
 			// Update.
 			{

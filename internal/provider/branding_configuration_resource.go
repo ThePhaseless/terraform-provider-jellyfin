@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 var (
@@ -30,6 +31,7 @@ type BrandingConfigurationResource struct {
 
 // BrandingConfigurationResourceModel describes the resource data model.
 type BrandingConfigurationResourceModel struct {
+	ID                types.String         `tfsdk:"id"`
 	ConfigurationJSON jsontypes.Normalized `tfsdk:"configuration_json"`
 }
 
@@ -42,6 +44,10 @@ func (r *BrandingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 		MarkdownDescription: "Manages the Jellyfin branding configuration. " +
 			"Controls branding settings such as the splashscreen.",
 		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				MarkdownDescription: "Resource identifier. Always set to `branding` for this singleton resource.",
+				Computed:            true,
+			},
 			"configuration_json": schema.StringAttribute{
 				MarkdownDescription: "The branding configuration as a JSON string. " +
 					"Supports settings like SplashscreenEnabled.",
@@ -82,6 +88,8 @@ func (r *BrandingConfigurationResource) Create(ctx context.Context, req resource
 		return
 	}
 
+	data.ID = types.StringValue("branding")
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -104,6 +112,7 @@ func (r *BrandingConfigurationResource) Read(ctx context.Context, req resource.R
 		return
 	}
 
+	data.ID = types.StringValue("branding")
 	data.ConfigurationJSON = jsontypes.NewNormalizedValue(normalized)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -122,6 +131,8 @@ func (r *BrandingConfigurationResource) Update(ctx context.Context, req resource
 		return
 	}
 
+	data.ID = types.StringValue("branding")
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -132,6 +143,7 @@ func (r *BrandingConfigurationResource) Delete(_ context.Context, _ resource.Del
 func (r *BrandingConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Singleton resource — the import ID is not used. Read will populate all fields.
 	data := BrandingConfigurationResourceModel{
+		ID:                types.StringValue("branding"),
 		ConfigurationJSON: jsontypes.NewNormalizedValue("{}"),
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

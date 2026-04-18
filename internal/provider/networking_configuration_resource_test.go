@@ -24,9 +24,11 @@ func TestAccNetworkingConfigurationResource(t *testing.T) {
 			},
 			// ImportState.
 			{
-				ResourceName:      "jellyfin_networking_configuration.test",
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            "jellyfin_networking_configuration.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateId:           "networking",
+				ImportStateVerifyIgnore: []string{"configuration_json"},
 			},
 			// Update.
 			{

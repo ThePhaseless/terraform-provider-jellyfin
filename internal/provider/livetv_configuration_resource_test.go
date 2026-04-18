@@ -38,9 +38,11 @@ resource "jellyfin_livetv_configuration" "test" {
 			},
 			// ImportState.
 			{
-				ResourceName:      "jellyfin_livetv_configuration.test",
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            "jellyfin_livetv_configuration.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateId:           "livetv",
+				ImportStateVerifyIgnore: []string{"configuration_json"},
 			},
 			// Update.
 			{

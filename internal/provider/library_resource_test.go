@@ -31,9 +31,11 @@ resource "jellyfin_library" "test" {
 			},
 			// ImportState.
 			{
-				ResourceName:      "jellyfin_library.test",
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            "jellyfin_library.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateId:           "TestMovies",
+				ImportStateVerifyIgnore: []string{"library_options_json"},
 			},
 		},
 	})

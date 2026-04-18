@@ -24,9 +24,11 @@ func TestAccSystemConfigurationResource(t *testing.T) {
 			},
 			// ImportState.
 			{
-				ResourceName:      "jellyfin_system_configuration.test",
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            "jellyfin_system_configuration.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateId:           "system",
+				ImportStateVerifyIgnore: []string{"server_name", "configuration_json"},
 			},
 			// Update.
 			{

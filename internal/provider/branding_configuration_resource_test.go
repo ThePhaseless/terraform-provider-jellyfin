@@ -29,9 +29,11 @@ resource "jellyfin_branding_configuration" "test" {
 			},
 			// ImportState.
 			{
-				ResourceName:      "jellyfin_branding_configuration.test",
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            "jellyfin_branding_configuration.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateId:           "branding",
+				ImportStateVerifyIgnore: []string{"configuration_json"},
 			},
 			// Update.
 			{

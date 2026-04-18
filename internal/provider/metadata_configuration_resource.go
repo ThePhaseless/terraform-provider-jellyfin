@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 var (
@@ -30,6 +31,7 @@ type MetadataConfigurationResource struct {
 
 // MetadataConfigurationResourceModel describes the resource data model.
 type MetadataConfigurationResourceModel struct {
+	ID                types.String         `tfsdk:"id"`
 	ConfigurationJSON jsontypes.Normalized `tfsdk:"configuration_json"`
 }
 
@@ -42,6 +44,10 @@ func (r *MetadataConfigurationResource) Schema(_ context.Context, _ resource.Sch
 		MarkdownDescription: "Manages the Jellyfin metadata configuration. " +
 			"Controls metadata settings such as how file creation time is used for date added.",
 		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				MarkdownDescription: "Resource identifier. Always set to `metadata` for this singleton resource.",
+				Computed:            true,
+			},
 			"configuration_json": schema.StringAttribute{
 				MarkdownDescription: "The metadata configuration as a JSON string. " +
 					"Supports settings like UseFileCreationTimeForDateAdded.",
@@ -82,6 +88,8 @@ func (r *MetadataConfigurationResource) Create(ctx context.Context, req resource
 		return
 	}
 
+	data.ID = types.StringValue("metadata")
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -104,6 +112,7 @@ func (r *MetadataConfigurationResource) Read(ctx context.Context, req resource.R
 		return
 	}
 
+	data.ID = types.StringValue("metadata")
 	data.ConfigurationJSON = jsontypes.NewNormalizedValue(normalized)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -122,6 +131,8 @@ func (r *MetadataConfigurationResource) Update(ctx context.Context, req resource
 		return
 	}
 
+	data.ID = types.StringValue("metadata")
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -132,6 +143,7 @@ func (r *MetadataConfigurationResource) Delete(_ context.Context, _ resource.Del
 func (r *MetadataConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Singleton resource — the import ID is not used. Read will populate all fields.
 	data := MetadataConfigurationResourceModel{
+		ID:                types.StringValue("metadata"),
 		ConfigurationJSON: jsontypes.NewNormalizedValue("{}"),
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

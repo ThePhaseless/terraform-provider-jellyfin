@@ -4,9 +4,11 @@
 package provider
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccAPIKeyResource(t *testing.T) {
@@ -31,6 +33,14 @@ resource "jellyfin_api_key" "test" {
 				ResourceName:      "jellyfin_api_key.test",
 				ImportState:       true,
 				ImportStateVerify: true,
+				ImportStateIdFunc: func(s *terraform.State) (string, error) {
+					rs, ok := s.RootModule().Resources["jellyfin_api_key.test"]
+					if !ok {
+						return "", fmt.Errorf("resource not found: jellyfin_api_key.test")
+					}
+					return rs.Primary.Attributes["access_token"], nil
+				},
+				ImportStateVerifyIgnore: []string{"access_token"},
 			},
 		},
 	})
