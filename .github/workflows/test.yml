@@ -78,6 +78,10 @@ jobs:
           TF_ACC: "1"
         run: go test -v -cover -timeout 10m ./internal/provider/
 
+      - name: Run import tool e2e tests
+        # JELLYFIN_ENDPOINT and JELLYFIN_API_KEY are set via $GITHUB_ENV in "Setup Jellyfin" step.
+        run: go test -v -timeout 5m -run 'TestAcc' ./cmd/jellyfin-import/
+
       - name: Stop Jellyfin
         if: always()
         run: docker compose down -v

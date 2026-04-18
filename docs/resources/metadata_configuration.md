@@ -26,3 +26,13 @@ resource "jellyfin_metadata_configuration" "example" {
 ### Required
 
 - `configuration_json` (String) The metadata configuration as a JSON string. Supports settings like UseFileCreationTimeForDateAdded.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import jellyfin_metadata_configuration.example singleton
+```

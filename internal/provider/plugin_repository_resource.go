@@ -8,13 +8,17 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-var _ resource.Resource = &PluginRepositoryResource{}
+var (
+	_ resource.Resource                = &PluginRepositoryResource{}
+	_ resource.ResourceWithImportState = &PluginRepositoryResource{}
+)
 
 // NewPluginRepositoryResource creates a new plugin repository resource.
 func NewPluginRepositoryResource() resource.Resource {
@@ -208,4 +212,8 @@ func (r *PluginRepositoryResource) Delete(ctx context.Context, req resource.Dele
 	if err := r.client.SetPluginRepositories(filtered); err != nil {
 		resp.Diagnostics.AddError("Failed to set plugin repositories", err.Error())
 	}
+}
+
+func (r *PluginRepositoryResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
 }

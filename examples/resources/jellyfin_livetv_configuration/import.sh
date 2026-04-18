@@ -1,0 +1,1 @@
+terraform import jellyfin_livetv_configuration.example singleton

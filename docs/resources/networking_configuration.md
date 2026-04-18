@@ -39,3 +39,13 @@ resource "jellyfin_networking_configuration" "example" {
 ### Required
 
 - `configuration_json` (String) The networking configuration as a JSON string. Supports all Jellyfin network settings including BaseUrl, EnableHttps, RequireHttps, CertificatePath, InternalHttpPort, PublicHttpPort, EnableRemoteAccess, KnownProxies, RemoteIPFilter, and more.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import jellyfin_networking_configuration.example singleton
+```

@@ -11,9 +11,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-var _ resource.Resource = &EncodingConfigurationResource{}
+var (
+	_ resource.Resource                = &EncodingConfigurationResource{}
+	_ resource.ResourceWithImportState = &EncodingConfigurationResource{}
+)
 
 // NewEncodingConfigurationResource creates a new encoding configuration resource.
 func NewEncodingConfigurationResource() resource.Resource {
@@ -27,6 +31,7 @@ type EncodingConfigurationResource struct {
 
 // EncodingConfigurationResourceModel describes the resource data model.
 type EncodingConfigurationResourceModel struct {
+	ID                types.String         `tfsdk:"id"`
 	ConfigurationJSON jsontypes.Normalized `tfsdk:"configuration_json"`
 }
 
@@ -39,6 +44,10 @@ func (r *EncodingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 		MarkdownDescription: "Manages the Jellyfin encoding/transcoding configuration. " +
 			"The configuration is passed as a JSON string for full flexibility over all encoding options.",
 		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				MarkdownDescription: "Resource identifier. Always set to `encoding` for this singleton resource.",
+				Computed:            true,
+			},
 			"configuration_json": schema.StringAttribute{
 				MarkdownDescription: "The encoding configuration as a JSON string.",
 				Required:            true,
@@ -78,6 +87,8 @@ func (r *EncodingConfigurationResource) Create(ctx context.Context, req resource
 		return
 	}
 
+	data.ID = types.StringValue("encoding")
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -100,6 +111,7 @@ func (r *EncodingConfigurationResource) Read(ctx context.Context, req resource.R
 		return
 	}
 
+	data.ID = types.StringValue("encoding")
 	data.ConfigurationJSON = jsontypes.NewNormalizedValue(normalized)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -118,9 +130,20 @@ func (r *EncodingConfigurationResource) Update(ctx context.Context, req resource
 		return
 	}
 
+	data.ID = types.StringValue("encoding")
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *EncodingConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
 	// Encoding configuration cannot be deleted. We just remove from state.
+}
+
+func (r *EncodingConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	// Singleton resource — the import ID is not used. Read will populate all fields.
+	data := EncodingConfigurationResourceModel{
+		ID:                types.StringValue("encoding"),
+		ConfigurationJSON: jsontypes.NewNormalizedValue("{}"),
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

@@ -26,3 +26,13 @@ resource "jellyfin_branding_configuration" "example" {
 ### Required
 
 - `configuration_json` (String) The branding configuration as a JSON string. Supports settings like SplashscreenEnabled.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import jellyfin_branding_configuration.example singleton
+```

@@ -33,3 +33,13 @@ resource "jellyfin_scheduled_task" "scan_library" {
 
 - `id` (String) The unique identifier of the scheduled task.
 - `triggers_json` (String) The task triggers as a JSON array string. Each trigger object can have Type (DailyTrigger, IntervalTrigger, StartupTrigger, WeeklyTrigger), TimeOfDayTicks, IntervalTicks, DayOfWeek, MaxRuntimeTicks.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import jellyfin_scheduled_task.example <task-id>
+```

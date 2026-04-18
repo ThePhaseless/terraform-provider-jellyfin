@@ -11,9 +11,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-var _ resource.Resource = &LiveTVConfigurationResource{}
+var (
+	_ resource.Resource                = &LiveTVConfigurationResource{}
+	_ resource.ResourceWithImportState = &LiveTVConfigurationResource{}
+)
 
 // NewLiveTVConfigurationResource creates a new Live TV configuration resource.
 func NewLiveTVConfigurationResource() resource.Resource {
@@ -27,6 +31,7 @@ type LiveTVConfigurationResource struct {
 
 // LiveTVConfigurationResourceModel describes the resource data model.
 type LiveTVConfigurationResourceModel struct {
+	ID                types.String         `tfsdk:"id"`
 	ConfigurationJSON jsontypes.Normalized `tfsdk:"configuration_json"`
 }
 
@@ -39,6 +44,10 @@ func (r *LiveTVConfigurationResource) Schema(_ context.Context, _ resource.Schem
 		MarkdownDescription: "Manages the Jellyfin Live TV configuration. " +
 			"Controls Live TV settings such as recording options, tuner hosts, and listing providers.",
 		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				MarkdownDescription: "Resource identifier. Always set to `livetv` for this singleton resource.",
+				Computed:            true,
+			},
 			"configuration_json": schema.StringAttribute{
 				MarkdownDescription: "The Live TV configuration as a JSON string. " +
 					"Supports settings like EnableRecordingSubfolders, PrePaddingSeconds, PostPaddingSeconds, " +
@@ -80,6 +89,8 @@ func (r *LiveTVConfigurationResource) Create(ctx context.Context, req resource.C
 		return
 	}
 
+	data.ID = types.StringValue("livetv")
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -102,6 +113,7 @@ func (r *LiveTVConfigurationResource) Read(ctx context.Context, req resource.Rea
 		return
 	}
 
+	data.ID = types.StringValue("livetv")
 	data.ConfigurationJSON = jsontypes.NewNormalizedValue(normalized)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -120,9 +132,20 @@ func (r *LiveTVConfigurationResource) Update(ctx context.Context, req resource.U
 		return
 	}
 
+	data.ID = types.StringValue("livetv")
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *LiveTVConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
 	// Live TV configuration cannot be deleted. We just remove from state.
+}
+
+func (r *LiveTVConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	// Singleton resource — the import ID is not used. Read will populate all fields.
+	data := LiveTVConfigurationResourceModel{
+		ID:                types.StringValue("livetv"),
+		ConfigurationJSON: jsontypes.NewNormalizedValue("{}"),
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
