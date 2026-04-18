@@ -26,8 +26,11 @@ resource "jellyfin_plugin" "example" {
 ### Required
 
 - `name` (String) The plugin package name.
-- `repository_url` (String) The repository URL from which to install the plugin.
 - `version` (String) The plugin version to install.
+
+### Optional
+
+- `repository_url` (String) The repository URL from which to install the plugin. Resolved automatically on import.
 
 ### Read-Only
 

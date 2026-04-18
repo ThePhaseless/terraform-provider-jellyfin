@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -492,15 +493,11 @@ func quote(s string) string {
 	return `"` + escaped + `"`
 }
 
-// prettyJSON formats a JSON string with indentation.
+// prettyJSON formats a JSON string with indentation, preserving number precision.
 func prettyJSON(raw string) (string, error) {
-	var v interface{}
-	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, []byte(raw), "  ", "  "); err != nil {
 		return "", err
 	}
-	b, err := json.MarshalIndent(v, "  ", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
+	return buf.String(), nil
 }

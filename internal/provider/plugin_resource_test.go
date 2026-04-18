@@ -44,10 +44,9 @@ resource "jellyfin_plugin" "test" {
 			},
 			// ImportState.
 			{
-				ResourceName:            "jellyfin_plugin.test",
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"repository_url"},
+				ResourceName:      "jellyfin_plugin.test",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
