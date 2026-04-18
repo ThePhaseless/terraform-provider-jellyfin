@@ -355,7 +355,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("formatting system configuration: %w", err)
 	}
-	imports = append(imports, importBlock("jellyfin_system_configuration", "this", "singleton"))
+	imports = append(imports, importBlock("jellyfin_system_configuration", "this", "system"))
 	resources = append(resources, resourceBlock("jellyfin_system_configuration", "this", map[string]string{
 		"server_name":        quote(sysConfig.ServerName),
 		"configuration_json": "jsonencode(" + pretty + ")",
@@ -370,7 +370,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("formatting encoding configuration: %w", err)
 	}
-	imports = append(imports, importBlock("jellyfin_encoding_configuration", "this", "singleton"))
+	imports = append(imports, importBlock("jellyfin_encoding_configuration", "this", "encoding"))
 	resources = append(resources, resourceBlock("jellyfin_encoding_configuration", "this", map[string]string{
 		"configuration_json": "jsonencode(" + pretty + ")",
 	}))
@@ -384,7 +384,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("formatting networking configuration: %w", err)
 	}
-	imports = append(imports, importBlock("jellyfin_networking_configuration", "this", "singleton"))
+	imports = append(imports, importBlock("jellyfin_networking_configuration", "this", "networking"))
 	resources = append(resources, resourceBlock("jellyfin_networking_configuration", "this", map[string]string{
 		"configuration_json": "jsonencode(" + pretty + ")",
 	}))
@@ -398,7 +398,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("formatting branding configuration: %w", err)
 	}
-	imports = append(imports, importBlock("jellyfin_branding_configuration", "this", "singleton"))
+	imports = append(imports, importBlock("jellyfin_branding_configuration", "this", "branding"))
 	resources = append(resources, resourceBlock("jellyfin_branding_configuration", "this", map[string]string{
 		"configuration_json": "jsonencode(" + pretty + ")",
 	}))
@@ -412,7 +412,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("formatting livetv configuration: %w", err)
 	}
-	imports = append(imports, importBlock("jellyfin_livetv_configuration", "this", "singleton"))
+	imports = append(imports, importBlock("jellyfin_livetv_configuration", "this", "livetv"))
 	resources = append(resources, resourceBlock("jellyfin_livetv_configuration", "this", map[string]string{
 		"configuration_json": "jsonencode(" + pretty + ")",
 	}))
@@ -426,7 +426,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("formatting metadata configuration: %w", err)
 	}
-	imports = append(imports, importBlock("jellyfin_metadata_configuration", "this", "singleton"))
+	imports = append(imports, importBlock("jellyfin_metadata_configuration", "this", "metadata"))
 	resources = append(resources, resourceBlock("jellyfin_metadata_configuration", "this", map[string]string{
 		"configuration_json": "jsonencode(" + pretty + ")",
 	}))
