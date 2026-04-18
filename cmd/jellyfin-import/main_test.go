@@ -114,6 +114,14 @@ func TestSortedKeys(t *testing.T) {
 	}
 }
 
+// writeJSON encodes v as JSON into w, logging any error via t.
+func writeJSON(t *testing.T, w http.ResponseWriter, v interface{}) {
+	t.Helper()
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		t.Errorf("failed to encode JSON response: %v", err)
+	}
+}
+
 // setupTestServer creates a mock Jellyfin server for testing.
 func setupTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
@@ -121,7 +129,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/Users", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]interface{}{
+		writeJSON(t, w, []map[string]interface{}{
 			{
 				"Id":   "user-id-1",
 				"Name": "admin",
@@ -144,7 +152,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]interface{}{
+		writeJSON(t, w, []map[string]interface{}{
 			{
 				"Name":           "Movies",
 				"CollectionType": "movies",
@@ -155,7 +163,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/Auth/Keys", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(t, w, map[string]interface{}{
 			"Items": []map[string]interface{}{
 				{
 					"AccessToken": "test-token-123",
@@ -166,7 +174,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/Repositories", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]interface{}{
+		writeJSON(t, w, []map[string]interface{}{
 			{
 				"Name":    "Jellyfin Stable",
 				"Url":     "https://repo.jellyfin.org/files/plugin/manifest.json",
@@ -176,7 +184,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]interface{}{
+		writeJSON(t, w, []map[string]interface{}{
 			{
 				"Name":    "MusicBrainz",
 				"Version": "14.0.0.0",
@@ -186,7 +194,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/Packages", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]interface{}{
+		writeJSON(t, w, []map[string]interface{}{
 			{
 				"name": "MusicBrainz",
 				"versions": []map[string]interface{}{
@@ -201,7 +209,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/ScheduledTasks", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]interface{}{
+		writeJSON(t, w, []map[string]interface{}{
 			{
 				"Name":     "Scan Media Library",
 				"Id":       "task-id-1",
@@ -223,39 +231,39 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/System/Configuration", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(t, w, map[string]interface{}{
 			"ServerName":               "Test Server",
 			"IsStartupWizardCompleted": true,
 		})
 	})
 
 	mux.HandleFunc("/System/Configuration/encoding", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(t, w, map[string]interface{}{
 			"EncodingThreadCount": -1,
 		})
 	})
 
 	mux.HandleFunc("/System/Configuration/network", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(t, w, map[string]interface{}{
 			"BaseUrl":     "",
 			"EnableHttps": false,
 		})
 	})
 
 	mux.HandleFunc("/System/Configuration/branding", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(t, w, map[string]interface{}{
 			"SplashscreenEnabled": false,
 		})
 	})
 
 	mux.HandleFunc("/System/Configuration/livetv", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(t, w, map[string]interface{}{
 			"EnableRecordingSubfolders": false,
 		})
 	})
 
 	mux.HandleFunc("/System/Configuration/metadata", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(t, w, map[string]interface{}{
 			"UseFileCreationTimeForDateAdded": true,
 		})
 	})
@@ -623,7 +631,7 @@ func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
 	// Server that has /Plugins but returns 500 for /Packages
 	mux := http.NewServeMux()
 	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]interface{}{
+		writeJSON(t, w, []map[string]interface{}{
 			{
 				"Name":    "TestPlugin",
 				"Version": "1.0.0",

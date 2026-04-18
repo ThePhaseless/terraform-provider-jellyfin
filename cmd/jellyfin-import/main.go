@@ -464,11 +464,11 @@ func importBlock(resourceType, name, id string) string {
 // resourceBlock generates a Terraform resource block from a map of attributes.
 func resourceBlock(resourceType, name string, attrs map[string]string) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("resource %s %s {\n", quote(resourceType), quote(name)))
+	fmt.Fprintf(&b, "resource %s %s {\n", quote(resourceType), quote(name))
 
 	keys := sortedKeys(attrs)
 	for _, k := range keys {
-		b.WriteString(fmt.Sprintf("  %s = %s\n", k, attrs[k]))
+		fmt.Fprintf(&b, "  %s = %s\n", k, attrs[k])
 	}
 
 	b.WriteString("}\n")
