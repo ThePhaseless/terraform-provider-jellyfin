@@ -222,8 +222,14 @@ func (r *PluginResource) resolveRepositoryURL(ctx context.Context, name, version
 					return v.RepositoryUrl
 				}
 			}
-			// If exact version not found, return the first version's repo URL.
+			// If exact version not found, fall back to the first version's repo URL
+			// (the repository is typically the same across versions).
 			if len(pkg.Versions) > 0 && pkg.Versions[0].RepositoryUrl != "" {
+				tflog.Debug(ctx, "Exact version not found in packages, falling back to first available version's repository URL", map[string]interface{}{
+					"plugin":            name,
+					"requested_version": version,
+					"fallback_version":  pkg.Versions[0].Version,
+				})
 				return pkg.Versions[0].RepositoryUrl
 			}
 		}
