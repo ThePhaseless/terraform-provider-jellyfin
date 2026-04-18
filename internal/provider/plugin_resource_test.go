@@ -40,6 +40,27 @@ resource "jellyfin_plugin" "test" {
 					resource.TestCheckResourceAttrSet("jellyfin_plugin.test", "id"),
 					resource.TestCheckResourceAttr("jellyfin_plugin.test", "name", pluginName),
 					resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", pluginVersion),
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "enabled", "true"),
+				),
+			},
+			// Disable plugin in place.
+			{
+				Config: fmt.Sprintf(`
+resource "jellyfin_plugin_repository" "stable" {
+  name    = "Jellyfin Stable"
+  url     = %q
+  enabled = true
+}
+
+resource "jellyfin_plugin" "test" {
+  name           = %q
+  version        = %q
+  repository_url = jellyfin_plugin_repository.stable.url
+  enabled        = false
+}
+`, stableRepoURL, pluginName, pluginVersion),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "enabled", "false"),
 				),
 			},
 		},

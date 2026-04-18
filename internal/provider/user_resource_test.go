@@ -17,7 +17,7 @@ func TestAccUserResource(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create and Read.
 			{
-				Config: testAccUserResourceConfig("testuser1"),
+				Config: testAccUserResourceConfigWithPassword("testuser1", "testpass123"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("jellyfin_user.test", "id"),
 					resource.TestCheckResourceAttr("jellyfin_user.test", "name", "testuser1"),
@@ -31,22 +31,31 @@ func TestAccUserResource(t *testing.T) {
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"password"},
 			},
-			// Update.
+			// Update name.
 			{
-				Config: testAccUserResourceConfig("testuser1_updated"),
+				Config: testAccUserResourceConfigWithPassword("testuser1_updated", "testpass123"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_user.test", "name", "testuser1_updated"),
+				),
+			},
+			// Update password (regression test: previously failed because the
+			// API requires the old password unless we reset first).
+			{
+				Config: testAccUserResourceConfigWithPassword("testuser1_updated", "newpass456"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_user.test", "name", "testuser1_updated"),
+					resource.TestCheckResourceAttr("jellyfin_user.test", "password", "newpass456"),
 				),
 			},
 		},
 	})
 }
 
-func testAccUserResourceConfig(name string) string {
+func testAccUserResourceConfigWithPassword(name, password string) string {
 	return fmt.Sprintf(`
 resource "jellyfin_user" "test" {
   name     = %[1]q
-  password = "testpass123"
+  password = %[2]q
 }
-`, name)
+`, name, password)
 }

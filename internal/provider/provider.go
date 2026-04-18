@@ -146,12 +146,32 @@ func (p *JellyfinProvider) Resources(_ context.Context) []func() resource.Resour
 		NewLiveTVConfigurationResource,
 		NewMetadataConfigurationResource,
 		NewAPIKeyResource,
+		NewInitialSetupResource,
+		NewServerRestartResource,
 	}
 }
 
 func (p *JellyfinProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		NewSystemInfoDataSource,
+		NewUserDataSource,
+		NewUsersDataSource,
+		NewLibraryDataSource,
+		NewLibrariesDataSource,
+		NewPluginDataSource,
+		NewPluginsDataSource,
+		NewAPIKeyDataSource,
+		NewAPIKeysDataSource,
+		NewScheduledTasksDataSource,
+		NewAvailablePackagesDataSource,
+		NewPluginRepositoryDataSource,
+		NewPluginRepositoriesDataSource,
+		NewSystemConfigurationDataSource,
+		NewEncodingConfigurationDataSource,
+		NewNetworkingConfigurationDataSource,
+		NewBrandingConfigurationDataSource,
+		NewMetadataConfigurationDataSource,
+		NewLiveTVConfigurationDataSource,
 	}
 }
 

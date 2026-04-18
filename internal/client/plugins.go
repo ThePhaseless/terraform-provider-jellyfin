@@ -119,3 +119,19 @@ func (c *Client) GetAvailablePackages() ([]PackageInfo, error) {
 	}
 	return packages, nil
 }
+
+// EnablePlugin enables an installed plugin by its ID.
+func (c *Client) EnablePlugin(pluginId string) error {
+	if err := c.post(fmt.Sprintf("/Plugins/%s/Enable", url.PathEscape(pluginId)), nil); err != nil {
+		return fmt.Errorf("enabling plugin %s: %w", pluginId, err)
+	}
+	return nil
+}
+
+// DisablePlugin disables an installed plugin by its ID.
+func (c *Client) DisablePlugin(pluginId string) error {
+	if err := c.post(fmt.Sprintf("/Plugins/%s/Disable", url.PathEscape(pluginId)), nil); err != nil {
+		return fmt.Errorf("disabling plugin %s: %w", pluginId, err)
+	}
+	return nil
+}

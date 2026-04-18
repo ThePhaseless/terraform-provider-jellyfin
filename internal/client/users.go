@@ -132,6 +132,19 @@ func (c *Client) UpdateUserPassword(id, currentPassword, newPassword string) err
 	return nil
 }
 
+// ResetUserPassword resets the user's password (clears it).
+// This must be called before UpdateUserPassword when the user already has a password set,
+// since the Jellyfin API requires the current password otherwise.
+func (c *Client) ResetUserPassword(id string) error {
+	body := map[string]bool{
+		"ResetPassword": true,
+	}
+	if err := c.post(fmt.Sprintf("/Users/%s/Password", url.PathEscape(id)), body); err != nil {
+		return fmt.Errorf("resetting password for user %s: %w", id, err)
+	}
+	return nil
+}
+
 // UpdateUserPolicy updates a user's policy/permissions.
 func (c *Client) UpdateUserPolicy(id string, policy *UserPolicy) error {
 	if err := c.post(fmt.Sprintf("/Users/%s/Policy", url.PathEscape(id)), policy); err != nil {

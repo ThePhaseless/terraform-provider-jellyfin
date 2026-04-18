@@ -248,10 +248,19 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	}
 
 	// Update password if changed.
-	if !data.Password.IsNull() && !data.Password.Equal(state.Password) {
-		if err := r.client.UpdateUserPassword(currentUser.Id, "", data.Password.ValueString()); err != nil {
-			resp.Diagnostics.AddError("Failed to update user password", err.Error())
+	if !data.Password.Equal(state.Password) {
+		// Always reset first to clear the existing password (the Jellyfin API requires
+		// the current password otherwise, which Terraform does not have access to).
+		if err := r.client.ResetUserPassword(currentUser.Id); err != nil {
+			resp.Diagnostics.AddError("Failed to reset user password", err.Error())
 			return
+		}
+		// If a new password is configured, set it. Otherwise leave the password cleared.
+		if !data.Password.IsNull() && data.Password.ValueString() != "" {
+			if err := r.client.UpdateUserPassword(currentUser.Id, "", data.Password.ValueString()); err != nil {
+				resp.Diagnostics.AddError("Failed to update user password", err.Error())
+				return
+			}
 		}
 	}
 

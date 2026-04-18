@@ -29,6 +29,10 @@ resource "jellyfin_plugin" "example" {
 - `repository_url` (String) The repository URL from which to install the plugin.
 - `version` (String) The plugin version to install.
 
+### Optional
+
+- `enabled` (Boolean) Whether the plugin is enabled. Can be toggled in place without reinstalling.
+
 ### Read-Only
 
 - `id` (String) The plugin ID assigned by Jellyfin after installation.

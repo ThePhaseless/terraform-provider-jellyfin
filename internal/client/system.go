@@ -114,3 +114,19 @@ func (c *Client) UpdateEncodingOptions(config *EncodingOptions) error {
 	}
 	return nil
 }
+
+// RestartServer requests the Jellyfin server to restart.
+func (c *Client) RestartServer() error {
+	if err := c.post("/System/Restart", nil); err != nil {
+		return fmt.Errorf("restarting server: %w", err)
+	}
+	return nil
+}
+
+// ShutdownServer requests the Jellyfin server to shut down.
+func (c *Client) ShutdownServer() error {
+	if err := c.post("/System/Shutdown", nil); err != nil {
+		return fmt.Errorf("shutting down server: %w", err)
+	}
+	return nil
+}

@@ -1,0 +1,38 @@
+// Copyright IBM Corp. 2021, 2025
+// SPDX-License-Identifier: MPL-2.0
+
+package provider
+
+import (
+	"testing"
+
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+)
+
+func TestAccLibraryDataSource(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "jellyfin_library" "test" {
+  name            = "DSLibTest"
+  collection_type = "movies"
+  paths           = ["/media/movies"]
+}
+
+data "jellyfin_library" "test" {
+  name       = jellyfin_library.test.name
+  depends_on = [jellyfin_library.test]
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("data.jellyfin_library.test", "name", "DSLibTest"),
+					resource.TestCheckResourceAttr("data.jellyfin_library.test", "collection_type", "movies"),
+					resource.TestCheckResourceAttrSet("data.jellyfin_library.test", "item_id"),
+				),
+			},
+		},
+	})
+}

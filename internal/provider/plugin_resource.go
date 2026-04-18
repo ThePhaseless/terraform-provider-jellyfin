@@ -11,6 +11,7 @@ import (
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -35,6 +36,7 @@ type PluginResourceModel struct {
 	Name          types.String `tfsdk:"name"`
 	Version       types.String `tfsdk:"version"`
 	RepositoryURL types.String `tfsdk:"repository_url"`
+	Enabled       types.Bool   `tfsdk:"enabled"`
 }
 
 func (r *PluginResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -72,6 +74,12 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
+			},
+			"enabled": schema.BoolAttribute{
+				MarkdownDescription: "Whether the plugin is enabled. Can be toggled in place without reinstalling.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(true),
 			},
 		},
 	}
@@ -115,6 +123,13 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 
 	data.ID = types.StringValue(pluginID)
 
+	if !data.Enabled.IsNull() && !data.Enabled.IsUnknown() && !data.Enabled.ValueBool() {
+		if err := r.client.DisablePlugin(pluginID); err != nil {
+			resp.Diagnostics.AddError("Failed to disable plugin after install", err.Error())
+			return
+		}
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -137,6 +152,7 @@ func (r *PluginResource) Read(ctx context.Context, req resource.ReadRequest, res
 			data.ID = types.StringValue(p.Id)
 			data.Name = types.StringValue(p.Name)
 			data.Version = types.StringValue(p.Version)
+			data.Enabled = types.BoolValue(p.Status != "Disabled")
 			found = true
 			break
 		}
@@ -150,9 +166,42 @@ func (r *PluginResource) Read(ctx context.Context, req resource.ReadRequest, res
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func (r *PluginResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
-	// All attributes require replace, so Update should never be called.
-	resp.Diagnostics.AddError("Update not supported", "Plugin updates require replacement.")
+func (r *PluginResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan PluginResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	var state PluginResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// All other attributes have RequiresReplace, so the only legal in-place change is `enabled`.
+	if !plan.Name.Equal(state.Name) || !plan.Version.Equal(state.Version) || !plan.RepositoryURL.Equal(state.RepositoryURL) {
+		resp.Diagnostics.AddError("Update not supported", "Plugin attributes other than `enabled` require replacement.")
+		return
+	}
+
+	if !plan.Enabled.Equal(state.Enabled) {
+		if plan.Enabled.ValueBool() {
+			if err := r.client.EnablePlugin(state.ID.ValueString()); err != nil {
+				resp.Diagnostics.AddError("Failed to enable plugin", err.Error())
+				return
+			}
+		} else {
+			if err := r.client.DisablePlugin(state.ID.ValueString()); err != nil {
+				resp.Diagnostics.AddError("Failed to disable plugin", err.Error())
+				return
+			}
+		}
+	}
+
+	plan.ID = state.ID
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *PluginResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
