@@ -26,9 +26,22 @@ resource "jellyfin_plugin" "example" {
 ### Required
 
 - `name` (String) The plugin package name.
-- `repository_url` (String) The repository URL from which to install the plugin.
 - `version` (String) The plugin version to install.
+
+### Optional
+
+- `repository_url` (String) The repository URL from which to install the plugin. Resolved automatically on import.
 
 ### Read-Only
 
 - `id` (String) The plugin ID assigned by Jellyfin after installation.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import jellyfin_plugin.example <plugin-id>
+```

@@ -11,9 +11,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-var _ resource.Resource = &NetworkingConfigurationResource{}
+var (
+	_ resource.Resource                = &NetworkingConfigurationResource{}
+	_ resource.ResourceWithImportState = &NetworkingConfigurationResource{}
+)
 
 // NewNetworkingConfigurationResource creates a new networking configuration resource.
 func NewNetworkingConfigurationResource() resource.Resource {
@@ -27,6 +31,7 @@ type NetworkingConfigurationResource struct {
 
 // NetworkingConfigurationResourceModel describes the resource data model.
 type NetworkingConfigurationResourceModel struct {
+	ID                types.String         `tfsdk:"id"`
 	ConfigurationJSON jsontypes.Normalized `tfsdk:"configuration_json"`
 }
 
@@ -40,6 +45,10 @@ func (r *NetworkingConfigurationResource) Schema(_ context.Context, _ resource.S
 			"Controls network settings including HTTPS, ports, remote access, proxy settings, and IP filtering. " +
 			"The configuration is passed as a JSON string for full flexibility.",
 		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				MarkdownDescription: "Resource identifier. Always set to `networking` for this singleton resource.",
+				Computed:            true,
+			},
 			"configuration_json": schema.StringAttribute{
 				MarkdownDescription: "The networking configuration as a JSON string. Supports all Jellyfin network settings " +
 					"including BaseUrl, EnableHttps, RequireHttps, CertificatePath, InternalHttpPort, PublicHttpPort, " +
@@ -81,6 +90,8 @@ func (r *NetworkingConfigurationResource) Create(ctx context.Context, req resour
 		return
 	}
 
+	data.ID = types.StringValue("networking")
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -103,6 +114,7 @@ func (r *NetworkingConfigurationResource) Read(ctx context.Context, req resource
 		return
 	}
 
+	data.ID = types.StringValue("networking")
 	data.ConfigurationJSON = jsontypes.NewNormalizedValue(normalized)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -121,9 +133,20 @@ func (r *NetworkingConfigurationResource) Update(ctx context.Context, req resour
 		return
 	}
 
+	data.ID = types.StringValue("networking")
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *NetworkingConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
 	// Networking configuration cannot be deleted. We just remove from state.
+}
+
+func (r *NetworkingConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	// Singleton resource — the import ID is not used. Read will populate all fields.
+	data := NetworkingConfigurationResourceModel{
+		ID:                types.StringValue("networking"),
+		ConfigurationJSON: jsontypes.NewNormalizedValue("{}"),
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

@@ -29,6 +29,14 @@ resource "jellyfin_library" "test" {
 					resource.TestCheckResourceAttrSet("jellyfin_library.test", "item_id"),
 				),
 			},
+			// ImportState.
+			{
+				ResourceName:            "jellyfin_library.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateId:           "TestMovies",
+				ImportStateVerifyIgnore: []string{"library_options_json"},
+			},
 		},
 	})
 }

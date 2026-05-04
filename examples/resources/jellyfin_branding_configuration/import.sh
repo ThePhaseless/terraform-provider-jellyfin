@@ -1,0 +1,1 @@
+terraform import jellyfin_branding_configuration.example singleton

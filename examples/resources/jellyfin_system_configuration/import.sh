@@ -1,0 +1,1 @@
+terraform import jellyfin_system_configuration.example singleton

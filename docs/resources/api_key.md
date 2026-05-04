@@ -33,3 +33,13 @@ output "api_key" {
 ### Read-Only
 
 - `access_token` (String, Sensitive) The generated access token (API key). This is set by Jellyfin upon creation.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import jellyfin_api_key.example <access-token>
+```

@@ -21,6 +21,14 @@ func TestAccEncodingConfigurationResource(t *testing.T) {
 					resource.TestCheckResourceAttrSet("jellyfin_encoding_configuration.test", "configuration_json"),
 				),
 			},
+			// ImportState.
+			{
+				ResourceName:            "jellyfin_encoding_configuration.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateId:           "encoding",
+				ImportStateVerifyIgnore: []string{"configuration_json"},
+			},
 			// Update.
 			{
 				Config: testAccEncodingConfigurationResourceConfig(true),

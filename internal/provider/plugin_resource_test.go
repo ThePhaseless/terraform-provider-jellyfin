@@ -42,6 +42,12 @@ resource "jellyfin_plugin" "test" {
 					resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", pluginVersion),
 				),
 			},
+			// ImportState.
+			{
+				ResourceName:      "jellyfin_plugin.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
 		},
 	})
 }
