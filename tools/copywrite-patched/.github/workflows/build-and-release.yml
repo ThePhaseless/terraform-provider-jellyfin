@@ -1,0 +1,32 @@
+name: release
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # Upload GitHub Release Artifacts
+  issues: write # Close related issues
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e5e7e5ab8b370d6c329ec480221332ada57f0ab # v3.5.2
+
+      - name: Install Go
+        uses: actions/setup-go@4d34df0c2316fe8122ab82dc22947d607c0c91f9 # v4.0.0
+        with:
+          go-version-file: '.go-version'
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@286f3b13b1b49da4ac219696163fb8c1c93e1200 # v6.0.0
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
+          HOMEBREW_COMMIT_AUTHOR_NAME: ${{ secrets.HOMEBREW_COMMIT_AUTHOR_NAME }}
+          HOMEBREW_COMMIT_EMAIL: ${{ secrets.HOMEBREW_COMMIT_EMAIL }}
