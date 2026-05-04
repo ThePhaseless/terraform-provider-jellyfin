@@ -25,10 +25,11 @@ func TestAccPluginRepositoryResource(t *testing.T) {
 			},
 			// ImportState.
 			{
-				ResourceName:      "jellyfin_plugin_repository.test",
-				ImportState:       true,
-				ImportStateVerify: true,
-				ImportStateId:     "Jellyfin Stable",
+				ResourceName:                         "jellyfin_plugin_repository.test",
+				ImportState:                          true,
+				ImportStateVerify:                    true,
+				ImportStateVerifyIdentifierAttribute: "name",
+				ImportStateId:                        "Jellyfin Stable",
 			},
 			// Update.
 			{

@@ -27,6 +27,10 @@ resource "jellyfin_branding_configuration" "example" {
 
 - `configuration_json` (String) The branding configuration as a JSON string. Supports settings like SplashscreenEnabled.
 
+### Read-Only
+
+- `id` (String) Resource identifier. Always set to `branding` for this singleton resource.
+
 ## Import
 
 Import is supported using the following syntax:

@@ -30,9 +30,10 @@ resource "jellyfin_api_key" "test" {
 			},
 			// ImportState.
 			{
-				ResourceName:      "jellyfin_api_key.test",
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:                         "jellyfin_api_key.test",
+				ImportState:                          true,
+				ImportStateVerify:                    true,
+				ImportStateVerifyIdentifierAttribute: "access_token",
 				ImportStateIdFunc: func(s *terraform.State) (string, error) {
 					rs, ok := s.RootModule().Resources["jellyfin_api_key.test"]
 					if !ok {

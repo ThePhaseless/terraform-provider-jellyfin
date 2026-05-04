@@ -61,6 +61,10 @@ resource "jellyfin_encoding_configuration" "example" {
 
 - `configuration_json` (String) The encoding configuration as a JSON string.
 
+### Read-Only
+
+- `id` (String) Resource identifier. Always set to `encoding` for this singleton resource.
+
 ## Import
 
 Import is supported using the following syntax:

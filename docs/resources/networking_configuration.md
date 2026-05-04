@@ -40,6 +40,10 @@ resource "jellyfin_networking_configuration" "example" {
 
 - `configuration_json` (String) The networking configuration as a JSON string. Supports all Jellyfin network settings including BaseUrl, EnableHttps, RequireHttps, CertificatePath, InternalHttpPort, PublicHttpPort, EnableRemoteAccess, KnownProxies, RemoteIPFilter, and more.
 
+### Read-Only
+
+- `id` (String) Resource identifier. Always set to `networking` for this singleton resource.
+
 ## Import
 
 Import is supported using the following syntax:

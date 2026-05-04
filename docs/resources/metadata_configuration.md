@@ -27,6 +27,10 @@ resource "jellyfin_metadata_configuration" "example" {
 
 - `configuration_json` (String) The metadata configuration as a JSON string. Supports settings like UseFileCreationTimeForDateAdded.
 
+### Read-Only
+
+- `id` (String) Resource identifier. Always set to `metadata` for this singleton resource.
+
 ## Import
 
 Import is supported using the following syntax:

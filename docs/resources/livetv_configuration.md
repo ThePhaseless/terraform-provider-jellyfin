@@ -35,6 +35,10 @@ resource "jellyfin_livetv_configuration" "example" {
 
 - `configuration_json` (String) The Live TV configuration as a JSON string. Supports settings like EnableRecordingSubfolders, PrePaddingSeconds, PostPaddingSeconds, TunerHosts, ListingProviders, SaveRecordingNFO, and SaveRecordingImages.
 
+### Read-Only
+
+- `id` (String) Resource identifier. Always set to `livetv` for this singleton resource.
+
 ## Import
 
 Import is supported using the following syntax:
