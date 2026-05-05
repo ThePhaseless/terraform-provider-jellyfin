@@ -192,7 +192,7 @@ func promptForConfigValues(c *config.Config) error {
 		return err
 	}
 	selectedIndex, err := strconv.Atoi(licenseChoice)
-	if err != nil || selectedIndex < 1 || selectedIndex > len(licenseOptions) {
+	if err != nil {
 		return fmt.Errorf("license selection must be a number between 1 and %d", len(licenseOptions))
 	}
 	licenseIndex := selectedIndex - 1

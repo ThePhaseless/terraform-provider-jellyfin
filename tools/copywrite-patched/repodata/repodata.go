@@ -62,6 +62,10 @@ func Transform(repos []*github.Repository) ([]map[string]interface{}, error) {
 	// place all the metaData types into the csvData array
 	var structRepos []map[string]interface{}
 	for _, repo := range repos {
+		if repo == nil {
+			return []map[string]interface{}{}, errors.New("repository data contains nil entry")
+		}
+
 		repomap := repositoryFieldPointers(repo)
 
 		// Transform values into strings for easier parsing
