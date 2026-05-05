@@ -16,12 +16,12 @@ require (
 	github.com/knadh/koanf/v2 v2.3.4
 	github.com/mattn/go-isatty v0.0.20
 	github.com/mergestat/timediff v0.0.4
-	github.com/spf13/afero v1.9.5
+	github.com/spf13/afero v1.15.0
 	github.com/spf13/cobra v1.6.1
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.8.4
 	golang.org/x/oauth2 v0.27.0
-	golang.org/x/sync v0.12.0
+	golang.org/x/sync v0.16.0
 )
 
 require (
@@ -44,7 +44,7 @@ require (
 	golang.org/x/crypto v0.35.0 // indirect
 	golang.org/x/exp v0.0.0-20220303212507-bbda1eaf7a17 // indirect
 	golang.org/x/sys v0.32.0 // indirect
-	golang.org/x/text v0.23.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
 
