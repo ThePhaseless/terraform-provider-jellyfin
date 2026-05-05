@@ -45,6 +45,10 @@ resource "jellyfin_plugin_configuration" "sso_auth" {
 - `configuration_json` (String) The plugin configuration as a JSON string. For SSO-Auth, this would include SAML/OIDC configuration. This allows universal configuration of any plugin.
 - `plugin_id` (String) The plugin ID (GUID).
 
+### Read-Only
+
+- `id` (String) The plugin configuration resource identifier.
+
 ## Import
 
 Import is supported using the following syntax:

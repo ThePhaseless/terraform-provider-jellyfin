@@ -35,6 +35,7 @@ resource "jellyfin_library" "movies" {
 
 ### Read-Only
 
+- `id` (String) The library resource identifier.
 - `item_id` (String) The internal item ID assigned by Jellyfin.
 
 ## Import

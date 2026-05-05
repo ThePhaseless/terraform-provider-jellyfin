@@ -33,6 +33,7 @@ output "api_key" {
 ### Read-Only
 
 - `access_token` (String, Sensitive) The generated access token (API key). This is set by Jellyfin upon creation.
+- `id` (String) The API key resource identifier.
 
 ## Import
 
