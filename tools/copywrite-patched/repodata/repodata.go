@@ -72,16 +72,19 @@ func Transform(repos []*github.Repository) ([]map[string]interface{}, error) {
 
 			//pointer will never be nil, but the underlying value may be
 			rv := reflect.ValueOf(pointer)
-			if !isNilable(rv.Kind()) || !rv.IsNil() {
-				switch pointer := pointer.(type) {
-				case *string:
-					data = *pointer
-				case *github.License:
-					data = *pointer.Key
-				case *github.Timestamp: // time will never be nil
-					data = pointer.Time.String()
-				default:
-				}
+			if !shouldInspectField(rv) {
+				repomap[value] = data
+				continue
+			}
+
+			switch pointer := pointer.(type) {
+			case *string:
+				data = *pointer
+			case *github.License:
+				data = *pointer.Key
+			case *github.Timestamp: // time will never be nil
+				data = pointer.Time.String()
+			default:
 			}
 			repomap[value] = data
 		}
@@ -143,4 +146,12 @@ func isNilable(kind reflect.Kind) bool {
 	default:
 		return false
 	}
+}
+
+func shouldInspectField(value reflect.Value) bool {
+	if !isNilable(value.Kind()) {
+		return true
+	}
+
+	return !value.IsNil()
 }

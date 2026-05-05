@@ -195,6 +195,10 @@ func promptForConfigValues(c *config.Config) error {
 	if err != nil || selectedIndex < 1 || selectedIndex > len(licenseOptions) {
 		return fmt.Errorf("license selection must be a number between 1 and %d", len(licenseOptions))
 	}
+	licenseIndex := selectedIndex - 1
+	if licenseIndex < 0 || licenseIndex >= len(licenseOptions) {
+		return fmt.Errorf("license selection must be a number between 1 and %d", len(licenseOptions))
+	}
 
 	yearInput, err := promptWithDefault(reader, "Choose a copyright year", strconv.Itoa(c.Project.CopyrightYear))
 	if err != nil {
@@ -211,7 +215,7 @@ func promptForConfigValues(c *config.Config) error {
 		return fmt.Errorf("copyright year is expected to be between %v and %v", minYear, maxYear)
 	}
 
-	c.Project.License = licenseOptions[selectedIndex-1]
+	c.Project.License = licenseOptions[licenseIndex]
 	c.Project.CopyrightYear = year
 	return nil
 }
