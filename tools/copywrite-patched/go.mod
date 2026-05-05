@@ -1,12 +1,12 @@
 module github.com/hashicorp/copywrite
 
-go 1.23.0
+go 1.25.0
 
 toolchain go1.26.2
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.6.0
-	github.com/bradleyfalzon/ghinstallation/v2 v2.5.0
+	github.com/bradleyfalzon/ghinstallation/v2 v2.18.0
 	github.com/knadh/koanf/parsers/dotenv v1.1.1
 	github.com/knadh/koanf/parsers/hcl v1.0.0
 	github.com/knadh/koanf/parsers/yaml v1.1.0
@@ -30,9 +30,10 @@ require (
 	github.com/cloudflare/circl v1.3.7 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
-	github.com/golang-jwt/jwt/v4 v4.5.1 // indirect
+	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/google/go-github/v53 v53.0.0 // indirect
-	github.com/google/go-querystring v1.1.0 // indirect
+	github.com/google/go-github/v84 v84.0.0 // indirect
+	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.0.1 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
