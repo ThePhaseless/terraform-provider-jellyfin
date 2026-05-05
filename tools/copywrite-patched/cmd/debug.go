@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 
 	"github.com/hashicorp/copywrite/github"
-	"github.com/hashicorp/go-hclog"
-	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/hashicorp/copywrite/internal/logging"
+	"github.com/hashicorp/copywrite/internal/pretty"
 	"github.com/mergestat/timediff"
 	"github.com/spf13/cobra"
 )
@@ -32,11 +32,11 @@ var debugCmd = &cobra.Command{
 		}
 
 		// Let's forcibly enable trace-level logging
-		cliLogger.SetLevel(hclog.Trace)
+		cliLogger.SetLevel(logging.Trace)
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		title := func(t string) {
-			escaped := colorize(t, text.FgCyan, text.Bold)
+			escaped := colorize(t, pretty.FgCyan, pretty.Bold)
 			cmd.Println(escaped)
 		}
 

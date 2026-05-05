@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -17,11 +18,10 @@ import (
 	"github.com/hashicorp/copywrite/addlicense"
 	"github.com/hashicorp/copywrite/config"
 	"github.com/hashicorp/copywrite/github"
-	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/hashicorp/copywrite/internal/pretty"
 	"github.com/mattn/go-isatty"
 	"github.com/samber/lo"
 
-	"github.com/AlecAivazis/survey/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -106,7 +106,7 @@ for any unknown values. If you are running this command in CI, please use the
 		err = configToHCL(*newConfig, f)
 		cobra.CheckErr(err)
 
-		successText := text.Color(text.FgGreen).Sprintf("✔️ A config has been successfully generated at: ./%s", f.Name())
+		successText := pretty.Color(pretty.FgGreen).Sprintf("✔️ A config has been successfully generated at: ./%s", f.Name())
 		cmd.Println(successText)
 		cmd.Println("Please commit this file to your repo")
 	},
@@ -164,68 +164,81 @@ func promptForConfigValues(c *config.Config) error {
 
 	currentLicense := strings.ToUpper(c.Project.License)
 	licenseOptions := lo.Uniq([]string{noLicenseText, currentLicense, "MPL-2.0", "MIT", "Apache-2.0"})
+	reader := bufio.NewReader(os.Stdin)
 
-	prompts := []*survey.Question{
-		{
-			Name: "License",
-			Prompt: &survey.Select{
-				Message: "Choose a license:",
-				Options: licenseOptions,
-				Default: currentLicense, // default to using the current license
-				Help:    "HashiCorp defaults to using MPL-2.0 for public projects",
-				Description: func(value string, index int) string {
-					switch value {
-					case noLicenseText:
-						return "Proceed without a license"
-					// Current repo license is before MPL-2.0 intentionally for UX clarity
-					case c.Project.License:
-						return "Current Repo License"
-					case "MPL-2.0":
-						return "HashiCorp default for public repos"
-					default:
-						return ""
-					}
-				},
-			},
-		},
-		{
-			Name: "CopyrightYear",
-			Prompt: &survey.Input{
-				Message: "Choose a copyright year:",
-				Default: strconv.Itoa(c.Project.CopyrightYear),
-				Help:    "HashiCorp defaults to the earlier of the repo creation year or when the project was first published",
-			},
-			Validate: func(val interface{}) error {
-				i, err := strconv.Atoi(val.(string))
-				if err != nil {
-					return fmt.Errorf("year must be a number")
-				}
-
-				// Let's do some minor sanity checking here
-				minYear := 1970
-				maxYear := time.Now().Year() + 1
-				if i < minYear || i > maxYear {
-					return fmt.Errorf("copyright year is expected to be between %v and %v", minYear, maxYear)
-				}
-
-				return nil
-			},
-		},
+	fmt.Println("Choose a license:")
+	defaultIndex := 1
+	for i, option := range licenseOptions {
+		label := option
+		if label == noLicenseText {
+			label = "(none)"
+		}
+		switch option {
+		case noLicenseText:
+			label += " - Proceed without a license"
+		case c.Project.License:
+			label += " - Current Repo License"
+		case "MPL-2.0":
+			label += " - HashiCorp default for public repos"
+		}
+		if option == currentLicense {
+			defaultIndex = i + 1
+		}
+		fmt.Printf("  %d) %s\n", i+1, label)
 	}
 
-	answers := struct {
-		License       string `survey:"License"`
-		CopyrightYear int    `survey:"CopyrightYear"`
-	}{}
-
-	// prompt the user
-	err := survey.Ask(prompts, &answers)
+	licenseChoice, err := promptWithDefault(reader, "Select license number", strconv.Itoa(defaultIndex))
+	if err != nil {
+		return err
+	}
+	licenseIndex, err := parseChoiceIndex(licenseChoice, len(licenseOptions))
 	if err != nil {
 		return err
 	}
 
-	c.Project.License = answers.License
-	c.Project.CopyrightYear = answers.CopyrightYear
+	yearInput, err := promptWithDefault(reader, "Choose a copyright year", strconv.Itoa(c.Project.CopyrightYear))
+	if err != nil {
+		return err
+	}
+	year, err := strconv.Atoi(yearInput)
+	if err != nil {
+		return fmt.Errorf("year must be a number")
+	}
 
+	minYear := 1970
+	maxYear := time.Now().Year() + 1
+	if year < minYear || year > maxYear {
+		return fmt.Errorf("copyright year is expected to be between %v and %v", minYear, maxYear)
+	}
+
+	c.Project.License = licenseOptions[licenseIndex]
+	c.Project.CopyrightYear = year
 	return nil
+}
+
+func promptWithDefault(reader *bufio.Reader, label, defaultValue string) (string, error) {
+	fmt.Printf("%s [%s]: ", label, defaultValue)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return defaultValue, nil
+	}
+	return input, nil
+}
+
+func parseChoiceIndex(input string, numChoices int) (int, error) {
+	selectedIndex, err := strconv.Atoi(input)
+	if err != nil {
+		return 0, fmt.Errorf("license selection must be a number between 1 and %d", numChoices)
+	}
+
+	choiceIndex := selectedIndex - 1
+	if choiceIndex < 0 || choiceIndex >= numChoices {
+		return 0, fmt.Errorf("license selection must be a number between 1 and %d", numChoices)
+	}
+
+	return choiceIndex, nil
 }

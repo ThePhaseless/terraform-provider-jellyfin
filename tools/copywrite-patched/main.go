@@ -5,15 +5,15 @@ package main
 
 import (
 	"github.com/hashicorp/copywrite/cmd"
-	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/copywrite/internal/logging"
 )
 
 func main() {
-	appLogger := hclog.New(&hclog.LoggerOptions{
+	appLogger := logging.New(&logging.LoggerOptions{
 		Name:  "hc-copywrite",
-		Level: hclog.LevelFromString("DEBUG"),
-		Color: hclog.AutoColor,
+		Level: logging.LevelFromString("DEBUG"),
+		Color: logging.AutoColor,
 	})
-	hclog.SetDefault(appLogger)
+	logging.SetDefault(appLogger)
 	cmd.Execute()
 }

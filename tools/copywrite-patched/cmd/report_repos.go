@@ -59,7 +59,7 @@ Outputs the fields you specify in a repodata.csv file in the working directory.`
 		// Populate rows
 		for _, r := range outputData {
 			// Filter the row to just contain the fields we care about
-			row := make([]interface{}, 0)
+			row := make(tableRow, 0)
 			for _, k := range fieldsArr {
 				row = append(row, r[k])
 			}
