@@ -259,6 +259,9 @@ func repositoryNameExists(repos []client.PluginRepository, name string) bool {
 	return false
 }
 
+// findPluginRepositoryIndex returns the matching repository index, -1 when no
+// repository is found, or an error when the repository name is ambiguous and
+// the URL does not disambiguate it.
 func findPluginRepositoryIndex(repos []client.PluginRepository, name, url string) (int, error) {
 	matches := make([]int, 0, 1)
 	for i, repo := range repos {
