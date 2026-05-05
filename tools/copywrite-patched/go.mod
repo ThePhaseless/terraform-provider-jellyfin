@@ -13,6 +13,7 @@ require (
 	github.com/knadh/koanf/parsers/yaml v1.1.0
 	github.com/knadh/koanf/providers/confmap v1.0.0
 	github.com/knadh/koanf/providers/env v1.1.0
+	github.com/knadh/koanf/providers/env/v2 v2.0.0
 	github.com/knadh/koanf/providers/file v1.2.1
 	github.com/knadh/koanf/v2 v2.3.4
 	github.com/mattn/go-isatty v0.0.22
@@ -26,10 +27,13 @@ require (
 )
 
 require (
+	github.com/ProtonMail/go-crypto v1.4.1 // indirect
 	github.com/cli/safeexec v1.0.1 // indirect
+	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
+	github.com/google/go-github/v53 v53.2.0 // indirect
 	github.com/google/go-github/v84 v84.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/hashicorp/hcl v1.0.1-vault-7 // indirect
@@ -41,6 +45,7 @@ require (
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
+	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
@@ -49,6 +54,7 @@ require (
 require (
 	github.com/cli/go-gh/v2 v2.13.0
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/google/go-github/v85 v85.0.0
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/samber/lo v1.53.0
 	gopkg.in/yaml.v3 v3.0.1 // indirect
