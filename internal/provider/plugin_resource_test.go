@@ -24,18 +24,12 @@ func TestAccPluginResource(t *testing.T) {
 			// Install plugin.
 			{
 				Config: fmt.Sprintf(`
-resource "jellyfin_plugin_repository" "stable" {
-  name    = "Jellyfin Stable"
-  url     = %q
-  enabled = true
-}
-
 resource "jellyfin_plugin" "test" {
   name           = %q
   version        = %q
-  repository_url = jellyfin_plugin_repository.stable.url
+  repository_url = %q
 }
-`, stableRepoURL, pluginName, pluginVersion),
+`, pluginName, pluginVersion, stableRepoURL),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("jellyfin_plugin.test", "id"),
 					resource.TestCheckResourceAttr("jellyfin_plugin.test", "name", pluginName),
