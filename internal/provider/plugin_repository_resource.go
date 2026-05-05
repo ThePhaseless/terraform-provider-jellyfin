@@ -58,9 +58,6 @@ func (r *PluginRepositoryResource) Schema(_ context.Context, _ resource.SchemaRe
 				Validators: []validator.String{
 					stringvalidator.LengthAtLeast(1),
 				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
 			},
 			"url": schema.StringAttribute{
 				MarkdownDescription: "The repository URL.",
@@ -210,12 +207,21 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 		return
 	}
 
-	for i, repo := range repos {
+	if state.Name.ValueString() != data.Name.ValueString() && repositoryNameExists(repos, data.Name.ValueString()) {
+		resp.Diagnostics.AddError(
+			"Plugin repository already exists",
+			fmt.Sprintf("A plugin repository named %q already exists. Repository names must be unique for this resource to manage them safely.", data.Name.ValueString()),
+		)
+		return
+	}
+
+	for i := range repos {
 		if i == index {
-			repo.Url = data.URL.ValueString()
-			repo.Enabled = data.Enabled.ValueBool()
+			repos[i].Name = data.Name.ValueString()
+			repos[i].Url = data.URL.ValueString()
+			repos[i].Enabled = data.Enabled.ValueBool()
 		}
-		updated = append(updated, repo)
+		updated = append(updated, repos[i])
 	}
 
 	if err := r.client.SetPluginRepositories(updated); err != nil {
@@ -228,8 +234,8 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 		resp.Diagnostics.AddError("Failed to read plugin repositories after update", err.Error())
 		return
 	}
-	if index >= len(repos) || repos[index].Name != state.Name.ValueString() {
-		index, err = findPluginRepositoryIndex(repos, state.Name.ValueString(), state.URL.ValueString())
+	if index >= len(repos) || repos[index].Name != data.Name.ValueString() {
+		index, err = findPluginRepositoryIndex(repos, data.Name.ValueString(), data.URL.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError("Plugin repository is ambiguous", err.Error())
 			return
