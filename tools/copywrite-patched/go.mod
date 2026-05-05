@@ -7,6 +7,7 @@ toolchain go1.26.2
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/bradleyfalzon/ghinstallation/v2 v2.18.0
+	github.com/google/go-github/v45 v45.2.0
 	github.com/knadh/koanf/parsers/dotenv v1.1.1
 	github.com/knadh/koanf/parsers/hcl v1.0.0
 	github.com/knadh/koanf/parsers/yaml v1.1.0
@@ -53,7 +54,7 @@ require (
 require (
 	github.com/cli/go-gh/v2 v2.13.0
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/google/go-github/v45 v45.2.0
+	github.com/google/go-github/v85 v85.0.0
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/samber/lo v1.53.0
 	gopkg.in/yaml.v3 v3.0.1 // indirect
