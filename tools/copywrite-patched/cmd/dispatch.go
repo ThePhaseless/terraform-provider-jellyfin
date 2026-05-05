@@ -43,7 +43,8 @@ var dispatchCmd = &cobra.Command{
 
 		// Dynamically generate a batchID if none is supplied
 		if conf.Dispatch.BatchID == "" {
-			conf.Dispatch.BatchID = randomHex(8)
+			conf.Dispatch.BatchID, err = randomHex(8)
+			cobra.CheckErr(err)
 			cliLogger.Debug(fmt.Sprintf("Using auto-generated batchID: %s", conf.Dispatch.BatchID))
 		}
 	},
@@ -151,10 +152,10 @@ func init() {
 	dispatchCmd.Flags().String("github-org", "hashicorp", "Sets the target GitHub org who's repos you wish to audit")
 }
 
-func randomHex(length int) string {
+func randomHex(length int) (string, error) {
 	buf := make([]byte, (length+1)/2)
 	if _, err := rand.Read(buf); err != nil {
-		panic(err)
+		return "", fmt.Errorf("generate random hex string: %w", err)
 	}
-	return hex.EncodeToString(buf)[:length]
+	return hex.EncodeToString(buf)[:length], nil
 }
