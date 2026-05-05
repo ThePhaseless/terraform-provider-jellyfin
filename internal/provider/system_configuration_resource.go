@@ -228,14 +228,20 @@ func mergeJSON(base, override string) (string, error) {
 
 // normalizeJSON re-encodes JSON to remove insignificant formatting and sort object keys.
 func normalizeJSON(raw string) (string, error) {
-	normalized, err := normalizeJSONRaw(json.RawMessage(raw))
+	normalized, err := normalizeJSONRaw(json.RawMessage(raw), 0)
 	if err != nil {
 		return "", fmt.Errorf("parsing JSON for normalization: %w", err)
 	}
 	return string(normalized), nil
 }
 
-func normalizeJSONRaw(raw json.RawMessage) (json.RawMessage, error) {
+const maxJSONNormalizeDepth = 100
+
+func normalizeJSONRaw(raw json.RawMessage, depth int) (json.RawMessage, error) {
+	if depth > maxJSONNormalizeDepth {
+		return nil, fmt.Errorf("JSON nesting exceeds maximum depth of %d", maxJSONNormalizeDepth)
+	}
+
 	var compact bytes.Buffer
 	if err := json.Compact(&compact, raw); err != nil {
 		return nil, err
@@ -253,7 +259,7 @@ func normalizeJSONRaw(raw json.RawMessage) (json.RawMessage, error) {
 			return nil, err
 		}
 		for key, value := range object {
-			normalized, err := normalizeJSONRaw(value)
+			normalized, err := normalizeJSONRaw(value, depth+1)
 			if err != nil {
 				return nil, err
 			}
@@ -266,7 +272,7 @@ func normalizeJSONRaw(raw json.RawMessage) (json.RawMessage, error) {
 			return nil, err
 		}
 		for i, value := range list {
-			normalized, err := normalizeJSONRaw(value)
+			normalized, err := normalizeJSONRaw(value, depth+1)
 			if err != nil {
 				return nil, err
 			}
