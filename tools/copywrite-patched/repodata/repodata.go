@@ -72,7 +72,7 @@ func Transform(repos []*github.Repository) ([]map[string]interface{}, error) {
 
 			//pointer will never be nil, but the underlying value may be
 			rv := reflect.ValueOf(pointer)
-			if isNilable(rv.Kind()) && !rv.IsNil() {
+			if !isNilable(rv.Kind()) || !rv.IsNil() {
 				switch pointer := pointer.(type) {
 				case *string:
 					data = *pointer
