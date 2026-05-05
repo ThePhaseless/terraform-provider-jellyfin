@@ -36,3 +36,13 @@ resource "jellyfin_library" "movies" {
 ### Read-Only
 
 - `item_id` (String) The internal item ID assigned by Jellyfin.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import jellyfin_library.example <library-name>
+```

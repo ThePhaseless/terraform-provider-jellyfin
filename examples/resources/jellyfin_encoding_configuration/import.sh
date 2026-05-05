@@ -1,0 +1,1 @@
+terraform import jellyfin_encoding_configuration.example singleton

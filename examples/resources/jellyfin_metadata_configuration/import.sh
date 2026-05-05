@@ -1,0 +1,1 @@
+terraform import jellyfin_metadata_configuration.example singleton

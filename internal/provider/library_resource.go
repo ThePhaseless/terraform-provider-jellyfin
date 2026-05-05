@@ -9,6 +9,7 @@ import (
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
@@ -17,7 +18,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-var _ resource.Resource = &LibraryResource{}
+var (
+	_ resource.Resource                = &LibraryResource{}
+	_ resource.ResourceWithImportState = &LibraryResource{}
+)
 
 // NewLibraryResource creates a new library resource.
 func NewLibraryResource() resource.Resource {
@@ -233,4 +237,8 @@ func (r *LibraryResource) findFolder(name string) (*client.VirtualFolder, error)
 		}
 	}
 	return nil, fmt.Errorf("library %q not found", name)
+}
+
+func (r *LibraryResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
 }

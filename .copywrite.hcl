@@ -20,5 +20,8 @@ project {
 
     # GoReleaser tooling configuration
     ".goreleaser.yml",
+
+    # Local patched copywrite tool source
+    "tools/copywrite-patched/**",
   ]
 }

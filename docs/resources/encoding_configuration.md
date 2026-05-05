@@ -60,3 +60,17 @@ resource "jellyfin_encoding_configuration" "example" {
 ### Required
 
 - `configuration_json` (String) The encoding configuration as a JSON string.
+
+### Read-Only
+
+- `id` (String) Resource identifier. Always set to `encoding` for this singleton resource.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import jellyfin_encoding_configuration.example singleton
+```

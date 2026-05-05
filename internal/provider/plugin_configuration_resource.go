@@ -9,12 +9,16 @@ import (
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-var _ resource.Resource = &PluginConfigurationResource{}
+var (
+	_ resource.Resource                = &PluginConfigurationResource{}
+	_ resource.ResourceWithImportState = &PluginConfigurationResource{}
+)
 
 // NewPluginConfigurationResource creates a new plugin configuration resource.
 func NewPluginConfigurationResource() resource.Resource {
@@ -130,4 +134,8 @@ func (r *PluginConfigurationResource) Update(ctx context.Context, req resource.U
 func (r *PluginConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, resp *resource.DeleteResponse) {
 	// Plugin configuration cannot truly be deleted — it resets when the plugin is uninstalled.
 	// We simply remove it from state.
+}
+
+func (r *PluginConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("plugin_id"), req, resp)
 }

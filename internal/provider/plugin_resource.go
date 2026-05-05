@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -17,7 +18,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-var _ resource.Resource = &PluginResource{}
+var (
+	_ resource.Resource                = &PluginResource{}
+	_ resource.ResourceWithImportState = &PluginResource{}
+)
 
 // NewPluginResource creates a new plugin resource.
 func NewPluginResource() resource.Resource {
@@ -67,10 +71,12 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"repository_url": schema.StringAttribute{
-				MarkdownDescription: "The repository URL from which to install the plugin.",
-				Required:            true,
+				MarkdownDescription: "The repository URL from which to install the plugin. Required when creating the resource and resolved automatically on import when the exact package version is still available.",
+				Optional:            true,
+				Computed:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 		},
@@ -98,6 +104,14 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 	var data PluginResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if data.RepositoryURL.IsUnknown() || data.RepositoryURL.IsNull() || data.RepositoryURL.ValueString() == "" {
+		resp.Diagnostics.AddError(
+			"Missing plugin repository URL",
+			"The repository_url attribute must be set when installing a plugin so the provider can reproduce the install source.",
+		)
 		return
 	}
 
@@ -147,6 +161,14 @@ func (r *PluginResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
+	// Populate repository_url from available packages if not already set.
+	if data.RepositoryURL.IsNull() || data.RepositoryURL.ValueString() == "" {
+		repoURL := r.resolveRepositoryURL(ctx, data.Name.ValueString(), data.Version.ValueString())
+		if repoURL != "" {
+			data.RepositoryURL = types.StringValue(repoURL)
+		}
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -183,4 +205,39 @@ func (r *PluginResource) waitForPlugin(ctx context.Context, name string, timeout
 		time.Sleep(2 * time.Second)
 	}
 	return "", fmt.Errorf("plugin %q did not appear within %s", name, timeout)
+}
+
+func (r *PluginResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+// resolveRepositoryURL attempts to find the repository URL for a plugin by
+// querying the /Packages endpoint and matching on name and version.
+func (r *PluginResource) resolveRepositoryURL(ctx context.Context, name, version string) string {
+	pkgs, err := r.client.GetAvailablePackages()
+	if err != nil {
+		tflog.Debug(ctx, "Could not resolve repository URL for plugin (packages unavailable)", map[string]interface{}{
+			"plugin": name,
+			"error":  err.Error(),
+		})
+		return ""
+	}
+
+	for _, pkg := range pkgs {
+		if pkg.Name == name {
+			for _, v := range pkg.Versions {
+				if v.Version == version && v.RepositoryUrl != "" {
+					return v.RepositoryUrl
+				}
+			}
+
+			tflog.Debug(ctx, "Could not resolve repository URL for plugin (exact version unavailable)", map[string]interface{}{
+				"plugin":  name,
+				"version": version,
+			})
+			return ""
+		}
+	}
+
+	return ""
 }

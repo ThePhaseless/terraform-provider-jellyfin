@@ -19,7 +19,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-var _ resource.Resource = &SystemConfigurationResource{}
+var (
+	_ resource.Resource                = &SystemConfigurationResource{}
+	_ resource.ResourceWithImportState = &SystemConfigurationResource{}
+)
 
 // NewSystemConfigurationResource creates a new system configuration resource.
 func NewSystemConfigurationResource() resource.Resource {
@@ -33,6 +36,7 @@ type SystemConfigurationResource struct {
 
 // SystemConfigurationResourceModel describes the resource data model.
 type SystemConfigurationResourceModel struct {
+	ID                types.String         `tfsdk:"id"`
 	ServerName        types.String         `tfsdk:"server_name"`
 	ConfigurationJSON jsontypes.Normalized `tfsdk:"configuration_json"`
 }
@@ -47,6 +51,10 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			"The `configuration_json` attribute accepts the full system configuration as JSON, allowing " +
 			"complete control over all settings.",
 		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				MarkdownDescription: "Resource identifier. Always set to `system` for this singleton resource.",
+				Computed:            true,
+			},
 			"server_name": schema.StringAttribute{
 				MarkdownDescription: "The server display name.",
 				Optional:            true,
@@ -107,6 +115,7 @@ func (r *SystemConfigurationResource) Read(ctx context.Context, req resource.Rea
 	}
 
 	data.ServerName = types.StringValue(config.ServerName)
+	data.ID = types.StringValue("system")
 	normalized, err := normalizeJSON(config.RawJSON)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to normalize system configuration", err.Error())
@@ -178,6 +187,7 @@ func (r *SystemConfigurationResource) applyConfiguration(ctx context.Context, da
 	}
 
 	data.ServerName = types.StringValue(updated.ServerName)
+	data.ID = types.StringValue("system")
 	normalizedUpdated, normErr := normalizeJSON(updated.RawJSON)
 	if normErr != nil {
 		diagnostics.AddError("Failed to normalize system configuration", normErr.Error())
@@ -223,4 +233,14 @@ func normalizeJSON(raw string) (string, error) {
 		return "", fmt.Errorf("serializing normalized JSON: %w", err)
 	}
 	return string(result), nil
+}
+
+func (r *SystemConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	// Singleton resource — the import ID is not used. Read will populate all fields.
+	data := SystemConfigurationResourceModel{
+		ID:                types.StringValue("system"),
+		ServerName:        types.StringNull(),
+		ConfigurationJSON: jsontypes.NewNormalizedNull(),
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

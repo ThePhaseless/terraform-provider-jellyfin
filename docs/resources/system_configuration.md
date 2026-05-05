@@ -25,3 +25,17 @@ resource "jellyfin_system_configuration" "example" {
 
 - `configuration_json` (String) The full system configuration as a JSON string. When provided, it will be merged with the existing configuration.
 - `server_name` (String) The server display name.
+
+### Read-Only
+
+- `id` (String) Resource identifier. Always set to `system` for this singleton resource.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import jellyfin_system_configuration.example singleton
+```

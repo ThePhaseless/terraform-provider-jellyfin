@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -15,7 +16,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-var _ resource.Resource = &APIKeyResource{}
+var (
+	_ resource.Resource                = &APIKeyResource{}
+	_ resource.ResourceWithImportState = &APIKeyResource{}
+)
 
 // NewAPIKeyResource creates a new API key resource.
 func NewAPIKeyResource() resource.Resource {
@@ -173,4 +177,8 @@ func (r *APIKeyResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	if err := r.client.DeleteAPIKey(data.AccessToken.ValueString()); err != nil {
 		resp.Diagnostics.AddError("Failed to delete API key", err.Error())
 	}
+}
+
+func (r *APIKeyResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("access_token"), req, resp)
 }
