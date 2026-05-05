@@ -10,10 +10,8 @@ import (
 
 	"github.com/google/go-github/v45/github"
 	gh "github.com/hashicorp/copywrite/github"
+	"github.com/hashicorp/copywrite/internal/pretty"
 	"github.com/mergestat/timediff"
-
-	"github.com/jedib0t/go-pretty/v6/table"
-	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/spf13/cobra"
 )
 
@@ -32,7 +30,7 @@ copyright notice automation tooling will be authored by "hashicorp-copywrite"`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// Disable color pretty-print if not intended for human eyes
 		if csv {
-			text.DisableColors()
+			pretty.DisableColors()
 		}
 
 		client := gh.NewGHClient().Raw()
@@ -80,7 +78,7 @@ copyright notice automation tooling will be authored by "hashicorp-copywrite"`,
 		// Let's turn this into some tabular data and render it out
 
 		t := newTableWriter(cmd.OutOrStdout())
-		t.AppendHeader(table.Row{"Pull Request", "Name", "Age", "Link"})
+		t.AppendHeader(tableRow{"Pull Request", "Name", "Age", "Link"})
 
 		for _, i := range prs {
 			// The repo name is not a field on Issues, so we have to infer by
@@ -89,12 +87,12 @@ copyright notice automation tooling will be authored by "hashicorp-copywrite"`,
 			repoName := s[len(s)-1]
 
 			// let's format the pull request reference as "org/repo#number"
-			prRef := text.FgCyan.Sprint(repoName + "#" + fmt.Sprint(*i.Number))
+			prRef := pretty.FgCyan.Sprint(repoName + "#" + fmt.Sprint(*i.Number))
 
 			// get a human-friendly age string (e.g., "1 month ago")
 			age := timediff.TimeDiff(*i.CreatedAt)
 
-			t.AppendRow(table.Row{prRef, *i.Title, age, *i.HTMLURL})
+			t.AppendRow(tableRow{prRef, *i.Title, age, *i.HTMLURL})
 		}
 
 		if csv {

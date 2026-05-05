@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jedib0t/go-pretty/text"
+	"github.com/hashicorp/copywrite/internal/pretty"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -74,7 +74,7 @@ func Test_New(t *testing.T) {
 
 func Test_StartGroup(t *testing.T) {
 	// Let's take colorized output out of the picture
-	text.DisableColors()
+	pretty.DisableColors()
 
 	tests := []struct {
 		name           string
@@ -170,7 +170,7 @@ func Test_DisableGHAOutput(t *testing.T) {
 
 func Test_appendToFile(t *testing.T) {
 	// Let's take colorized output out of the picture
-	text.DisableColors()
+	pretty.DisableColors()
 
 	tests := []struct {
 		name           string
@@ -245,7 +245,7 @@ func Test_appendToFile(t *testing.T) {
 
 func Test_SetOutput(t *testing.T) {
 	// Let's take colorized output out of the picture
-	text.DisableColors()
+	pretty.DisableColors()
 
 	tests := []struct {
 		name           string
@@ -298,7 +298,7 @@ func Test_SetOutput(t *testing.T) {
 
 func Test_ExportVariable(t *testing.T) {
 	// Let's take colorized output out of the picture
-	text.DisableColors()
+	pretty.DisableColors()
 
 	tests := []struct {
 		name           string
@@ -351,7 +351,7 @@ func Test_ExportVariable(t *testing.T) {
 
 func Test_SetJobSummary(t *testing.T) {
 	// Let's take colorized output out of the picture
-	text.DisableColors()
+	pretty.DisableColors()
 
 	tests := []struct {
 		name           string
@@ -402,7 +402,7 @@ func Test_SetJobSummary(t *testing.T) {
 
 func Test_newAnnotation(t *testing.T) {
 	// Let's take colorized output out of the picture
-	text.DisableColors()
+	pretty.DisableColors()
 
 	tests := []struct {
 		name           string
@@ -513,7 +513,7 @@ func Test_newAnnotation(t *testing.T) {
 // ensure that the annotation type is passed properly to newAnnotation()
 func Test_Notice(t *testing.T) {
 	// Let's take colorized output out of the picture
-	text.DisableColors()
+	pretty.DisableColors()
 
 	tests := []struct {
 		name           string
@@ -554,7 +554,7 @@ func Test_Notice(t *testing.T) {
 // ensure that the annotation type is passed properly to newAnnotation()
 func Test_Warning(t *testing.T) {
 	// Let's take colorized output out of the picture
-	text.DisableColors()
+	pretty.DisableColors()
 
 	tests := []struct {
 		name           string
@@ -595,7 +595,7 @@ func Test_Warning(t *testing.T) {
 // ensure that the annotation type is passed properly to newAnnotation()
 func Test_Error(t *testing.T) {
 	// Let's take colorized output out of the picture
-	text.DisableColors()
+	pretty.DisableColors()
 
 	tests := []struct {
 		name           string

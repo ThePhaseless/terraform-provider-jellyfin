@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jedib0t/go-pretty/text"
+	"github.com/hashicorp/copywrite/internal/pretty"
 )
 
 ///////////////////////////////////
@@ -78,7 +78,7 @@ func (gha *GHA) EnableGHAOutput() {
 // https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#grouping-log-lines
 func (gha *GHA) StartGroup(name string) {
 	if !gha.IsGHA() {
-		gha.println(text.Bold.Sprint(name))
+		gha.println(pretty.Bold.Sprint(name))
 		return
 	}
 

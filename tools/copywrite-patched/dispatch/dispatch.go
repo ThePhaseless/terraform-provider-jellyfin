@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/google/go-github/v45/github"
-	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/copywrite/internal/logging"
 )
 
 // Result reports on the outcome of a given job, including if it was successful
@@ -25,7 +25,7 @@ type Result struct {
 type Options struct {
 	SecondsBetweenPolls int
 	MaxAttempts         int
-	Logger              hclog.Logger
+	Logger              logging.Logger
 	BranchRef           string
 	BatchID             string
 	WorkflowFileName    string

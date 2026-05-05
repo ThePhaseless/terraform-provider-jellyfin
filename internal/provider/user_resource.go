@@ -9,7 +9,7 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
-	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"

@@ -8,21 +8,21 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/google/go-github/v45/github"
-	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/copywrite/internal/logging"
 	"github.com/knadh/koanf/parsers/dotenv"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
-	"github.com/mitchellh/go-homedir"
 	"golang.org/x/oauth2"
 )
 
-var logger = hclog.L()
+var logger = logging.L()
 
 // GHClient is a wrapper to access Github Client's API endpoints easily
 type GHClient struct {
@@ -83,10 +83,11 @@ func getGitHubCLIConfig() (token string, exists bool) {
 
 	errorString := "Unable to retrieve GitHub authentication via gh CLI config"
 
-	configPath, err := homedir.Expand("~/.config/gh/hosts.yml")
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", false
 	}
+	configPath := filepath.Join(homeDir, ".config", "gh", "hosts.yml")
 
 	// Config file is in the following format:
 	// ───────┬───────────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ import (
 
 	"github.com/hashicorp/copywrite/config"
 	"github.com/hashicorp/copywrite/github/actions"
-	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/copywrite/internal/logging"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +25,7 @@ var (
 	gha = actions.New(rootCmd.OutOrStdout())
 
 	// Named subsystem logger for copywrite-cli commands
-	cliLogger hclog.Logger
+	cliLogger logging.Logger
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -78,27 +78,27 @@ func initConfig() {
 
 func initLogger() {
 	// Valid levels list: https://pkg.go.dev/github.com/hashicorp/go-hclog#Level
-	logLevel := hclog.DefaultLevel
+	logLevel := logging.DefaultLevel
 
 	// If we're running in GitHub Actions and runner debugging is enabled, let's
 	// default to debug logging just to be extra friendly
 	if os.Getenv("RUNNER_DEBUG") == "1" {
-		logLevel = hclog.Debug
+		logLevel = logging.Debug
 	}
 
 	// If the `COPYWRITE_LOG_LEVEL` environment variable is explicitly set, let's
 	// attempt to coerce the result into a proper level. If no matching level can
-	// be found, hclog.LevelFromString() defaults to the "NoLevel" (a good thing)
+	// be found, logging.LevelFromString() defaults to the "NoLevel" (a good thing)
 	levelEnv, levelSet := os.LookupEnv("COPYWRITE_LOG_LEVEL")
 	if levelSet {
-		logLevel = hclog.LevelFromString(levelEnv)
+		logLevel = logging.LevelFromString(levelEnv)
 	}
 
-	hclog.Default().Named("cli")
-	cliLogger = hclog.New(&hclog.LoggerOptions{
+	logging.Default().Named("cli")
+	cliLogger = logging.New(&logging.LoggerOptions{
 		Name:   "cli",
 		Level:  logLevel,
-		Color:  hclog.AutoColor,
+		Color:  logging.AutoColor,
 		Output: os.Stdout,
 	})
 }

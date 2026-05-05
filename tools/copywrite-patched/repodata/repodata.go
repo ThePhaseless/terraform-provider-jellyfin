@@ -11,8 +11,7 @@ import (
 
 	"github.com/google/go-github/v45/github"
 	gh "github.com/hashicorp/copywrite/github"
-	"github.com/hashicorp/go-hclog"
-	"github.com/mitchellh/mapstructure"
+	"github.com/hashicorp/copywrite/internal/logging"
 	"github.com/samber/lo"
 )
 
@@ -31,7 +30,7 @@ func GetRepos(githubOrganization string) ([]*github.Repository, error) {
 	for {
 		repos, current, err := client.Repositories.ListByOrg(context.Background(), githubOrganization, opt)
 		if err != nil {
-			hclog.L().Error(err.Error())
+			logging.L().Error(err.Error())
 
 			return []*github.Repository{}, err
 		}
@@ -63,12 +62,7 @@ func Transform(repos []*github.Repository) ([]map[string]interface{}, error) {
 	// place all the metaData types into the csvData array
 	var structRepos []map[string]interface{}
 	for _, repo := range repos {
-		//turn the repo struct into a map and append
-		repomap := map[string]interface{}{}
-		err := mapstructure.Decode(repo, &repomap)
-		if err != nil {
-			return []map[string]interface{}{}, err
-		}
+		repomap := repositoryFieldPointers(repo)
 
 		// Transform values into strings for easier parsing
 		for _, value := range lo.Keys(repomap) {
@@ -77,7 +71,8 @@ func Transform(repos []*github.Repository) ([]map[string]interface{}, error) {
 			data := ""
 
 			//pointer will never be nil, but the underlying value may be
-			if !reflect.ValueOf(pointer).IsNil() {
+			rv := reflect.ValueOf(pointer)
+			if isNilable(rv.Kind()) && !rv.IsNil() {
 				switch pointer := pointer.(type) {
 				case *string:
 					data = *pointer
@@ -105,18 +100,13 @@ func ValidateInputFields(fields string) ([]string, error) {
 	}
 
 	// convert to map
-	base := new(github.Repository)
-	repomap := map[string]interface{}{}
-	err := mapstructure.Decode(base, &repomap)
-	if err != nil {
-		return []string{}, err
-	}
+	repomap := repositoryFieldPointers(new(github.Repository))
 
 	for _, value := range values {
 		//make sure the data type exists in the struct
 		_, exist := repomap[value]
 		if !exist {
-			hclog.L().Error("Data type does not exist in repository struct", "type", value)
+			logging.L().Error("Data type does not exist in repository struct", "type", value)
 			return []string{}, errors.New("Data type " + value + " does not exist in repository struct")
 		}
 
@@ -131,4 +121,26 @@ func ValidateInputFields(fields string) ([]string, error) {
 	}
 
 	return values, nil
+}
+
+func repositoryFieldPointers(repo *github.Repository) map[string]interface{} {
+	value := reflect.ValueOf(repo).Elem()
+	typ := value.Type()
+	fields := make(map[string]interface{}, typ.NumField())
+
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		fields[field.Name] = value.Field(i).Interface()
+	}
+
+	return fields
+}
+
+func isNilable(kind reflect.Kind) bool {
+	switch kind {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return true
+	default:
+		return false
+	}
 }

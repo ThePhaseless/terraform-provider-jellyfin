@@ -6,42 +6,41 @@ package cmd
 import (
 	"testing"
 
-	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/hashicorp/copywrite/internal/pretty"
 	"github.com/stretchr/testify/assert"
 )
 
 func Test_colorize(t *testing.T) {
-	// Let's take console abilities out of the picture
-	text.EnableColors()
+	pretty.EnableColors()
 
 	tests := []struct {
 		name           string
 		inputString    string
-		inputCodes     []text.Color
+		inputCodes     []pretty.Code
 		expectedOutput string
 	}{
 		{
 			name:           "Output left alone when no codes are specified",
 			inputString:    "Hello, world!",
-			inputCodes:     []text.Color{},
+			inputCodes:     []pretty.Code{},
 			expectedOutput: "Hello, world!",
 		},
 		{
 			name:           "Output wrapped with stylistic escape sequence (bold)",
 			inputString:    "Hello, world!",
-			inputCodes:     []text.Color{text.Bold},
+			inputCodes:     []pretty.Code{pretty.Bold},
 			expectedOutput: "\x1b[1mHello, world!\x1b[0m",
 		},
 		{
 			name:           "Output wrapped with colored escape sequence (FgCyan)",
 			inputString:    "Hello, world!",
-			inputCodes:     []text.Color{text.FgCyan},
+			inputCodes:     []pretty.Code{pretty.FgCyan},
 			expectedOutput: "\x1b[36mHello, world!\x1b[0m",
 		},
 		{
 			name:           "Output properly wrapped with multiple escape sequences",
 			inputString:    "Hello, world!",
-			inputCodes:     []text.Color{text.Bold, text.FgCyan, text.BgBlack},
+			inputCodes:     []pretty.Code{pretty.Bold, pretty.FgCyan, pretty.BgBlack},
 			expectedOutput: "\x1b[1;36;40mHello, world!\x1b[0m",
 		},
 	}

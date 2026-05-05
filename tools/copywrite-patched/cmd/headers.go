@@ -8,8 +8,8 @@ import (
 	"os"
 
 	"github.com/hashicorp/copywrite/addlicense"
-	"github.com/hashicorp/go-hclog"
-	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/hashicorp/copywrite/internal/logging"
+	"github.com/hashicorp/copywrite/internal/pretty"
 	"github.com/samber/lo"
 	"github.com/spf13/cobra"
 )
@@ -61,7 +61,7 @@ config, see the "copywrite init" command.`,
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		if plan {
-			cmd.Print(text.FgYellow.Sprint("Executing in dry-run mode. Rerun without the `--plan` flag to apply changes.\n\n"))
+			cmd.Print(pretty.FgYellow.Sprint("Executing in dry-run mode. Rerun without the `--plan` flag to apply changes.\n\n"))
 		}
 
 		if conf.Project.License == "" {
@@ -76,7 +76,7 @@ config, see the "copywrite init" command.`,
 		} else {
 			gha.StartGroup("Exempting the following search patterns:")
 			for _, v := range conf.Project.HeaderIgnore {
-				cmd.Println(text.FgCyan.Sprint(v))
+				cmd.Println(pretty.FgCyan.Sprint(v))
 			}
 			gha.EndGroup()
 		}
@@ -100,7 +100,7 @@ config, see the "copywrite init" command.`,
 		verbose := true
 
 		// Wrap hclogger to use standard lib's log.Logger
-		stdcliLogger := cliLogger.StandardLogger(&hclog.StandardLoggerOptions{
+		stdcliLogger := cliLogger.StandardLogger(&logging.StandardLoggerOptions{
 			// InferLevels must be true so that addLicense can set the log level via
 			// log prefix, e.g. logger.Println("[DEBUG] this is inferred as a debug log")
 			InferLevels: true,
