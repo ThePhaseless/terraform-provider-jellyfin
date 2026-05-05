@@ -2,7 +2,7 @@ module github.com/hashicorp/copywrite
 
 go 1.23.0
 
-toolchain go1.24.13
+toolchain go1.26.2
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.6.0
