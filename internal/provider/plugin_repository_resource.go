@@ -8,10 +8,14 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -32,6 +36,7 @@ type PluginRepositoryResource struct {
 
 // PluginRepositoryResourceModel describes the resource data model.
 type PluginRepositoryResourceModel struct {
+	ID      types.String `tfsdk:"id"`
 	Name    types.String `tfsdk:"name"`
 	URL     types.String `tfsdk:"url"`
 	Enabled types.Bool   `tfsdk:"enabled"`
@@ -50,10 +55,26 @@ func (r *PluginRepositoryResource) Schema(_ context.Context, _ resource.SchemaRe
 			"name": schema.StringAttribute{
 				MarkdownDescription: "The repository name.",
 				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
 			},
 			"url": schema.StringAttribute{
 				MarkdownDescription: "The repository URL.",
 				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
+			},
+			"id": schema.StringAttribute{
+				MarkdownDescription: "The plugin repository resource identifier.",
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"enabled": schema.BoolAttribute{
 				MarkdownDescription: "Whether the repository is enabled.",
@@ -116,6 +137,7 @@ func (r *PluginRepositoryResource) Create(ctx context.Context, req resource.Crea
 		return
 	}
 
+	data.ID = types.StringValue(data.Name.ValueString())
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -140,6 +162,8 @@ func (r *PluginRepositoryResource) Read(ctx context.Context, req resource.ReadRe
 	}
 	if index >= 0 {
 		repo := repos[index]
+		data.ID = types.StringValue(repo.Name)
+		data.Name = types.StringValue(repo.Name)
 		data.URL = types.StringValue(repo.Url)
 		data.Enabled = types.BoolValue(repo.Enabled)
 		found = true
@@ -186,17 +210,8 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 		return
 	}
 
-	if state.Name.ValueString() != data.Name.ValueString() && repositoryNameExists(repos, data.Name.ValueString()) {
-		resp.Diagnostics.AddError(
-			"Plugin repository already exists",
-			fmt.Sprintf("A plugin repository named %q already exists. Repository names must be unique for this resource to manage them safely.", data.Name.ValueString()),
-		)
-		return
-	}
-
 	for i, repo := range repos {
 		if i == index {
-			repo.Name = data.Name.ValueString()
 			repo.Url = data.URL.ValueString()
 			repo.Enabled = data.Enabled.ValueBool()
 		}
@@ -207,6 +222,26 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 		resp.Diagnostics.AddError("Failed to set plugin repositories", err.Error())
 		return
 	}
+
+	repos, err = r.client.GetPluginRepositories()
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read plugin repositories after update", err.Error())
+		return
+	}
+	index, err = findPluginRepositoryIndex(repos, state.Name.ValueString(), data.URL.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Plugin repository is ambiguous", err.Error())
+		return
+	}
+	if index < 0 {
+		resp.Diagnostics.AddError("Plugin repository not found", fmt.Sprintf("Plugin repository %q was not found after update.", state.Name.ValueString()))
+		return
+	}
+	repo := repos[index]
+	data.ID = types.StringValue(repo.Name)
+	data.Name = types.StringValue(repo.Name)
+	data.URL = types.StringValue(repo.Url)
+	data.Enabled = types.BoolValue(repo.Enabled)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

@@ -6,6 +6,7 @@ package client
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,24 @@ type Client struct {
 	BaseURL    string
 	APIKey     string
 	HTTPClient *http.Client
+}
+
+// HTTPError represents a non-success Jellyfin API response.
+type HTTPError struct {
+	Method     string
+	Path       string
+	StatusCode int
+	Body       string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("%s %s returned status %d: %s", e.Method, e.Path, e.StatusCode, e.Body)
+}
+
+// IsNotFound reports whether err wraps a Jellyfin API 404 response.
+func IsNotFound(err error) bool {
+	var httpErr *HTTPError
+	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound
 }
 
 // NewClient creates a new Jellyfin API client.
@@ -63,7 +82,7 @@ func (c *Client) get(path string, target interface{}) error {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("GET %s returned status %d: %s", path, resp.StatusCode, string(bodyBytes))
+		return &HTTPError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: string(bodyBytes)}
 	}
 
 	decoder := json.NewDecoder(resp.Body)
@@ -84,7 +103,7 @@ func (c *Client) getRaw(path string) (string, error) {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("GET %s returned status %d: %s", path, resp.StatusCode, string(bodyBytes))
+		return "", &HTTPError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: string(bodyBytes)}
 	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
@@ -114,7 +133,7 @@ func (c *Client) post(path string, body interface{}) error {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("POST %s returned status %d: %s", path, resp.StatusCode, string(bodyBytes))
+		return &HTTPError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: string(bodyBytes)}
 	}
 
 	return nil
@@ -130,7 +149,7 @@ func (c *Client) postRaw(path string, rawJSON string) error {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("POST %s returned status %d: %s", path, resp.StatusCode, string(bodyBytes))
+		return &HTTPError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: string(bodyBytes)}
 	}
 
 	return nil
@@ -155,7 +174,7 @@ func (c *Client) postAndDecode(path string, body interface{}, target interface{}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("POST %s returned status %d: %s", path, resp.StatusCode, string(bodyBytes))
+		return &HTTPError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: string(bodyBytes)}
 	}
 
 	decoder := json.NewDecoder(resp.Body)
@@ -176,7 +195,7 @@ func (c *Client) delete(path string) error {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("DELETE %s returned status %d: %s", path, resp.StatusCode, string(bodyBytes))
+		return &HTTPError{Method: http.MethodDelete, Path: path, StatusCode: resp.StatusCode, Body: string(bodyBytes)}
 	}
 
 	return nil

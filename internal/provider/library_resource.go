@@ -5,16 +5,19 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -35,6 +38,7 @@ type LibraryResource struct {
 
 // LibraryResourceModel describes the resource data model.
 type LibraryResourceModel struct {
+	ID             types.String         `tfsdk:"id"`
 	Name           types.String         `tfsdk:"name"`
 	CollectionType types.String         `tfsdk:"collection_type"`
 	Paths          types.List           `tfsdk:"paths"`
@@ -53,6 +57,9 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			"name": schema.StringAttribute{
 				MarkdownDescription: "The library name.",
 				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -60,6 +67,9 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			"collection_type": schema.StringAttribute{
 				MarkdownDescription: "The collection type (e.g., `movies`, `tvshows`, `music`, `books`, `homevideos`, `boxsets`, `mixed`).",
 				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.OneOf("movies", "tvshows", "music", "books", "homevideos", "boxsets", "mixed"),
+				},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -80,6 +90,13 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			},
 			"item_id": schema.StringAttribute{
 				MarkdownDescription: "The internal item ID assigned by Jellyfin.",
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"id": schema.StringAttribute{
+				MarkdownDescription: "The library resource identifier.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -137,6 +154,7 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	data.ItemID = types.StringValue(folder.ItemId)
+	data.ID = types.StringValue(folder.Name)
 
 	opts := folder.GetLibraryOptions()
 	if opts.RawJSON != "" && opts.RawJSON != "{}" {
@@ -157,12 +175,17 @@ func (r *LibraryResource) Read(ctx context.Context, req resource.ReadRequest, re
 
 	folder, err := r.findFolder(data.Name.ValueString())
 	if err != nil {
-		resp.State.RemoveResource(ctx)
+		if errors.Is(err, errLibraryNotFound) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
+		resp.Diagnostics.AddError("Failed to read library", err.Error())
 		return
 	}
 
 	data.CollectionType = types.StringValue(folder.CollectionType)
 	data.ItemID = types.StringValue(folder.ItemId)
+	data.ID = types.StringValue(folder.Name)
 
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, folder.Locations)
 	resp.Diagnostics.Append(diags...)
@@ -203,6 +226,7 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 	}
 
 	data.ItemID = types.StringValue(folder.ItemId)
+	data.ID = types.StringValue(folder.Name)
 
 	opts := folder.GetLibraryOptions()
 	if opts.RawJSON != "" && opts.RawJSON != "{}" {
@@ -222,9 +246,14 @@ func (r *LibraryResource) Delete(ctx context.Context, req resource.DeleteRequest
 	}
 
 	if err := r.client.RemoveVirtualFolder(data.Name.ValueString()); err != nil {
+		if client.IsNotFound(err) {
+			return
+		}
 		resp.Diagnostics.AddError("Failed to delete library", err.Error())
 	}
 }
+
+var errLibraryNotFound = errors.New("library not found")
 
 func (r *LibraryResource) findFolder(name string) (*client.VirtualFolder, error) {
 	folders, err := r.client.GetVirtualFolders()
@@ -236,7 +265,7 @@ func (r *LibraryResource) findFolder(name string) (*client.VirtualFolder, error)
 			return &folders[i], nil
 		}
 	}
-	return nil, fmt.Errorf("library %q not found", name)
+	return nil, fmt.Errorf("%w: %q", errLibraryNotFound, name)
 }
 
 func (r *LibraryResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {

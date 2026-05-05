@@ -18,7 +18,7 @@ func TestAccScheduledTaskResource(t *testing.T) {
 			{
 				Config: `
 resource "jellyfin_scheduled_task" "test" {
-  id = "7738148ffcd07979c7ceb148e06b3aed"
+  task_id = "7738148ffcd07979c7ceb148e06b3aed"
 
   triggers_json = jsonencode([
     {
@@ -43,7 +43,7 @@ resource "jellyfin_scheduled_task" "test" {
 			{
 				Config: `
 resource "jellyfin_scheduled_task" "test" {
-  id = "7738148ffcd07979c7ceb148e06b3aed"
+  task_id = "7738148ffcd07979c7ceb148e06b3aed"
 
   triggers_json = jsonencode([
     {

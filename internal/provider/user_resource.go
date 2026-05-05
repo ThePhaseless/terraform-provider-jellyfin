@@ -9,13 +9,15 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -63,6 +65,9 @@ func (r *UserResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 			"name": schema.StringAttribute{
 				MarkdownDescription: "The username.",
 				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 			},
 			"password": schema.StringAttribute{
 				MarkdownDescription: "The user password.",
@@ -174,6 +179,10 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 
 	user, err := r.client.GetUserByID(data.ID.ValueString())
 	if err != nil {
+		if client.IsNotFound(err) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Failed to read user", err.Error())
 		return
 	}
@@ -256,6 +265,28 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	}
 
 	data.ID = state.ID
+	updatedUser, err := r.client.GetUserByID(state.ID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read user after update", err.Error())
+		return
+	}
+	data.Name = types.StringValue(updatedUser.Name)
+	data.IsAdministrator = types.BoolValue(updatedUser.Policy.IsAdministrator)
+	data.IsDisabled = types.BoolValue(updatedUser.Policy.IsDisabled)
+	data.EnableAllFolders = types.BoolValue(updatedUser.Policy.EnableAllFolders)
+	if !data.PolicyJSON.IsNull() {
+		policyBytes, err := json.Marshal(updatedUser.Policy)
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to serialize user policy", err.Error())
+			return
+		}
+		normalizedPolicy, err := normalizeJSON(string(policyBytes))
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to normalize user policy", err.Error())
+			return
+		}
+		data.PolicyJSON = jsontypes.NewNormalizedValue(normalizedPolicy)
+	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -268,6 +299,9 @@ func (r *UserResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 	}
 
 	if err := r.client.DeleteUser(data.ID.ValueString()); err != nil {
+		if client.IsNotFound(err) {
+			return
+		}
 		resp.Diagnostics.AddError("Failed to delete user", err.Error())
 	}
 }

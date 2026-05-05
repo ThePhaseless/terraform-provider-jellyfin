@@ -8,11 +8,13 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -33,6 +35,7 @@ type APIKeyResource struct {
 
 // APIKeyResourceModel describes the resource data model.
 type APIKeyResourceModel struct {
+	ID          types.String `tfsdk:"id"`
 	AppName     types.String `tfsdk:"app_name"`
 	AccessToken types.String `tfsdk:"access_token"`
 }
@@ -49,8 +52,18 @@ func (r *APIKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"app_name": schema.StringAttribute{
 				MarkdownDescription: "The application name for the API key.",
 				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"id": schema.StringAttribute{
+				MarkdownDescription: "The API key resource identifier.",
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"access_token": schema.StringAttribute{
@@ -126,6 +139,7 @@ func (r *APIKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 
 	data.AccessToken = types.StringValue(newKey.AccessToken)
+	data.ID = types.StringValue(newKey.AccessToken)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -148,6 +162,7 @@ func (r *APIKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 	for _, key := range keys {
 		if key.AccessToken == data.AccessToken.ValueString() {
 			data.AppName = types.StringValue(key.AppName)
+			data.ID = types.StringValue(key.AccessToken)
 			found = true
 			break
 		}
@@ -175,6 +190,9 @@ func (r *APIKeyResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	}
 
 	if err := r.client.DeleteAPIKey(data.AccessToken.ValueString()); err != nil {
+		if client.IsNotFound(err) {
+			return
+		}
 		resp.Diagnostics.AddError("Failed to delete API key", err.Error())
 	}
 }

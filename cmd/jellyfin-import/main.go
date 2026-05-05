@@ -334,7 +334,7 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 		}
 
 		attrs := map[string]string{
-			"id":            quote(task.Id),
+			"task_id":       quote(task.Id),
 			"triggers_json": "jsonencode(" + prettyTriggers + ")",
 		}
 		resources = append(resources, resourceBlock("jellyfin_scheduled_task", name, attrs))

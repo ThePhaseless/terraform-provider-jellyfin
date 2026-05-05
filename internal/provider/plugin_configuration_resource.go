@@ -8,10 +8,14 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -32,6 +36,7 @@ type PluginConfigurationResource struct {
 
 // PluginConfigurationResourceModel describes the resource data model.
 type PluginConfigurationResourceModel struct {
+	ID            types.String         `tfsdk:"id"`
 	PluginID      types.String         `tfsdk:"plugin_id"`
 	Configuration jsontypes.Normalized `tfsdk:"configuration_json"`
 }
@@ -48,6 +53,19 @@ func (r *PluginConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			"plugin_id": schema.StringAttribute{
 				MarkdownDescription: "The plugin ID (GUID).",
 				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"id": schema.StringAttribute{
+				MarkdownDescription: "The plugin configuration resource identifier.",
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"configuration_json": schema.StringAttribute{
 				MarkdownDescription: "The plugin configuration as a JSON string. " +
@@ -89,6 +107,7 @@ func (r *PluginConfigurationResource) Create(ctx context.Context, req resource.C
 		return
 	}
 
+	data.ID = data.PluginID
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -101,6 +120,10 @@ func (r *PluginConfigurationResource) Read(ctx context.Context, req resource.Rea
 
 	configJSON, err := r.client.GetPluginConfiguration(data.PluginID.ValueString())
 	if err != nil {
+		if client.IsNotFound(err) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Failed to read plugin configuration", err.Error())
 		return
 	}
@@ -112,6 +135,7 @@ func (r *PluginConfigurationResource) Read(ctx context.Context, req resource.Rea
 	}
 
 	data.Configuration = jsontypes.NewNormalizedValue(normalized)
+	data.ID = data.PluginID
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -127,6 +151,19 @@ func (r *PluginConfigurationResource) Update(ctx context.Context, req resource.U
 		resp.Diagnostics.AddError("Failed to update plugin configuration", err.Error())
 		return
 	}
+
+	configJSON, err := r.client.GetPluginConfiguration(data.PluginID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read plugin configuration after update", err.Error())
+		return
+	}
+	normalized, err := normalizeJSON(configJSON)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to normalize plugin configuration", err.Error())
+		return
+	}
+	data.Configuration = jsontypes.NewNormalizedValue(normalized)
+	data.ID = data.PluginID
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

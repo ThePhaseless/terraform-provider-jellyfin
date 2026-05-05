@@ -9,7 +9,7 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -54,6 +54,9 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Resource identifier. Always set to `system` for this singleton resource.",
 				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"server_name": schema.StringAttribute{
 				MarkdownDescription: "The server display name.",
@@ -222,9 +225,9 @@ func mergeJSON(base, override string) (string, error) {
 	return string(result), nil
 }
 
-// normalizeJSON re-encodes JSON through interface{} to produce canonical key ordering.
+// normalizeJSON re-encodes JSON to remove insignificant formatting.
 func normalizeJSON(raw string) (string, error) {
-	var generic interface{}
+	var generic json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &generic); err != nil {
 		return "", fmt.Errorf("parsing JSON for normalization: %w", err)
 	}

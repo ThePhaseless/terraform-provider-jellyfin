@@ -8,9 +8,11 @@ import (
 	"fmt"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -48,6 +50,9 @@ func (r *NetworkingConfigurationResource) Schema(_ context.Context, _ resource.S
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Resource identifier. Always set to `networking` for this singleton resource.",
 				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"configuration_json": schema.StringAttribute{
 				MarkdownDescription: "The networking configuration as a JSON string. Supports all Jellyfin network settings " +
@@ -91,6 +96,17 @@ func (r *NetworkingConfigurationResource) Create(ctx context.Context, req resour
 	}
 
 	data.ID = types.StringValue("networking")
+	updated, err := r.client.GetNetworkConfiguration()
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read networking configuration after update", err.Error())
+		return
+	}
+	normalized, err := normalizeJSON(updated.RawJSON)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to normalize networking configuration", err.Error())
+		return
+	}
+	data.ConfigurationJSON = jsontypes.NewNormalizedValue(normalized)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
