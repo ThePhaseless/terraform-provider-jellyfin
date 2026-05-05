@@ -27,7 +27,7 @@ require (
 	github.com/stretchr/testify v1.8.4
 	github.com/thanhpk/randstr v1.0.4
 	golang.org/x/oauth2 v0.8.0
-	golang.org/x/sync v0.10.0
+	golang.org/x/sync v0.12.0
 )
 
 require (
@@ -51,7 +51,7 @@ require (
 	github.com/knadh/koanf/maps v0.1.2 // indirect
 	github.com/kr/pretty v0.3.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
-	github.com/mattn/go-runewidth v0.0.15 // indirect
+	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
@@ -59,19 +59,19 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	go.mongodb.org/mongo-driver v1.10.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.3 // indirect
-	golang.org/x/crypto v0.31.0 // indirect
+	golang.org/x/crypto v0.35.0 // indirect
 	golang.org/x/exp v0.0.0-20220303212507-bbda1eaf7a17 // indirect
-	golang.org/x/net v0.33.0 // indirect
+	golang.org/x/net v0.36.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
-	golang.org/x/term v0.27.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/term v0.30.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/protobuf v1.28.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
 
 require (
-	github.com/cli/go-gh/v2 v2.11.2
+	github.com/cli/go-gh/v2 v2.12.1
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/google/go-github/v45 v45.2.0
 	github.com/jedib0t/go-pretty v4.3.0+incompatible
