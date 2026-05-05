@@ -10,7 +10,7 @@
   description: Checks if any copyright headers are missing, but does not make changes
   entry: go run .
   language: golang
-  args: [headers --plan]
+  args: [headers, --plan]
 
 - id: add-license
   name: Add or fix repo license
@@ -24,4 +24,4 @@
   description: Checks if a LICENSE file is valid, but does not make changes
   entry: go run .
   language: golang
-  args: [license --plan]
+  args: [license, --plan]

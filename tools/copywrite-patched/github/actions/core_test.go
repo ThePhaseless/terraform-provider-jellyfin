@@ -138,6 +138,36 @@ func Test_EndGroup(t *testing.T) {
 	}
 }
 
+func Test_DisableGHAOutput(t *testing.T) {
+	tests := []struct {
+		name     string
+		initial  bool
+		disable  bool
+		expected bool
+	}{
+		{
+			name:     "true disables GitHub Actions output",
+			initial:  true,
+			disable:  true,
+			expected: false,
+		},
+		{
+			name:     "false leaves GitHub Actions output unchanged",
+			initial:  true,
+			disable:  false,
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gha := &GHA{isGHA: tt.initial}
+			gha.DisableGHAOutput(tt.disable)
+			assert.Equal(t, tt.expected, gha.isGHA)
+		})
+	}
+}
+
 func Test_appendToFile(t *testing.T) {
 	// Let's take colorized output out of the picture
 	text.DisableColors()
@@ -440,6 +470,17 @@ func Test_newAnnotation(t *testing.T) {
 				EndLine: 7,
 			},
 			expectedOutput: "::notice title=Syntax Error,file=app.js,line=7,endLine=7::Missing semicolon\n",
+		},
+		{
+			name:           "Annotation content is escaped for workflow commands",
+			annotationType: "notice",
+			isGHA:          true,
+			input: Annotation{
+				Title:   "Title: 50%, done",
+				File:    "dir/file,name.go",
+				Message: "line1\nline2\r\n100%",
+			},
+			expectedOutput: "::notice title=Title%3A 50%25%2C done,file=dir/file%2Cname.go::line1%0Aline2%0D%0A100%25\n",
 		},
 		{
 			name:           "Nothing gets printed if we aren't in GitHub Actions",

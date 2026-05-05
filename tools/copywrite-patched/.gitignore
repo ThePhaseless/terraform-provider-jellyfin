@@ -4,6 +4,7 @@ dist/
 
 # output from running the program
 repos.csv
+repodata.csv
 
 # Ignore built binaries
 copywrite

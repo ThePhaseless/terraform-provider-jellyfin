@@ -37,22 +37,22 @@ type Options struct {
 // workflow has finished processing
 func WaitRunFinished(client *github.Client, opts Options, run github.WorkflowRun) error {
 	// Short circuit if stuff went really fast
-	if *run.Status == "completed" {
-		return nil
+	if run.GetStatus() == "completed" {
+		return runConclusionError(run)
 	}
 
 	for i := 0; i < opts.MaxAttempts; i++ {
-		opts.Logger.Debug(fmt.Sprintf("Waiting %d of 5 for run to finish: %s", i, *run.Name))
+		opts.Logger.Debug(fmt.Sprintf("Waiting %d of %d for run to finish: %s", i+1, opts.MaxAttempts, run.GetName()))
 		time.Sleep(time.Duration(opts.SecondsBetweenPolls) * time.Second)
 
-		this, _, err := client.Actions.GetWorkflowRunByID(context.Background(), opts.GitHubOwner, opts.GitHubRepo, *run.ID)
+		this, _, err := client.Actions.GetWorkflowRunByID(context.Background(), opts.GitHubOwner, opts.GitHubRepo, run.GetID())
 		if err != nil {
 			return err
 		}
 
-		switch *this.Status {
+		switch this.GetStatus() {
 		case "completed":
-			return nil
+			return runConclusionError(*this)
 		case "queued":
 			// Do nothing, keep watching
 		case "in_progress":
@@ -76,8 +76,6 @@ func WaitRunFinished(client *github.Client, opts Options, run github.WorkflowRun
 func FindRun(client *github.Client, opts Options, runName string) (github.WorkflowRun, error) {
 	searchOpts := &github.ListWorkflowRunsOptions{
 		Branch: opts.BranchRef,
-		// Only search for workflow runs from today
-		Created: time.Now().Format("2006-01-02"),
 	}
 
 	for i := 0; i < opts.MaxAttempts; i++ {
@@ -98,6 +96,14 @@ func FindRun(client *github.Client, opts Options, runName string) (github.Workfl
 		time.Sleep(time.Duration(opts.SecondsBetweenPolls) * time.Second)
 	}
 	return github.WorkflowRun{}, fmt.Errorf("Timed out polling for workflow job")
+}
+
+func runConclusionError(run github.WorkflowRun) error {
+	if run.GetConclusion() == "" || run.GetConclusion() == "success" {
+		return nil
+	}
+
+	return fmt.Errorf("Workflow %q completed with conclusion: %s", run.GetName(), run.GetConclusion())
 }
 
 // Worker spawns an instance of a goroutine that listens for new job requests

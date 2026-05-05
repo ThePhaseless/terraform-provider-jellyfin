@@ -64,7 +64,9 @@ func (gha *GHA) IsGHA() bool {
 
 // DisableGHAOutput forcibly disables GitHub Actions-specific output types (e.g., groups)
 func (gha *GHA) DisableGHAOutput(in bool) {
-	gha.isGHA = false
+	if in {
+		gha.isGHA = false
+	}
 }
 
 // EnableGHAOutput forcibly enables GitHub Actions-specific output types (e.g., groups)
@@ -183,10 +185,10 @@ func (gha *GHA) newAnnotation(T string, a Annotation) {
 	// TODO: maybe reflect would be cleaner for this?
 	attributes := []string{}
 	if a.Title != "" {
-		attributes = append(attributes, fmt.Sprintf("title=%s", a.Title))
+		attributes = append(attributes, fmt.Sprintf("title=%s", escapeAnnotationProperty(a.Title)))
 	}
 	if a.File != "" {
-		attributes = append(attributes, fmt.Sprintf("file=%s", a.File))
+		attributes = append(attributes, fmt.Sprintf("file=%s", escapeAnnotationProperty(a.File)))
 	}
 	if a.Line != 0 {
 		attributes = append(attributes, fmt.Sprintf("line=%d", a.Line))
@@ -198,8 +200,30 @@ func (gha *GHA) newAnnotation(T string, a Annotation) {
 	// General format should be:
 	// "::error file={name},line={line},endLine={endLine},title={title}::{message}"
 	// "::error file=app.js,line=1,title=Syntax Error::Missing semicolon"
-	str := fmt.Sprintf("::%s %s::%s", T, strings.Join(attributes, ","), a.Message)
+	str := fmt.Sprintf("::%s %s::%s", T, strings.Join(attributes, ","), escapeAnnotationMessage(a.Message))
 	gha.println(str)
+}
+
+func escapeAnnotationProperty(in string) string {
+	replacer := strings.NewReplacer(
+		"%", "%25",
+		"\r", "%0D",
+		"\n", "%0A",
+		":", "%3A",
+		",", "%2C",
+	)
+
+	return replacer.Replace(in)
+}
+
+func escapeAnnotationMessage(in string) string {
+	replacer := strings.NewReplacer(
+		"%", "%25",
+		"\r", "%0D",
+		"\n", "%0A",
+	)
+
+	return replacer.Replace(in)
 }
 
 // println is an internal helper for printing to the expected output io.Writer

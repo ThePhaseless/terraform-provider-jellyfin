@@ -105,10 +105,24 @@ var debugCmd = &cobra.Command{
 		title("Attempting GitHub Authentication:")
 		ghc := github.NewGHClient().Raw()
 
-		user, _, _ := ghc.Users.Get(context.Background(), "")
-		cmd.Printf("Running as authenticated user: %v (@%v)\n", user.GetName(), user.GetLogin())
+		user, _, err := ghc.Users.Get(context.Background(), "")
+		if err != nil {
+			cmd.Printf("GitHub user lookup failed: %v\n", err)
+		} else {
+			cmd.Printf("Running as authenticated user: %v (@%v)\n", user.GetName(), user.GetLogin())
+		}
 
-		rateLimits, _, _ := ghc.RateLimits(context.Background())
+		rateLimits, _, err := ghc.RateLimits(context.Background())
+		if err != nil {
+			cmd.Printf("GitHub rate limit lookup failed: %v\n", err)
+			return
+		}
+
+		if rateLimits == nil || rateLimits.Core == nil {
+			cmd.Println("GitHub rate limit lookup returned no data")
+			return
+		}
+
 		cmd.Printf("GitHub API rate limits: %v/%v remaining\n", rateLimits.Core.Remaining, rateLimits.Core.Limit)
 		cmd.Printf("GitHub API rate limits will reset at: %v (%v)\n", rateLimits.Core.Reset, timediff.TimeDiff(rateLimits.Core.Reset.Time))
 	},

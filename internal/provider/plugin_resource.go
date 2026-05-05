@@ -71,7 +71,7 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"repository_url": schema.StringAttribute{
-				MarkdownDescription: "The repository URL from which to install the plugin. Resolved automatically on import.",
+				MarkdownDescription: "The repository URL from which to install the plugin. Required when creating the resource and resolved automatically on import when the exact package version is still available.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -104,6 +104,14 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 	var data PluginResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if data.RepositoryURL.IsUnknown() || data.RepositoryURL.IsNull() || data.RepositoryURL.ValueString() == "" {
+		resp.Diagnostics.AddError(
+			"Missing plugin repository URL",
+			"The repository_url attribute must be set when installing a plugin so the provider can reproduce the install source.",
+		)
 		return
 	}
 
@@ -222,16 +230,12 @@ func (r *PluginResource) resolveRepositoryURL(ctx context.Context, name, version
 					return v.RepositoryUrl
 				}
 			}
-			// If exact version not found, fall back to the first version's repo URL
-			// (the repository is typically the same across versions).
-			if len(pkg.Versions) > 0 && pkg.Versions[0].RepositoryUrl != "" {
-				tflog.Debug(ctx, "Exact version not found in packages, falling back to first available version's repository URL", map[string]interface{}{
-					"plugin":            name,
-					"requested_version": version,
-					"fallback_version":  pkg.Versions[0].Version,
-				})
-				return pkg.Versions[0].RepositoryUrl
-			}
+
+			tflog.Debug(ctx, "Could not resolve repository URL for plugin (exact version unavailable)", map[string]interface{}{
+				"plugin":  name,
+				"version": version,
+			})
+			return ""
 		}
 	}
 

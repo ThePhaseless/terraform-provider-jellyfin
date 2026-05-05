@@ -95,6 +95,14 @@ func (r *PluginRepositoryResource) Create(ctx context.Context, req resource.Crea
 		return
 	}
 
+	if repositoryNameExists(repos, data.Name.ValueString()) {
+		resp.Diagnostics.AddError(
+			"Plugin repository already exists",
+			fmt.Sprintf("A plugin repository named %q already exists. Repository names must be unique for this resource to manage them safely.", data.Name.ValueString()),
+		)
+		return
+	}
+
 	newRepo := client.PluginRepository{
 		Name:    data.Name.ValueString(),
 		Url:     data.URL.ValueString(),
@@ -125,13 +133,16 @@ func (r *PluginRepositoryResource) Read(ctx context.Context, req resource.ReadRe
 	}
 
 	found := false
-	for _, repo := range repos {
-		if repo.Name == data.Name.ValueString() {
-			data.URL = types.StringValue(repo.Url)
-			data.Enabled = types.BoolValue(repo.Enabled)
-			found = true
-			break
-		}
+	index, err := findPluginRepositoryIndex(repos, data.Name.ValueString(), data.URL.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Plugin repository is ambiguous", err.Error())
+		return
+	}
+	if index >= 0 {
+		repo := repos[index]
+		data.URL = types.StringValue(repo.Url)
+		data.Enabled = types.BoolValue(repo.Enabled)
+		found = true
 	}
 
 	if !found {
@@ -162,23 +173,34 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 	}
 
 	updated := make([]client.PluginRepository, 0, len(repos))
-	found := false
-	for _, repo := range repos {
-		if repo.Name == state.Name.ValueString() {
-			repo.Name = data.Name.ValueString()
-			repo.Url = data.URL.ValueString()
-			repo.Enabled = data.Enabled.ValueBool()
-			found = true
-		}
-		updated = append(updated, repo)
+	index, err := findPluginRepositoryIndex(repos, state.Name.ValueString(), state.URL.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Plugin repository is ambiguous", err.Error())
+		return
 	}
-
-	if !found {
+	if index < 0 {
 		resp.Diagnostics.AddError(
 			"Plugin repository not found",
 			fmt.Sprintf("Plugin repository %q was not found on the server. It may have been removed outside of Terraform.", state.Name.ValueString()),
 		)
 		return
+	}
+
+	if state.Name.ValueString() != data.Name.ValueString() && repositoryNameExists(repos, data.Name.ValueString()) {
+		resp.Diagnostics.AddError(
+			"Plugin repository already exists",
+			fmt.Sprintf("A plugin repository named %q already exists. Repository names must be unique for this resource to manage them safely.", data.Name.ValueString()),
+		)
+		return
+	}
+
+	for i, repo := range repos {
+		if i == index {
+			repo.Name = data.Name.ValueString()
+			repo.Url = data.URL.ValueString()
+			repo.Enabled = data.Enabled.ValueBool()
+		}
+		updated = append(updated, repo)
 	}
 
 	if err := r.client.SetPluginRepositories(updated); err != nil {
@@ -203,8 +225,17 @@ func (r *PluginRepositoryResource) Delete(ctx context.Context, req resource.Dele
 	}
 
 	filtered := make([]client.PluginRepository, 0, len(repos))
-	for _, repo := range repos {
-		if repo.Name != data.Name.ValueString() {
+	index, err := findPluginRepositoryIndex(repos, data.Name.ValueString(), data.URL.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Plugin repository is ambiguous", err.Error())
+		return
+	}
+	if index < 0 {
+		return
+	}
+
+	for i, repo := range repos {
+		if i != index {
 			filtered = append(filtered, repo)
 		}
 	}
@@ -216,4 +247,40 @@ func (r *PluginRepositoryResource) Delete(ctx context.Context, req resource.Dele
 
 func (r *PluginRepositoryResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
+}
+
+func repositoryNameExists(repos []client.PluginRepository, name string) bool {
+	for _, repo := range repos {
+		if repo.Name == name {
+			return true
+		}
+	}
+
+	return false
+}
+
+func findPluginRepositoryIndex(repos []client.PluginRepository, name, url string) (int, error) {
+	matches := make([]int, 0, 1)
+	for i, repo := range repos {
+		if repo.Name == name {
+			matches = append(matches, i)
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return -1, nil
+	case 1:
+		return matches[0], nil
+	}
+
+	if url != "" {
+		for _, i := range matches {
+			if repos[i].Url == url {
+				return i, nil
+			}
+		}
+	}
+
+	return -1, fmt.Errorf("multiple plugin repositories named %q exist on the server; use unique repository names to manage or import this resource safely", name)
 }
