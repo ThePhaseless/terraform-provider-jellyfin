@@ -4,6 +4,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -225,17 +226,64 @@ func mergeJSON(base, override string) (string, error) {
 	return string(result), nil
 }
 
-// normalizeJSON re-encodes JSON to remove insignificant formatting.
+// normalizeJSON re-encodes JSON to remove insignificant formatting and sort object keys.
 func normalizeJSON(raw string) (string, error) {
-	var generic json.RawMessage
-	if err := json.Unmarshal([]byte(raw), &generic); err != nil {
+	normalized, err := normalizeJSONRaw(json.RawMessage(raw))
+	if err != nil {
 		return "", fmt.Errorf("parsing JSON for normalization: %w", err)
 	}
-	result, err := json.Marshal(generic)
-	if err != nil {
-		return "", fmt.Errorf("serializing normalized JSON: %w", err)
+	return string(normalized), nil
+}
+
+func normalizeJSONRaw(raw json.RawMessage) (json.RawMessage, error) {
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw); err != nil {
+		return nil, err
 	}
-	return string(result), nil
+
+	trimmed := bytes.TrimSpace(compact.Bytes())
+	if len(trimmed) == 0 {
+		return nil, fmt.Errorf("empty JSON value")
+	}
+
+	switch trimmed[0] {
+	case '{':
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(trimmed, &object); err != nil {
+			return nil, err
+		}
+		for key, value := range object {
+			normalized, err := normalizeJSONRaw(value)
+			if err != nil {
+				return nil, err
+			}
+			object[key] = normalized
+		}
+		return json.Marshal(object)
+	case '[':
+		var list []json.RawMessage
+		if err := json.Unmarshal(trimmed, &list); err != nil {
+			return nil, err
+		}
+		for i, value := range list {
+			normalized, err := normalizeJSONRaw(value)
+			if err != nil {
+				return nil, err
+			}
+			list[i] = normalized
+		}
+		return json.Marshal(list)
+	}
+
+	var rawValue json.RawMessage
+	if err := json.Unmarshal(trimmed, &rawValue); err != nil {
+		return nil, err
+	}
+	result, err := json.Marshal(rawValue)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (r *SystemConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {

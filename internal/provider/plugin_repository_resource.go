@@ -228,12 +228,14 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 		resp.Diagnostics.AddError("Failed to read plugin repositories after update", err.Error())
 		return
 	}
-	index, err = findPluginRepositoryIndex(repos, state.Name.ValueString(), data.URL.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Plugin repository is ambiguous", err.Error())
-		return
+	if index >= len(repos) || repos[index].Name != state.Name.ValueString() {
+		index, err = findPluginRepositoryIndex(repos, state.Name.ValueString(), state.URL.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Plugin repository is ambiguous", err.Error())
+			return
+		}
 	}
-	if index < 0 {
+	if index < 0 || index >= len(repos) {
 		resp.Diagnostics.AddError("Plugin repository not found", fmt.Sprintf("Plugin repository %q was not found after update.", state.Name.ValueString()))
 		return
 	}
