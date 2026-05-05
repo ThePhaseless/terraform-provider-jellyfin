@@ -191,13 +191,9 @@ func promptForConfigValues(c *config.Config) error {
 	if err != nil {
 		return err
 	}
-	selectedIndex, err := strconv.Atoi(licenseChoice)
+	licenseIndex, err := parseChoiceIndex(licenseChoice, len(licenseOptions))
 	if err != nil {
-		return fmt.Errorf("license selection must be a number between 1 and %d", len(licenseOptions))
-	}
-	licenseIndex := selectedIndex - 1
-	if licenseIndex < 0 || licenseIndex >= len(licenseOptions) {
-		return fmt.Errorf("license selection must be a number between 1 and %d", len(licenseOptions))
+		return err
 	}
 
 	yearInput, err := promptWithDefault(reader, "Choose a copyright year", strconv.Itoa(c.Project.CopyrightYear))
@@ -231,4 +227,18 @@ func promptWithDefault(reader *bufio.Reader, label, defaultValue string) (string
 		return defaultValue, nil
 	}
 	return input, nil
+}
+
+func parseChoiceIndex(input string, numChoices int) (int, error) {
+	selectedIndex, err := strconv.Atoi(input)
+	if err != nil {
+		return 0, fmt.Errorf("license selection must be a number between 1 and %d", numChoices)
+	}
+
+	choiceIndex := selectedIndex - 1
+	if choiceIndex < 0 || choiceIndex >= numChoices {
+		return 0, fmt.Errorf("license selection must be a number between 1 and %d", numChoices)
+	}
+
+	return choiceIndex, nil
 }

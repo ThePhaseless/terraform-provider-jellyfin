@@ -81,7 +81,7 @@ func Transform(repos []*github.Repository) ([]map[string]interface{}, error) {
 				continue
 			}
 
-			switch pointer := pointer.(type) {
+			switch pointer := rv.Interface().(type) {
 			case *string:
 				data = *pointer
 			case *github.License:
