@@ -84,7 +84,7 @@ func (d *SystemInfoDataSource) Configure(_ context.Context, req datasource.Confi
 }
 
 func (d *SystemInfoDataSource) Read(ctx context.Context, _ datasource.ReadRequest, resp *datasource.ReadResponse) {
-	info, err := d.client.GetSystemInfo()
+	info, err := d.client.GetSystemInfo(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to get system info", err.Error())
 		return

@@ -88,13 +88,13 @@ func (r *MetadataConfigurationResource) Create(ctx context.Context, req resource
 	}
 
 	config := &client.MetadataConfiguration{RawJSON: data.ConfigurationJSON.ValueString()}
-	if err := r.client.UpdateMetadataConfiguration(config); err != nil {
+	if err := r.client.UpdateMetadataConfiguration(ctx, config); err != nil {
 		resp.Diagnostics.AddError("Failed to update metadata configuration", err.Error())
 		return
 	}
 
 	data.ID = types.StringValue("metadata")
-	updated, err := r.client.GetMetadataConfiguration()
+	updated, err := r.client.GetMetadataConfiguration(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read metadata configuration after update", err.Error())
 		return
@@ -116,7 +116,7 @@ func (r *MetadataConfigurationResource) Read(ctx context.Context, req resource.R
 		return
 	}
 
-	config, err := r.client.GetMetadataConfiguration()
+	config, err := r.client.GetMetadataConfiguration(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read metadata configuration", err.Error())
 		return
@@ -142,7 +142,7 @@ func (r *MetadataConfigurationResource) Update(ctx context.Context, req resource
 	}
 
 	config := &client.MetadataConfiguration{RawJSON: data.ConfigurationJSON.ValueString()}
-	if err := r.client.UpdateMetadataConfiguration(config); err != nil {
+	if err := r.client.UpdateMetadataConfiguration(ctx, config); err != nil {
 		resp.Diagnostics.AddError("Failed to update metadata configuration", err.Error())
 		return
 	}

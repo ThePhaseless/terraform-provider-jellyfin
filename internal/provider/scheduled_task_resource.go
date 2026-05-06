@@ -10,12 +10,10 @@ import (
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
-	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -60,9 +58,7 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 			"task_id": schema.StringAttribute{
 				MarkdownDescription: "The unique identifier of the scheduled task.",
 				Required:            true,
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
+				Validators:          requiredIdentifierValidators(),
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -103,13 +99,13 @@ func (r *ScheduledTaskResource) Create(ctx context.Context, req resource.CreateR
 	}
 
 	// Verify the task exists.
-	_, err := r.client.GetScheduledTask(data.TaskID.ValueString())
+	_, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to find scheduled task", err.Error())
 		return
 	}
 
-	if err := r.client.UpdateScheduledTaskTriggers(data.TaskID.ValueString(), data.TriggersJSON.ValueString()); err != nil {
+	if err := r.client.UpdateScheduledTaskTriggers(ctx, data.TaskID.ValueString(), data.TriggersJSON.ValueString()); err != nil {
 		resp.Diagnostics.AddError("Failed to update scheduled task triggers", err.Error())
 		return
 	}
@@ -125,7 +121,7 @@ func (r *ScheduledTaskResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
-	task, err := r.client.GetScheduledTask(data.TaskID.ValueString())
+	task, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString())
 	if err != nil {
 		if client.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)
@@ -161,12 +157,12 @@ func (r *ScheduledTaskResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
-	if err := r.client.UpdateScheduledTaskTriggers(data.TaskID.ValueString(), data.TriggersJSON.ValueString()); err != nil {
+	if err := r.client.UpdateScheduledTaskTriggers(ctx, data.TaskID.ValueString(), data.TriggersJSON.ValueString()); err != nil {
 		resp.Diagnostics.AddError("Failed to update scheduled task triggers", err.Error())
 		return
 	}
 
-	task, err := r.client.GetScheduledTask(data.TaskID.ValueString())
+	task, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read scheduled task after update", err.Error())
 		return

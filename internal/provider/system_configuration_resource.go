@@ -112,7 +112,7 @@ func (r *SystemConfigurationResource) Read(ctx context.Context, req resource.Rea
 		return
 	}
 
-	config, err := r.client.GetSystemConfiguration()
+	config, err := r.client.GetSystemConfiguration(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read system configuration", err.Error())
 		return
@@ -145,7 +145,7 @@ func (r *SystemConfigurationResource) Delete(_ context.Context, _ resource.Delet
 }
 
 func (r *SystemConfigurationResource) applyConfiguration(ctx context.Context, data *SystemConfigurationResourceModel, diagnostics *diag.Diagnostics, state *tfsdk.State) {
-	current, err := r.client.GetSystemConfiguration()
+	current, err := r.client.GetSystemConfiguration(ctx)
 	if err != nil {
 		diagnostics.AddError("Failed to read current system configuration", err.Error())
 		return
@@ -179,12 +179,12 @@ func (r *SystemConfigurationResource) applyConfiguration(ctx context.Context, da
 	}
 
 	config := &client.SystemConfiguration{RawJSON: rawJSON}
-	if err := r.client.UpdateSystemConfiguration(config); err != nil {
+	if err := r.client.UpdateSystemConfiguration(ctx, config); err != nil {
 		diagnostics.AddError("Failed to update system configuration", err.Error())
 		return
 	}
 
-	updated, err := r.client.GetSystemConfiguration()
+	updated, err := r.client.GetSystemConfiguration(ctx)
 	if err != nil {
 		diagnostics.AddError("Failed to read updated system configuration", err.Error())
 		return

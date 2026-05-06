@@ -61,9 +61,7 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"name": schema.StringAttribute{
 				MarkdownDescription: "The plugin package name.",
 				Required:            true,
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
+				Validators:          requiredIdentifierValidators(),
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -126,7 +124,7 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	if err := r.client.InstallPlugin(data.Name.ValueString(), data.Version.ValueString(), data.RepositoryURL.ValueString()); err != nil {
+	if err := r.client.InstallPlugin(ctx, data.Name.ValueString(), data.Version.ValueString(), data.RepositoryURL.ValueString()); err != nil {
 		resp.Diagnostics.AddError("Failed to install plugin", err.Error())
 		return
 	}
@@ -150,7 +148,7 @@ func (r *PluginResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
-	plugins, err := r.client.GetInstalledPlugins()
+	plugins, err := r.client.GetInstalledPlugins(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to get installed plugins", err.Error())
 		return
@@ -195,7 +193,7 @@ func (r *PluginResource) Delete(ctx context.Context, req resource.DeleteRequest,
 		return
 	}
 
-	if err := r.client.UninstallPlugin(data.ID.ValueString()); err != nil {
+	if err := r.client.UninstallPlugin(ctx, data.ID.ValueString()); err != nil {
 		if client.IsNotFound(err) {
 			return
 		}
@@ -206,7 +204,7 @@ func (r *PluginResource) Delete(ctx context.Context, req resource.DeleteRequest,
 func (r *PluginResource) waitForPlugin(ctx context.Context, name string, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		plugins, err := r.client.GetInstalledPlugins()
+		plugins, err := r.client.GetInstalledPlugins(ctx)
 		if err != nil {
 			return "", err
 		}
@@ -228,7 +226,7 @@ func (r *PluginResource) ImportState(ctx context.Context, req resource.ImportSta
 // resolveRepositoryURL attempts to find the repository URL for a plugin by
 // querying the /Packages endpoint and matching on name and version.
 func (r *PluginResource) resolveRepositoryURL(ctx context.Context, name, version string) string {
-	pkgs, err := r.client.GetAvailablePackages()
+	pkgs, err := r.client.GetAvailablePackages(ctx)
 	if err != nil {
 		tflog.Debug(ctx, "Could not resolve repository URL for plugin (packages unavailable)", map[string]interface{}{
 			"plugin": name,

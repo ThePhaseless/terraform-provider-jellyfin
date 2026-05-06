@@ -87,13 +87,13 @@ func (r *EncodingConfigurationResource) Create(ctx context.Context, req resource
 	}
 
 	config := &client.EncodingOptions{RawJSON: data.ConfigurationJSON.ValueString()}
-	if err := r.client.UpdateEncodingOptions(config); err != nil {
+	if err := r.client.UpdateEncodingOptions(ctx, config); err != nil {
 		resp.Diagnostics.AddError("Failed to update encoding configuration", err.Error())
 		return
 	}
 
 	data.ID = types.StringValue("encoding")
-	updated, err := r.client.GetEncodingOptions()
+	updated, err := r.client.GetEncodingOptions(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read encoding configuration after update", err.Error())
 		return
@@ -115,7 +115,7 @@ func (r *EncodingConfigurationResource) Read(ctx context.Context, req resource.R
 		return
 	}
 
-	config, err := r.client.GetEncodingOptions()
+	config, err := r.client.GetEncodingOptions(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read encoding configuration", err.Error())
 		return
@@ -141,7 +141,7 @@ func (r *EncodingConfigurationResource) Update(ctx context.Context, req resource
 	}
 
 	config := &client.EncodingOptions{RawJSON: data.ConfigurationJSON.ValueString()}
-	if err := r.client.UpdateEncodingOptions(config); err != nil {
+	if err := r.client.UpdateEncodingOptions(ctx, config); err != nil {
 		resp.Diagnostics.AddError("Failed to update encoding configuration", err.Error())
 		return
 	}

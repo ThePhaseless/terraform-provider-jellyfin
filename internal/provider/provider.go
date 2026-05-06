@@ -130,7 +130,7 @@ func (p *JellyfinProvider) Configure(ctx context.Context, req provider.Configure
 			)
 			return
 		}
-		authResult, err := c.AuthenticateByName(username, password)
+		authResult, err := c.AuthenticateByName(ctx, username, password)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Authentication Failed",

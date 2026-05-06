@@ -5,6 +5,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,49 +22,49 @@ type User struct {
 
 // UserPolicy represents the policy/permissions for a user.
 type UserPolicy struct {
-	IsAdministrator                  bool     `json:"IsAdministrator"`
-	IsHidden                         bool     `json:"IsHidden"`
-	IsDisabled                       bool     `json:"IsDisabled"`
-	MaxParentalRating                *int     `json:"MaxParentalRating,omitempty"`
-	BlockedTags                      []string `json:"BlockedTags"`
-	AllowedTags                      []string `json:"AllowedTags"`
-	EnableUserPreferenceAccess       bool     `json:"EnableUserPreferenceAccess"`
-	AccessSchedules                  []any    `json:"AccessSchedules"`
-	BlockUnratedItems                []string `json:"BlockUnratedItems"`
-	EnableRemoteControlOfOtherUsers  bool     `json:"EnableRemoteControlOfOtherUsers"`
-	EnableSharedDeviceControl        bool     `json:"EnableSharedDeviceControl"`
-	EnableRemoteAccess               bool     `json:"EnableRemoteAccess"`
-	EnableLiveTvManagement           bool     `json:"EnableLiveTvManagement"`
-	EnableLiveTvAccess               bool     `json:"EnableLiveTvAccess"`
-	EnableMediaPlayback              bool     `json:"EnableMediaPlayback"`
-	EnableAudioPlaybackTranscoding   bool     `json:"EnableAudioPlaybackTranscoding"`
-	EnableVideoPlaybackTranscoding   bool     `json:"EnableVideoPlaybackTranscoding"`
-	EnablePlaybackRemuxing           bool     `json:"EnablePlaybackRemuxing"`
-	ForceRemoteSourceTranscoding     bool     `json:"ForceRemoteSourceTranscoding"`
-	EnableContentDeletion            bool     `json:"EnableContentDeletion"`
-	EnableContentDeletionFromFolders []string `json:"EnableContentDeletionFromFolders"`
-	EnableContentDownloading         bool     `json:"EnableContentDownloading"`
-	EnableSyncTranscoding            bool     `json:"EnableSyncTranscoding"`
-	EnableMediaConversion            bool     `json:"EnableMediaConversion"`
-	EnabledDevices                   []string `json:"EnabledDevices"`
-	EnableAllDevices                 bool     `json:"EnableAllDevices"`
-	EnabledChannels                  []string `json:"EnabledChannels"`
-	EnableAllChannels                bool     `json:"EnableAllChannels"`
-	EnabledFolders                   []string `json:"EnabledFolders"`
-	EnableAllFolders                 bool     `json:"EnableAllFolders"`
-	InvalidLoginAttemptCount         int      `json:"InvalidLoginAttemptCount"`
-	LoginAttemptsBeforeLockout       int      `json:"LoginAttemptsBeforeLockout"`
-	MaxActiveSessions                int      `json:"MaxActiveSessions"`
-	EnablePublicSharing              bool     `json:"EnablePublicSharing"`
-	BlockedMediaFolders              []string `json:"BlockedMediaFolders"`
-	BlockedChannels                  []string `json:"BlockedChannels"`
-	RemoteClientBitrateLimit         int      `json:"RemoteClientBitrateLimit"`
-	AuthenticationProviderId         string   `json:"AuthenticationProviderId"`
-	PasswordResetProviderId          string   `json:"PasswordResetProviderId"`
-	SyncPlayAccess                   string   `json:"SyncPlayAccess"`
-	EnableCollectionManagement       bool     `json:"EnableCollectionManagement"`
-	EnableSubtitleManagement         bool     `json:"EnableSubtitleManagement"`
-	EnableLyricManagement            bool     `json:"EnableLyricManagement"`
+	IsAdministrator                  bool              `json:"IsAdministrator"`
+	IsHidden                         bool              `json:"IsHidden"`
+	IsDisabled                       bool              `json:"IsDisabled"`
+	MaxParentalRating                *int              `json:"MaxParentalRating,omitempty"`
+	BlockedTags                      []string          `json:"BlockedTags"`
+	AllowedTags                      []string          `json:"AllowedTags"`
+	EnableUserPreferenceAccess       bool              `json:"EnableUserPreferenceAccess"`
+	AccessSchedules                  []json.RawMessage `json:"AccessSchedules"`
+	BlockUnratedItems                []string          `json:"BlockUnratedItems"`
+	EnableRemoteControlOfOtherUsers  bool              `json:"EnableRemoteControlOfOtherUsers"`
+	EnableSharedDeviceControl        bool              `json:"EnableSharedDeviceControl"`
+	EnableRemoteAccess               bool              `json:"EnableRemoteAccess"`
+	EnableLiveTvManagement           bool              `json:"EnableLiveTvManagement"`
+	EnableLiveTvAccess               bool              `json:"EnableLiveTvAccess"`
+	EnableMediaPlayback              bool              `json:"EnableMediaPlayback"`
+	EnableAudioPlaybackTranscoding   bool              `json:"EnableAudioPlaybackTranscoding"`
+	EnableVideoPlaybackTranscoding   bool              `json:"EnableVideoPlaybackTranscoding"`
+	EnablePlaybackRemuxing           bool              `json:"EnablePlaybackRemuxing"`
+	ForceRemoteSourceTranscoding     bool              `json:"ForceRemoteSourceTranscoding"`
+	EnableContentDeletion            bool              `json:"EnableContentDeletion"`
+	EnableContentDeletionFromFolders []string          `json:"EnableContentDeletionFromFolders"`
+	EnableContentDownloading         bool              `json:"EnableContentDownloading"`
+	EnableSyncTranscoding            bool              `json:"EnableSyncTranscoding"`
+	EnableMediaConversion            bool              `json:"EnableMediaConversion"`
+	EnabledDevices                   []string          `json:"EnabledDevices"`
+	EnableAllDevices                 bool              `json:"EnableAllDevices"`
+	EnabledChannels                  []string          `json:"EnabledChannels"`
+	EnableAllChannels                bool              `json:"EnableAllChannels"`
+	EnabledFolders                   []string          `json:"EnabledFolders"`
+	EnableAllFolders                 bool              `json:"EnableAllFolders"`
+	InvalidLoginAttemptCount         int               `json:"InvalidLoginAttemptCount"`
+	LoginAttemptsBeforeLockout       int               `json:"LoginAttemptsBeforeLockout"`
+	MaxActiveSessions                int               `json:"MaxActiveSessions"`
+	EnablePublicSharing              bool              `json:"EnablePublicSharing"`
+	BlockedMediaFolders              []string          `json:"BlockedMediaFolders"`
+	BlockedChannels                  []string          `json:"BlockedChannels"`
+	RemoteClientBitrateLimit         int               `json:"RemoteClientBitrateLimit"`
+	AuthenticationProviderId         string            `json:"AuthenticationProviderId"`
+	PasswordResetProviderId          string            `json:"PasswordResetProviderId"`
+	SyncPlayAccess                   string            `json:"SyncPlayAccess"`
+	EnableCollectionManagement       bool              `json:"EnableCollectionManagement"`
+	EnableSubtitleManagement         bool              `json:"EnableSubtitleManagement"`
+	EnableLyricManagement            bool              `json:"EnableLyricManagement"`
 }
 
 // AuthResult represents the result of a user authentication.
@@ -74,67 +75,89 @@ type AuthResult struct {
 }
 
 // GetUsers retrieves all users.
-func (c *Client) GetUsers() ([]User, error) {
+func (c *Client) GetUsers(ctx context.Context) ([]User, error) {
 	var users []User
-	if err := c.get("/Users", &users); err != nil {
+	if err := c.get(ctx, "/Users", func(reader io.Reader) error {
+		return json.NewDecoder(reader).Decode(&users)
+	}); err != nil {
 		return nil, fmt.Errorf("getting users: %w", err)
 	}
 	return users, nil
 }
 
 // GetUserByID retrieves a user by their ID.
-func (c *Client) GetUserByID(id string) (*User, error) {
+func (c *Client) GetUserByID(ctx context.Context, id string) (*User, error) {
 	var user User
-	if err := c.get(fmt.Sprintf("/Users/%s", url.PathEscape(id)), &user); err != nil {
+	if err := c.get(ctx, fmt.Sprintf("/Users/%s", url.PathEscape(id)), func(reader io.Reader) error {
+		return json.NewDecoder(reader).Decode(&user)
+	}); err != nil {
 		return nil, fmt.Errorf("getting user %s: %w", id, err)
 	}
 	return &user, nil
 }
 
 // CreateUser creates a new user with the given name and password.
-func (c *Client) CreateUser(name, password string) (*User, error) {
+func (c *Client) CreateUser(ctx context.Context, name, password string) (*User, error) {
 	body := map[string]string{
 		"Name":     name,
 		"Password": password,
 	}
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling create user request for %s: %w", name, err)
+	}
 	var user User
-	if err := c.postAndDecode("/Users/New", body, &user); err != nil {
+	if err := c.postAndDecode(ctx, "/Users/New", jsonBody, func(reader io.Reader) error {
+		return json.NewDecoder(reader).Decode(&user)
+	}); err != nil {
 		return nil, fmt.Errorf("creating user %s: %w", name, err)
 	}
 	return &user, nil
 }
 
 // DeleteUser deletes a user by their ID.
-func (c *Client) DeleteUser(id string) error {
-	if err := c.delete(fmt.Sprintf("/Users/%s", url.PathEscape(id))); err != nil {
+func (c *Client) DeleteUser(ctx context.Context, id string) error {
+	if err := c.delete(ctx, fmt.Sprintf("/Users/%s", url.PathEscape(id))); err != nil {
 		return fmt.Errorf("deleting user %s: %w", id, err)
 	}
 	return nil
 }
 
 // UpdateUser updates an existing user.
-func (c *Client) UpdateUser(user *User) error {
-	if err := c.post(fmt.Sprintf("/Users/%s", url.PathEscape(user.Id)), user); err != nil {
+func (c *Client) UpdateUser(ctx context.Context, user *User) error {
+	jsonBody, err := json.Marshal(user)
+	if err != nil {
+		return fmt.Errorf("marshaling update user request for %s: %w", user.Id, err)
+	}
+	if err := c.post(ctx, fmt.Sprintf("/Users/%s", url.PathEscape(user.Id)), jsonBody); err != nil {
 		return fmt.Errorf("updating user %s: %w", user.Id, err)
 	}
 	return nil
 }
 
 // UpdateUserPassword changes a user's password.
-func (c *Client) UpdateUserPassword(id, currentPassword, newPassword string) error {
+func (c *Client) UpdateUserPassword(ctx context.Context, id, currentPassword, newPassword string) error {
 	body := map[string]string{
 		"CurrentPw": currentPassword,
 		"NewPw":     newPassword,
 	}
-	if err := c.post(fmt.Sprintf("/Users/%s/Password", url.PathEscape(id)), body); err != nil {
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshaling password update request for user %s: %w", id, err)
+	}
+	if err := c.post(ctx, fmt.Sprintf("/Users/%s/Password", url.PathEscape(id)), jsonBody); err != nil {
 		return fmt.Errorf("updating password for user %s: %w", id, err)
 	}
 	return nil
 }
 
 // UpdateUserPolicy updates a user's policy/permissions.
-func (c *Client) UpdateUserPolicy(id string, policy *UserPolicy) error {
-	if err := c.post(fmt.Sprintf("/Users/%s/Policy", url.PathEscape(id)), policy); err != nil {
+func (c *Client) UpdateUserPolicy(ctx context.Context, id string, policy *UserPolicy) error {
+	jsonBody, err := json.Marshal(policy)
+	if err != nil {
+		return fmt.Errorf("marshaling policy update request for user %s: %w", id, err)
+	}
+	if err := c.post(ctx, fmt.Sprintf("/Users/%s/Policy", url.PathEscape(id)), jsonBody); err != nil {
 		return fmt.Errorf("updating policy for user %s: %w", id, err)
 	}
 	return nil
@@ -142,7 +165,7 @@ func (c *Client) UpdateUserPolicy(id string, policy *UserPolicy) error {
 
 // AuthenticateByName authenticates a user by username and password.
 // This endpoint requires a special MediaBrowser header with client info, not a token.
-func (c *Client) AuthenticateByName(username, password string) (*AuthResult, error) {
+func (c *Client) AuthenticateByName(ctx context.Context, username, password string) (*AuthResult, error) {
 	body := map[string]string{
 		"Username": username,
 		"Pw":       password,
@@ -154,7 +177,7 @@ func (c *Client) AuthenticateByName(username, password string) (*AuthResult, err
 	}
 
 	url := c.BaseURL + "/Users/AuthenticateByName"
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("creating auth request: %w", err)
 	}
@@ -169,8 +192,7 @@ func (c *Client) AuthenticateByName(username, password string) (*AuthResult, err
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("authentication failed for user %s (status %d): %s", username, resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("authentication failed for user %s (status %d): %s", username, resp.StatusCode, readResponseBody(resp.Body))
 	}
 
 	var result AuthResult

@@ -88,13 +88,13 @@ func (r *BrandingConfigurationResource) Create(ctx context.Context, req resource
 	}
 
 	config := &client.BrandingConfiguration{RawJSON: data.ConfigurationJSON.ValueString()}
-	if err := r.client.UpdateBrandingConfiguration(config); err != nil {
+	if err := r.client.UpdateBrandingConfiguration(ctx, config); err != nil {
 		resp.Diagnostics.AddError("Failed to update branding configuration", err.Error())
 		return
 	}
 
 	data.ID = types.StringValue("branding")
-	updated, err := r.client.GetBrandingConfiguration()
+	updated, err := r.client.GetBrandingConfiguration(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read branding configuration after update", err.Error())
 		return
@@ -116,7 +116,7 @@ func (r *BrandingConfigurationResource) Read(ctx context.Context, req resource.R
 		return
 	}
 
-	config, err := r.client.GetBrandingConfiguration()
+	config, err := r.client.GetBrandingConfiguration(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read branding configuration", err.Error())
 		return
@@ -142,7 +142,7 @@ func (r *BrandingConfigurationResource) Update(ctx context.Context, req resource
 	}
 
 	config := &client.BrandingConfiguration{RawJSON: data.ConfigurationJSON.ValueString()}
-	if err := r.client.UpdateBrandingConfiguration(config); err != nil {
+	if err := r.client.UpdateBrandingConfiguration(ctx, config); err != nil {
 		resp.Diagnostics.AddError("Failed to update branding configuration", err.Error())
 		return
 	}

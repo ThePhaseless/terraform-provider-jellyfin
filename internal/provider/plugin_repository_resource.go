@@ -107,7 +107,7 @@ func (r *PluginRepositoryResource) Create(ctx context.Context, req resource.Crea
 		return
 	}
 
-	repos, err := r.client.GetPluginRepositories()
+	repos, err := r.client.GetPluginRepositories(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to get plugin repositories", err.Error())
 		return
@@ -129,7 +129,7 @@ func (r *PluginRepositoryResource) Create(ctx context.Context, req resource.Crea
 
 	repos = append(repos, newRepo)
 
-	if err := r.client.SetPluginRepositories(repos); err != nil {
+	if err := r.client.SetPluginRepositories(ctx, repos); err != nil {
 		resp.Diagnostics.AddError("Failed to set plugin repositories", err.Error())
 		return
 	}
@@ -145,7 +145,7 @@ func (r *PluginRepositoryResource) Read(ctx context.Context, req resource.ReadRe
 		return
 	}
 
-	repos, err := r.client.GetPluginRepositories()
+	repos, err := r.client.GetPluginRepositories(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to get plugin repositories", err.Error())
 		return
@@ -187,7 +187,7 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 		return
 	}
 
-	repos, err := r.client.GetPluginRepositories()
+	repos, err := r.client.GetPluginRepositories(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to get plugin repositories", err.Error())
 		return
@@ -224,12 +224,12 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 		updated = append(updated, repos[i])
 	}
 
-	if err := r.client.SetPluginRepositories(updated); err != nil {
+	if err := r.client.SetPluginRepositories(ctx, updated); err != nil {
 		resp.Diagnostics.AddError("Failed to set plugin repositories", err.Error())
 		return
 	}
 
-	repos, err = r.client.GetPluginRepositories()
+	repos, err = r.client.GetPluginRepositories(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read plugin repositories after update", err.Error())
 		return
@@ -261,7 +261,7 @@ func (r *PluginRepositoryResource) Delete(ctx context.Context, req resource.Dele
 		return
 	}
 
-	repos, err := r.client.GetPluginRepositories()
+	repos, err := r.client.GetPluginRepositories(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to get plugin repositories", err.Error())
 		return
@@ -283,7 +283,7 @@ func (r *PluginRepositoryResource) Delete(ctx context.Context, req resource.Dele
 		}
 	}
 
-	if err := r.client.SetPluginRepositories(filtered); err != nil {
+	if err := r.client.SetPluginRepositories(ctx, filtered); err != nil {
 		resp.Diagnostics.AddError("Failed to set plugin repositories", err.Error())
 	}
 }

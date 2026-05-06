@@ -4,8 +4,10 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 )
 
 // SystemInfo represents the full system information from /System/Info.
@@ -36,26 +38,30 @@ type SystemConfiguration struct {
 }
 
 // GetSystemInfo retrieves the full system information.
-func (c *Client) GetSystemInfo() (*SystemInfo, error) {
+func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	var info SystemInfo
-	if err := c.get("/System/Info", &info); err != nil {
+	if err := c.get(ctx, "/System/Info", func(reader io.Reader) error {
+		return json.NewDecoder(reader).Decode(&info)
+	}); err != nil {
 		return nil, fmt.Errorf("getting system info: %w", err)
 	}
 	return &info, nil
 }
 
 // GetPublicSystemInfo retrieves public system information (no auth required).
-func (c *Client) GetPublicSystemInfo() (*PublicSystemInfo, error) {
+func (c *Client) GetPublicSystemInfo(ctx context.Context) (*PublicSystemInfo, error) {
 	var info PublicSystemInfo
-	if err := c.get("/System/Info/Public", &info); err != nil {
+	if err := c.get(ctx, "/System/Info/Public", func(reader io.Reader) error {
+		return json.NewDecoder(reader).Decode(&info)
+	}); err != nil {
 		return nil, fmt.Errorf("getting public system info: %w", err)
 	}
 	return &info, nil
 }
 
 // GetSystemConfiguration retrieves the server configuration.
-func (c *Client) GetSystemConfiguration() (*SystemConfiguration, error) {
-	raw, err := c.getRaw("/System/Configuration")
+func (c *Client) GetSystemConfiguration(ctx context.Context) (*SystemConfiguration, error) {
+	raw, err := c.getRaw(ctx, "/System/Configuration")
 	if err != nil {
 		return nil, fmt.Errorf("getting system configuration: %w", err)
 	}
@@ -84,8 +90,8 @@ func (c *Client) GetSystemConfiguration() (*SystemConfiguration, error) {
 }
 
 // UpdateSystemConfiguration updates the server configuration.
-func (c *Client) UpdateSystemConfiguration(config *SystemConfiguration) error {
-	if err := c.postRaw("/System/Configuration", config.RawJSON); err != nil {
+func (c *Client) UpdateSystemConfiguration(ctx context.Context, config *SystemConfiguration) error {
+	if err := c.postRaw(ctx, "/System/Configuration", config.RawJSON); err != nil {
 		return fmt.Errorf("updating system configuration: %w", err)
 	}
 	return nil
@@ -98,8 +104,8 @@ type EncodingOptions struct {
 }
 
 // GetEncodingOptions retrieves the encoding configuration.
-func (c *Client) GetEncodingOptions() (*EncodingOptions, error) {
-	raw, err := c.getRaw("/System/Configuration/encoding")
+func (c *Client) GetEncodingOptions(ctx context.Context) (*EncodingOptions, error) {
+	raw, err := c.getRaw(ctx, "/System/Configuration/encoding")
 	if err != nil {
 		return nil, fmt.Errorf("getting encoding options: %w", err)
 	}
@@ -108,8 +114,8 @@ func (c *Client) GetEncodingOptions() (*EncodingOptions, error) {
 }
 
 // UpdateEncodingOptions updates the encoding configuration.
-func (c *Client) UpdateEncodingOptions(config *EncodingOptions) error {
-	if err := c.postRaw("/System/Configuration/encoding", config.RawJSON); err != nil {
+func (c *Client) UpdateEncodingOptions(ctx context.Context, config *EncodingOptions) error {
+	if err := c.postRaw(ctx, "/System/Configuration/encoding", config.RawJSON); err != nil {
 		return fmt.Errorf("updating encoding options: %w", err)
 	}
 	return nil

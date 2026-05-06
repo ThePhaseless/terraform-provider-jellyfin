@@ -3,7 +3,10 @@
 
 package client
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // NetworkConfiguration represents the network configuration.
 // RawJSON stores the complete JSON since the configuration has many fields.
@@ -12,8 +15,8 @@ type NetworkConfiguration struct {
 }
 
 // GetNetworkConfiguration retrieves the network configuration.
-func (c *Client) GetNetworkConfiguration() (*NetworkConfiguration, error) {
-	raw, err := c.getRaw("/System/Configuration/network")
+func (c *Client) GetNetworkConfiguration(ctx context.Context) (*NetworkConfiguration, error) {
+	raw, err := c.getRaw(ctx, "/System/Configuration/network")
 	if err != nil {
 		return nil, fmt.Errorf("getting network configuration: %w", err)
 	}
@@ -22,8 +25,8 @@ func (c *Client) GetNetworkConfiguration() (*NetworkConfiguration, error) {
 }
 
 // UpdateNetworkConfiguration updates the network configuration.
-func (c *Client) UpdateNetworkConfiguration(config *NetworkConfiguration) error {
-	if err := c.postRaw("/System/Configuration/network", config.RawJSON); err != nil {
+func (c *Client) UpdateNetworkConfiguration(ctx context.Context, config *NetworkConfiguration) error {
+	if err := c.postRaw(ctx, "/System/Configuration/network", config.RawJSON); err != nil {
 		return fmt.Errorf("updating network configuration: %w", err)
 	}
 	return nil

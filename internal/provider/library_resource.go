@@ -141,13 +141,13 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 		libraryOpts = &client.LibraryOptions{RawJSON: data.LibraryOptions.ValueString()}
 	}
 
-	if err := r.client.AddVirtualFolder(data.Name.ValueString(), data.CollectionType.ValueString(), paths, libraryOpts); err != nil {
+	if err := r.client.AddVirtualFolder(ctx, data.Name.ValueString(), data.CollectionType.ValueString(), paths, libraryOpts); err != nil {
 		resp.Diagnostics.AddError("Failed to create library", err.Error())
 		return
 	}
 
 	// Read back to get the ItemId.
-	folder, err := r.findFolder(data.Name.ValueString())
+	folder, err := r.findFolder(ctx, data.Name.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read library after creation", err.Error())
 		return
@@ -173,7 +173,7 @@ func (r *LibraryResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
-	folder, err := r.findFolder(data.Name.ValueString())
+	folder, err := r.findFolder(ctx, data.Name.ValueString())
 	if err != nil {
 		if errors.Is(err, errLibraryNotFound) {
 			resp.State.RemoveResource(ctx)
@@ -213,13 +213,13 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 		libraryOpts = &client.LibraryOptions{RawJSON: data.LibraryOptions.ValueString()}
 	}
 
-	if err := r.client.UpdateVirtualFolder(data.Name.ValueString(), libraryOpts); err != nil {
+	if err := r.client.UpdateVirtualFolder(ctx, data.Name.ValueString(), libraryOpts); err != nil {
 		resp.Diagnostics.AddError("Failed to update library", err.Error())
 		return
 	}
 
 	// Read back to refresh state.
-	folder, err := r.findFolder(data.Name.ValueString())
+	folder, err := r.findFolder(ctx, data.Name.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read library after update", err.Error())
 		return
@@ -245,7 +245,7 @@ func (r *LibraryResource) Delete(ctx context.Context, req resource.DeleteRequest
 		return
 	}
 
-	if err := r.client.RemoveVirtualFolder(data.Name.ValueString()); err != nil {
+	if err := r.client.RemoveVirtualFolder(ctx, data.Name.ValueString()); err != nil {
 		if client.IsNotFound(err) {
 			return
 		}
@@ -255,8 +255,8 @@ func (r *LibraryResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 var errLibraryNotFound = errors.New("library not found")
 
-func (r *LibraryResource) findFolder(name string) (*client.VirtualFolder, error) {
-	folders, err := r.client.GetVirtualFolders()
+func (r *LibraryResource) findFolder(ctx context.Context, name string) (*client.VirtualFolder, error) {
+	folders, err := r.client.GetVirtualFolders(ctx)
 	if err != nil {
 		return nil, err
 	}

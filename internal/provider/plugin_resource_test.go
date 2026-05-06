@@ -4,6 +4,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -59,9 +60,10 @@ func testAccFindInstallablePlugin(t *testing.T, repoURL string) (name, version s
 	}
 
 	c := client.NewClient(endpoint, apiKey)
+	ctx := context.Background()
 
 	// Get currently registered repos.
-	repos, err := c.GetPluginRepositories()
+	repos, err := c.GetPluginRepositories(ctx)
 	if err != nil {
 		t.Fatalf("failed to get plugin repositories: %v", err)
 	}
@@ -77,14 +79,18 @@ func testAccFindInstallablePlugin(t *testing.T, repoURL string) (name, version s
 
 	if !repoAlreadyRegistered {
 		tempRepo := client.PluginRepository{Name: "jellyfin-stable-temp", Url: repoURL, Enabled: true}
-		if err := c.SetPluginRepositories(append(repos, tempRepo)); err != nil {
+		if err := c.SetPluginRepositories(ctx, append(repos, tempRepo)); err != nil {
 			t.Fatalf("failed to register stable repository for package listing: %v", err)
 		}
-		t.Cleanup(func() { _ = c.SetPluginRepositories(repos) })
+		t.Cleanup(func() {
+			if err := c.SetPluginRepositories(ctx, repos); err != nil {
+				t.Errorf("failed to restore plugin repositories: %v", err)
+			}
+		})
 	}
 
 	// Query available packages.
-	pkgs, err := c.GetAvailablePackages()
+	pkgs, err := c.GetAvailablePackages(ctx)
 	if err != nil {
 		t.Skipf("failed to list packages (repository may be unavailable): %v", err)
 	}
@@ -93,7 +99,7 @@ func testAccFindInstallablePlugin(t *testing.T, repoURL string) (name, version s
 	}
 
 	// Get currently installed plugins to avoid picking one that's already installed.
-	installed, err := c.GetInstalledPlugins()
+	installed, err := c.GetInstalledPlugins(ctx)
 	if err != nil {
 		t.Fatalf("failed to get installed plugins: %v", err)
 	}

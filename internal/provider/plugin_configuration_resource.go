@@ -9,13 +9,11 @@ import (
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
-	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -53,9 +51,7 @@ func (r *PluginConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			"plugin_id": schema.StringAttribute{
 				MarkdownDescription: "The plugin ID (GUID).",
 				Required:            true,
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
+				Validators:          requiredIdentifierValidators(),
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -102,7 +98,7 @@ func (r *PluginConfigurationResource) Create(ctx context.Context, req resource.C
 		return
 	}
 
-	if err := r.client.UpdatePluginConfiguration(data.PluginID.ValueString(), data.Configuration.ValueString()); err != nil {
+	if err := r.client.UpdatePluginConfiguration(ctx, data.PluginID.ValueString(), data.Configuration.ValueString()); err != nil {
 		resp.Diagnostics.AddError("Failed to update plugin configuration", err.Error())
 		return
 	}
@@ -118,7 +114,7 @@ func (r *PluginConfigurationResource) Read(ctx context.Context, req resource.Rea
 		return
 	}
 
-	configJSON, err := r.client.GetPluginConfiguration(data.PluginID.ValueString())
+	configJSON, err := r.client.GetPluginConfiguration(ctx, data.PluginID.ValueString())
 	if err != nil {
 		if client.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)
@@ -147,12 +143,12 @@ func (r *PluginConfigurationResource) Update(ctx context.Context, req resource.U
 		return
 	}
 
-	if err := r.client.UpdatePluginConfiguration(data.PluginID.ValueString(), data.Configuration.ValueString()); err != nil {
+	if err := r.client.UpdatePluginConfiguration(ctx, data.PluginID.ValueString(), data.Configuration.ValueString()); err != nil {
 		resp.Diagnostics.AddError("Failed to update plugin configuration", err.Error())
 		return
 	}
 
-	configJSON, err := r.client.GetPluginConfiguration(data.PluginID.ValueString())
+	configJSON, err := r.client.GetPluginConfiguration(ctx, data.PluginID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read plugin configuration after update", err.Error())
 		return

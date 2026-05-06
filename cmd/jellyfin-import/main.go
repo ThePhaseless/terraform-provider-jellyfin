@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -43,6 +44,7 @@ func main() {
 
 	g := &generator{
 		client:    c,
+		ctx:       context.Background(),
 		outputDir: *outputDir,
 		usedNames: make(map[string]int),
 	}
@@ -57,8 +59,16 @@ func main() {
 
 type generator struct {
 	client    *client.Client
+	ctx       context.Context
 	outputDir string
 	usedNames map[string]int // tracks used resource addresses to avoid collisions
+}
+
+func (g *generator) context() context.Context {
+	if g.ctx != nil {
+		return g.ctx
+	}
+	return context.Background()
 }
 
 // uniqueName returns a unique Terraform resource name, appending a numeric suffix on collision.
@@ -151,7 +161,7 @@ func (g *generator) Generate() error {
 }
 
 func (g *generator) generateUsers() ([]string, []string, error) {
-	users, err := g.client.GetUsers()
+	users, err := g.client.GetUsers(g.context())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -174,7 +184,7 @@ func (g *generator) generateUsers() ([]string, []string, error) {
 }
 
 func (g *generator) generateLibraries() ([]string, []string, error) {
-	folders, err := g.client.GetVirtualFolders()
+	folders, err := g.client.GetVirtualFolders(g.context())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -201,7 +211,7 @@ func (g *generator) generateLibraries() ([]string, []string, error) {
 }
 
 func (g *generator) generateAPIKeys() ([]string, []string, error) {
-	keys, err := g.client.GetAPIKeys()
+	keys, err := g.client.GetAPIKeys(g.context())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -221,7 +231,7 @@ func (g *generator) generateAPIKeys() ([]string, []string, error) {
 }
 
 func (g *generator) generatePluginRepositories() ([]string, []string, error) {
-	repos, err := g.client.GetPluginRepositories()
+	repos, err := g.client.GetPluginRepositories(g.context())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -243,7 +253,7 @@ func (g *generator) generatePluginRepositories() ([]string, []string, error) {
 }
 
 func (g *generator) generatePlugins() ([]string, []string, error) {
-	plugins, err := g.client.GetInstalledPlugins()
+	plugins, err := g.client.GetInstalledPlugins(g.context())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -277,7 +287,7 @@ func (g *generator) resolvePluginRepoURLs(plugins []client.InstalledPlugin) map[
 		result[p.Id] = ""
 	}
 
-	packages, err := g.client.GetAvailablePackages()
+	packages, err := g.client.GetAvailablePackages(g.context())
 	if err != nil {
 		// Non-fatal: we'll use empty repository URLs.
 		return result
@@ -297,7 +307,7 @@ func (g *generator) resolvePluginRepoURLs(plugins []client.InstalledPlugin) map[
 			if result[p.Id] != "" {
 				break
 			}
-			// Fallback: use any version's repository URL for this package.
+			// Fallback: use a version's repository URL for this package.
 			if len(pkg.Versions) > 0 {
 				result[p.Id] = pkg.Versions[0].RepositoryUrl
 			}
@@ -309,7 +319,7 @@ func (g *generator) resolvePluginRepoURLs(plugins []client.InstalledPlugin) map[
 }
 
 func (g *generator) generateScheduledTasks() ([]string, []string, error) {
-	tasks, err := g.client.GetScheduledTasks()
+	tasks, err := g.client.GetScheduledTasks(g.context())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -347,7 +357,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	var imports, resources []string
 
 	// System Configuration
-	sysConfig, err := g.client.GetSystemConfiguration()
+	sysConfig, err := g.client.GetSystemConfiguration(g.context())
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting system configuration: %w", err)
 	}
@@ -362,7 +372,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	}))
 
 	// Encoding Configuration
-	encConfig, err := g.client.GetEncodingOptions()
+	encConfig, err := g.client.GetEncodingOptions(g.context())
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting encoding configuration: %w", err)
 	}
@@ -376,7 +386,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	}))
 
 	// Networking Configuration
-	netConfig, err := g.client.GetNetworkConfiguration()
+	netConfig, err := g.client.GetNetworkConfiguration(g.context())
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting networking configuration: %w", err)
 	}
@@ -390,7 +400,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	}))
 
 	// Branding Configuration
-	brandConfig, err := g.client.GetBrandingConfiguration()
+	brandConfig, err := g.client.GetBrandingConfiguration(g.context())
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting branding configuration: %w", err)
 	}
@@ -404,7 +414,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	}))
 
 	// Live TV Configuration
-	livetvConfig, err := g.client.GetLiveTVConfiguration()
+	livetvConfig, err := g.client.GetLiveTVConfiguration(g.context())
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting livetv configuration: %w", err)
 	}
@@ -418,7 +428,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	}))
 
 	// Metadata Configuration
-	metaConfig, err := g.client.GetMetadataConfiguration()
+	metaConfig, err := g.client.GetMetadataConfiguration(g.context())
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting metadata configuration: %w", err)
 	}

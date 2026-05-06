@@ -89,13 +89,13 @@ func (r *LiveTVConfigurationResource) Create(ctx context.Context, req resource.C
 	}
 
 	config := &client.LiveTVConfiguration{RawJSON: data.ConfigurationJSON.ValueString()}
-	if err := r.client.UpdateLiveTVConfiguration(config); err != nil {
+	if err := r.client.UpdateLiveTVConfiguration(ctx, config); err != nil {
 		resp.Diagnostics.AddError("Failed to update Live TV configuration", err.Error())
 		return
 	}
 
 	data.ID = types.StringValue("livetv")
-	updated, err := r.client.GetLiveTVConfiguration()
+	updated, err := r.client.GetLiveTVConfiguration(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read Live TV configuration after update", err.Error())
 		return
@@ -117,7 +117,7 @@ func (r *LiveTVConfigurationResource) Read(ctx context.Context, req resource.Rea
 		return
 	}
 
-	config, err := r.client.GetLiveTVConfiguration()
+	config, err := r.client.GetLiveTVConfiguration(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read Live TV configuration", err.Error())
 		return
@@ -143,7 +143,7 @@ func (r *LiveTVConfigurationResource) Update(ctx context.Context, req resource.U
 	}
 
 	config := &client.LiveTVConfiguration{RawJSON: data.ConfigurationJSON.ValueString()}
-	if err := r.client.UpdateLiveTVConfiguration(config); err != nil {
+	if err := r.client.UpdateLiveTVConfiguration(ctx, config); err != nil {
 		resp.Diagnostics.AddError("Failed to update Live TV configuration", err.Error())
 		return
 	}

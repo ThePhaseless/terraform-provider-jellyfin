@@ -90,13 +90,13 @@ func (r *NetworkingConfigurationResource) Create(ctx context.Context, req resour
 	}
 
 	config := &client.NetworkConfiguration{RawJSON: data.ConfigurationJSON.ValueString()}
-	if err := r.client.UpdateNetworkConfiguration(config); err != nil {
+	if err := r.client.UpdateNetworkConfiguration(ctx, config); err != nil {
 		resp.Diagnostics.AddError("Failed to update networking configuration", err.Error())
 		return
 	}
 
 	data.ID = types.StringValue("networking")
-	updated, err := r.client.GetNetworkConfiguration()
+	updated, err := r.client.GetNetworkConfiguration(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read networking configuration after update", err.Error())
 		return
@@ -118,7 +118,7 @@ func (r *NetworkingConfigurationResource) Read(ctx context.Context, req resource
 		return
 	}
 
-	config, err := r.client.GetNetworkConfiguration()
+	config, err := r.client.GetNetworkConfiguration(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read networking configuration", err.Error())
 		return
@@ -144,7 +144,7 @@ func (r *NetworkingConfigurationResource) Update(ctx context.Context, req resour
 	}
 
 	config := &client.NetworkConfiguration{RawJSON: data.ConfigurationJSON.ValueString()}
-	if err := r.client.UpdateNetworkConfiguration(config); err != nil {
+	if err := r.client.UpdateNetworkConfiguration(ctx, config); err != nil {
 		resp.Diagnostics.AddError("Failed to update networking configuration", err.Error())
 		return
 	}

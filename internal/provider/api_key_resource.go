@@ -103,7 +103,7 @@ func (r *APIKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 
 	// Snapshot existing keys before creation so we can identify the new one.
-	before, err := r.client.GetAPIKeys()
+	before, err := r.client.GetAPIKeys(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to list API keys before creation", err.Error())
 		return
@@ -113,13 +113,13 @@ func (r *APIKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		existingTokens[k.AccessToken] = struct{}{}
 	}
 
-	if err := r.client.CreateAPIKey(data.AppName.ValueString()); err != nil {
+	if err := r.client.CreateAPIKey(ctx, data.AppName.ValueString()); err != nil {
 		resp.Diagnostics.AddError("Failed to create API key", err.Error())
 		return
 	}
 
 	// Find the newly created key by diffing against the pre-creation snapshot.
-	after, err := r.client.GetAPIKeys()
+	after, err := r.client.GetAPIKeys(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to list API keys after creation", err.Error())
 		return
@@ -152,7 +152,7 @@ func (r *APIKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 
 	// Look up the key by access token to verify it still exists.
-	keys, err := r.client.GetAPIKeys()
+	keys, err := r.client.GetAPIKeys(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read API keys", err.Error())
 		return
@@ -189,7 +189,7 @@ func (r *APIKeyResource) Delete(ctx context.Context, req resource.DeleteRequest,
 		return
 	}
 
-	if err := r.client.DeleteAPIKey(data.AccessToken.ValueString()); err != nil {
+	if err := r.client.DeleteAPIKey(ctx, data.AccessToken.ValueString()); err != nil {
 		if client.IsNotFound(err) {
 			return
 		}

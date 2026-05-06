@@ -133,7 +133,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		password = data.Password.ValueString()
 	}
 
-	user, err := r.client.CreateUser(data.Name.ValueString(), password)
+	user, err := r.client.CreateUser(ctx, data.Name.ValueString(), password)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to create user", err.Error())
 		return
@@ -142,7 +142,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	data.ID = types.StringValue(user.Id)
 
 	// Read back the user to get the full policy with provider IDs.
-	freshUser, err := r.client.GetUserByID(user.Id)
+	freshUser, err := r.client.GetUserByID(ctx, user.Id)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read user after creation", err.Error())
 		return
@@ -162,7 +162,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	freshUser.Policy.IsDisabled = data.IsDisabled.ValueBool()
 	freshUser.Policy.EnableAllFolders = data.EnableAllFolders.ValueBool()
 
-	if err := r.client.UpdateUserPolicy(freshUser.Id, &freshUser.Policy); err != nil {
+	if err := r.client.UpdateUserPolicy(ctx, freshUser.Id, &freshUser.Policy); err != nil {
 		resp.Diagnostics.AddError("Failed to update user policy", err.Error())
 		return
 	}
@@ -177,7 +177,7 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 
-	user, err := r.client.GetUserByID(data.ID.ValueString())
+	user, err := r.client.GetUserByID(ctx, data.ID.ValueString())
 	if err != nil {
 		if client.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)
@@ -224,7 +224,7 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	}
 
 	// Read current user to get existing policy with required fields.
-	currentUser, err := r.client.GetUserByID(state.ID.ValueString())
+	currentUser, err := r.client.GetUserByID(ctx, state.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read current user", err.Error())
 		return
@@ -232,7 +232,7 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 
 	currentUser.Name = data.Name.ValueString()
 
-	if err := r.client.UpdateUser(currentUser); err != nil {
+	if err := r.client.UpdateUser(ctx, currentUser); err != nil {
 		resp.Diagnostics.AddError("Failed to update user", err.Error())
 		return
 	}
@@ -251,21 +251,21 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	currentUser.Policy.IsDisabled = data.IsDisabled.ValueBool()
 	currentUser.Policy.EnableAllFolders = data.EnableAllFolders.ValueBool()
 
-	if err := r.client.UpdateUserPolicy(currentUser.Id, &currentUser.Policy); err != nil {
+	if err := r.client.UpdateUserPolicy(ctx, currentUser.Id, &currentUser.Policy); err != nil {
 		resp.Diagnostics.AddError("Failed to update user policy", err.Error())
 		return
 	}
 
 	// Update password if changed.
 	if !data.Password.IsNull() && !data.Password.Equal(state.Password) {
-		if err := r.client.UpdateUserPassword(currentUser.Id, "", data.Password.ValueString()); err != nil {
+		if err := r.client.UpdateUserPassword(ctx, currentUser.Id, "", data.Password.ValueString()); err != nil {
 			resp.Diagnostics.AddError("Failed to update user password", err.Error())
 			return
 		}
 	}
 
 	data.ID = state.ID
-	updatedUser, err := r.client.GetUserByID(state.ID.ValueString())
+	updatedUser, err := r.client.GetUserByID(ctx, state.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read user after update", err.Error())
 		return
@@ -298,7 +298,7 @@ func (r *UserResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 		return
 	}
 
-	if err := r.client.DeleteUser(data.ID.ValueString()); err != nil {
+	if err := r.client.DeleteUser(ctx, data.ID.ValueString()); err != nil {
 		if client.IsNotFound(err) {
 			return
 		}
