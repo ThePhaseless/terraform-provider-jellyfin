@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -17,6 +16,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -48,11 +49,15 @@ func (r *PluginRepositoryResource) Metadata(_ context.Context, req resource.Meta
 
 func (r *PluginRepositoryResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Manages a plugin repository in Jellyfin. " +
+			"Plugin repositories are managed as a set — this resource adds, updates, or removes " +
+			"a single repository from the server's list.",
 		MarkdownDescription: "Manages a plugin repository in Jellyfin. " +
 			"Plugin repositories are managed as a set — this resource adds, updates, or removes " +
 			"a single repository from the server's list.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
+				Description:         "The repository name.",
 				MarkdownDescription: "The repository name.",
 				Required:            true,
 				Validators: []validator.String{
@@ -60,6 +65,7 @@ func (r *PluginRepositoryResource) Schema(_ context.Context, _ resource.SchemaRe
 				},
 			},
 			"url": schema.StringAttribute{
+				Description:         "The repository URL.",
 				MarkdownDescription: "The repository URL.",
 				Required:            true,
 				Validators: []validator.String{
@@ -67,6 +73,7 @@ func (r *PluginRepositoryResource) Schema(_ context.Context, _ resource.SchemaRe
 				},
 			},
 			"id": schema.StringAttribute{
+				Description:         "The plugin repository resource identifier.",
 				MarkdownDescription: "The plugin repository resource identifier.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -74,6 +81,7 @@ func (r *PluginRepositoryResource) Schema(_ context.Context, _ resource.SchemaRe
 				},
 			},
 			"enabled": schema.BoolAttribute{
+				Description:         "Whether the repository is enabled.",
 				MarkdownDescription: "Whether the repository is enabled.",
 				Optional:            true,
 				Computed:            true,
@@ -123,7 +131,7 @@ func (r *PluginRepositoryResource) Create(ctx context.Context, req resource.Crea
 
 	newRepo := client.PluginRepository{
 		Name:    data.Name.ValueString(),
-		Url:     data.URL.ValueString(),
+		URL:     data.URL.ValueString(),
 		Enabled: data.Enabled.ValueBool(),
 	}
 
@@ -161,7 +169,7 @@ func (r *PluginRepositoryResource) Read(ctx context.Context, req resource.ReadRe
 		repo := repos[index]
 		data.ID = types.StringValue(repo.Name)
 		data.Name = types.StringValue(repo.Name)
-		data.URL = types.StringValue(repo.Url)
+		data.URL = types.StringValue(repo.URL)
 		data.Enabled = types.BoolValue(repo.Enabled)
 		found = true
 	}
@@ -218,7 +226,7 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 	for i := range repos {
 		if i == index {
 			repos[i].Name = data.Name.ValueString()
-			repos[i].Url = data.URL.ValueString()
+			repos[i].URL = data.URL.ValueString()
 			repos[i].Enabled = data.Enabled.ValueBool()
 		}
 		updated = append(updated, repos[i])
@@ -248,7 +256,7 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 	repo := repos[index]
 	data.ID = types.StringValue(repo.Name)
 	data.Name = types.StringValue(repo.Name)
-	data.URL = types.StringValue(repo.Url)
+	data.URL = types.StringValue(repo.URL)
 	data.Enabled = types.BoolValue(repo.Enabled)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -322,7 +330,7 @@ func findPluginRepositoryIndex(repos []client.PluginRepository, name, url string
 
 	if url != "" {
 		for _, i := range matches {
-			if repos[i].Url == url {
+			if repos[i].URL == url {
 				return i, nil
 			}
 		}

@@ -56,9 +56,9 @@ func (c *Client) UpdateStartupConfiguration(ctx context.Context, config *Startup
 
 // SetStartupUser sets the initial admin user during setup.
 func (c *Client) SetStartupUser(ctx context.Context, name, password string) error {
-	body := StartupUser{
-		Name:     name,
-		Password: password,
+	body := map[string]string{
+		"Name":     name,
+		"Password": password,
 	}
 	jsonBody, err := json.Marshal(body)
 	if err != nil {

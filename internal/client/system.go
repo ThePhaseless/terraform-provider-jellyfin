@@ -12,7 +12,7 @@ import (
 
 // SystemInfo represents the full system information from /System/Info.
 type SystemInfo struct {
-	Id                string `json:"Id"`
+	ID                string `json:"Id"`
 	ServerName        string `json:"ServerName"`
 	Version           string `json:"Version"`
 	OperatingSystem   string `json:"OperatingSystem"`
@@ -22,7 +22,7 @@ type SystemInfo struct {
 
 // PublicSystemInfo represents public system information from /System/Info/Public.
 type PublicSystemInfo struct {
-	Id                     string `json:"Id"`
+	ID                     string `json:"Id"`
 	ServerName             string `json:"ServerName"`
 	Version                string `json:"Version"`
 	LocalAddress           string `json:"LocalAddress"`

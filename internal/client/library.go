@@ -17,7 +17,7 @@ type VirtualFolder struct {
 	Name           string          `json:"Name"`
 	Locations      []string        `json:"Locations"`
 	CollectionType string          `json:"CollectionType"`
-	ItemId         string          `json:"ItemId"`
+	ItemID         string          `json:"ItemID"`
 	LibraryOptions json.RawMessage `json:"LibraryOptions,omitempty"`
 }
 

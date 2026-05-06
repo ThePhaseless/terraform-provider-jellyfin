@@ -8,13 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -45,10 +46,13 @@ func (r *ScheduledTaskResource) Metadata(_ context.Context, req resource.Metadat
 
 func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Manages triggers for a Jellyfin scheduled task. " +
+			"Allows configuring when scheduled tasks run (e.g., library scans, trickplay generation).",
 		MarkdownDescription: "Manages triggers for a Jellyfin scheduled task. " +
 			"Allows configuring when scheduled tasks run (e.g., library scans, trickplay generation).",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
+				Description:         "The resource identifier, matching the scheduled task ID.",
 				MarkdownDescription: "The resource identifier, matching the scheduled task ID.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -56,6 +60,7 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 				},
 			},
 			"task_id": schema.StringAttribute{
+				Description:         "The unique identifier of the scheduled task.",
 				MarkdownDescription: "The unique identifier of the scheduled task.",
 				Required:            true,
 				Validators:          requiredIdentifierValidators(),
@@ -64,6 +69,9 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 				},
 			},
 			"triggers_json": schema.StringAttribute{
+				Description: "The task triggers as a JSON array string. Each trigger object can have " +
+					"Type (DailyTrigger, IntervalTrigger, StartupTrigger, WeeklyTrigger), " +
+					"TimeOfDayTicks, IntervalTicks, DayOfWeek, MaxRuntimeTicks.",
 				MarkdownDescription: "The task triggers as a JSON array string. Each trigger object can have " +
 					"Type (DailyTrigger, IntervalTrigger, StartupTrigger, WeeklyTrigger), " +
 					"TimeOfDayTicks, IntervalTicks, DayOfWeek, MaxRuntimeTicks.",
@@ -144,8 +152,8 @@ func (r *ScheduledTaskResource) Read(ctx context.Context, req resource.ReadReque
 	}
 
 	data.TriggersJSON = jsontypes.NewNormalizedValue(normalizedTriggers)
-	data.ID = types.StringValue(task.Id)
-	data.TaskID = types.StringValue(task.Id)
+	data.ID = types.StringValue(task.ID)
+	data.TaskID = types.StringValue(task.ID)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -177,8 +185,8 @@ func (r *ScheduledTaskResource) Update(ctx context.Context, req resource.UpdateR
 		resp.Diagnostics.AddError("Failed to normalize task triggers", err.Error())
 		return
 	}
-	data.ID = types.StringValue(task.Id)
-	data.TaskID = types.StringValue(task.Id)
+	data.ID = types.StringValue(task.ID)
+	data.TaskID = types.StringValue(task.ID)
 	data.TriggersJSON = jsontypes.NewNormalizedValue(normalizedTriggers)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

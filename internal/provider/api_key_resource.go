@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -16,6 +15,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -46,10 +47,13 @@ func (r *APIKeyResource) Metadata(_ context.Context, req resource.MetadataReques
 
 func (r *APIKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Manages an API key in Jellyfin. API keys provide authentication tokens for " +
+			"external applications to access the Jellyfin API.",
 		MarkdownDescription: "Manages an API key in Jellyfin. API keys provide authentication tokens for " +
 			"external applications to access the Jellyfin API.",
 		Attributes: map[string]schema.Attribute{
 			"app_name": schema.StringAttribute{
+				Description:         "The application name for the API key.",
 				MarkdownDescription: "The application name for the API key.",
 				Required:            true,
 				Validators: []validator.String{
@@ -60,6 +64,7 @@ func (r *APIKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"id": schema.StringAttribute{
+				Description:         "The API key resource identifier.",
 				MarkdownDescription: "The API key resource identifier.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -67,6 +72,7 @@ func (r *APIKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"access_token": schema.StringAttribute{
+				Description:         "The generated access token (API key). This is set by Jellyfin upon creation.",
 				MarkdownDescription: "The generated access token (API key). This is set by Jellyfin upon creation.",
 				Computed:            true,
 				Sensitive:           true,

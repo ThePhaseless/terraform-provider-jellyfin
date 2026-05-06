@@ -9,8 +9,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 const stableRepoURL = "https://repo.jellyfin.org/files/plugin/manifest.json"
@@ -71,14 +72,14 @@ func testAccFindInstallablePlugin(t *testing.T, repoURL string) (name, version s
 	// Register the stable repo temporarily if it's not already there.
 	repoAlreadyRegistered := false
 	for _, r := range repos {
-		if r.Url == repoURL {
+		if r.URL == repoURL {
 			repoAlreadyRegistered = true
 			break
 		}
 	}
 
 	if !repoAlreadyRegistered {
-		tempRepo := client.PluginRepository{Name: "jellyfin-stable-temp", Url: repoURL, Enabled: true}
+		tempRepo := client.PluginRepository{Name: "jellyfin-stable-temp", URL: repoURL, Enabled: true}
 		if err := c.SetPluginRepositories(ctx, append(repos, tempRepo)); err != nil {
 			t.Fatalf("failed to register stable repository for package listing: %v", err)
 		}

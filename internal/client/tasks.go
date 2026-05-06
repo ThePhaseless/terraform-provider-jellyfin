@@ -15,7 +15,7 @@ import (
 type ScheduledTask struct {
 	Name        string            `json:"Name"`
 	State       string            `json:"State"`
-	Id          string            `json:"Id"`
+	ID          string            `json:"Id"`
 	Description string            `json:"Description"`
 	Category    string            `json:"Category"`
 	IsHidden    bool              `json:"IsHidden"`

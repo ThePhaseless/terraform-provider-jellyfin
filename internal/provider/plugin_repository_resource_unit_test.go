@@ -13,9 +13,9 @@ func TestFindPluginRepositoryIndex(t *testing.T) {
 	t.Parallel()
 
 	repos := []client.PluginRepository{
-		{Name: "stable", Url: "https://stable.example/manifest.json", Enabled: true},
-		{Name: "testing", Url: "https://testing.example/manifest.json", Enabled: true},
-		{Name: "stable", Url: "https://mirror.example/manifest.json", Enabled: true},
+		{Name: "stable", URL: "https://stable.example/manifest.json", Enabled: true},
+		{Name: "testing", URL: "https://testing.example/manifest.json", Enabled: true},
+		{Name: "stable", URL: "https://mirror.example/manifest.json", Enabled: true},
 	}
 
 	tests := []struct {
@@ -55,6 +55,8 @@ func TestFindPluginRepositoryIndex(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			index, err := findPluginRepositoryIndex(tt.repos, tt.repoName, tt.repoURL)
 			if tt.wantErr {
 				if err == nil {

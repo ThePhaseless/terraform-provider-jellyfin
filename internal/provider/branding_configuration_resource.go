@@ -7,13 +7,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -43,10 +44,13 @@ func (r *BrandingConfigurationResource) Metadata(_ context.Context, req resource
 
 func (r *BrandingConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Manages the Jellyfin branding configuration. " +
+			"Controls branding settings such as the splashscreen.",
 		MarkdownDescription: "Manages the Jellyfin branding configuration. " +
 			"Controls branding settings such as the splashscreen.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
+				Description:         "Resource identifier. Always set to `branding` for this singleton resource.",
 				MarkdownDescription: "Resource identifier. Always set to `branding` for this singleton resource.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -54,6 +58,8 @@ func (r *BrandingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 				},
 			},
 			"configuration_json": schema.StringAttribute{
+				Description: "The branding configuration as a JSON string. " +
+					"Supports settings like SplashscreenEnabled.",
 				MarkdownDescription: "The branding configuration as a JSON string. " +
 					"Supports settings like SplashscreenEnabled.",
 				Required:   true,
@@ -156,7 +162,7 @@ func (r *BrandingConfigurationResource) Delete(_ context.Context, _ resource.Del
 	// Branding configuration cannot be deleted. We just remove from state.
 }
 
-func (r *BrandingConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *BrandingConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Singleton resource — the import ID is not used. Read will populate all fields.
 	data := BrandingConfigurationResourceModel{
 		ID:                types.StringValue("branding"),

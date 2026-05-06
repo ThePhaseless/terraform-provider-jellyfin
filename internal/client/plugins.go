@@ -14,7 +14,7 @@ import (
 // PluginRepository represents a plugin repository.
 type PluginRepository struct {
 	Name    string `json:"Name"`
-	Url     string `json:"Url"`
+	URL     string `json:"Url"`
 	Enabled bool   `json:"Enabled"`
 }
 
@@ -22,7 +22,7 @@ type PluginRepository struct {
 type InstalledPlugin struct {
 	Name         string `json:"Name"`
 	Version      string `json:"Version"`
-	Id           string `json:"Id"`
+	ID           string `json:"Id"`
 	Description  string `json:"Description"`
 	Status       string `json:"Status"`
 	CanUninstall bool   `json:"CanUninstall"`
@@ -41,11 +41,11 @@ type VersionInfo struct {
 	Version        string `json:"version"`
 	VersionNumber  string `json:"VersionNumber"`
 	TargetAbi      string `json:"targetAbi"`
-	SourceUrl      string `json:"sourceUrl"`
+	SourceURL      string `json:"sourceUrl"`
 	Checksum       string `json:"checksum"`
 	Timestamp      string `json:"timestamp"`
 	RepositoryName string `json:"repositoryName"`
-	RepositoryUrl  string `json:"repositoryUrl"`
+	RepositoryURL  string `json:"repositoryURL"`
 }
 
 // GetPluginRepositories retrieves all configured plugin repositories.
@@ -83,10 +83,10 @@ func (c *Client) GetInstalledPlugins(ctx context.Context) ([]InstalledPlugin, er
 }
 
 // InstallPlugin installs a plugin by name and version from a specific repository.
-func (c *Client) InstallPlugin(ctx context.Context, name, version, repositoryUrl string) error {
+func (c *Client) InstallPlugin(ctx context.Context, name, version, repositoryURL string) error {
 	params := url.Values{}
 	params.Set("version", version)
-	params.Set("repositoryUrl", repositoryUrl)
+	params.Set("repositoryURL", repositoryURL)
 
 	path := fmt.Sprintf("/Packages/Installed/%s?%s", url.PathEscape(name), params.Encode())
 
@@ -97,27 +97,27 @@ func (c *Client) InstallPlugin(ctx context.Context, name, version, repositoryUrl
 }
 
 // UninstallPlugin removes an installed plugin by its ID.
-func (c *Client) UninstallPlugin(ctx context.Context, pluginId string) error {
-	if err := c.delete(ctx, fmt.Sprintf("/Plugins/%s", url.PathEscape(pluginId))); err != nil {
-		return fmt.Errorf("uninstalling plugin %s: %w", pluginId, err)
+func (c *Client) UninstallPlugin(ctx context.Context, pluginID string) error {
+	if err := c.delete(ctx, fmt.Sprintf("/Plugins/%s", url.PathEscape(pluginID))); err != nil {
+		return fmt.Errorf("uninstalling plugin %s: %w", pluginID, err)
 	}
 	return nil
 }
 
 // GetPluginConfiguration retrieves the configuration for a plugin as raw JSON.
-func (c *Client) GetPluginConfiguration(ctx context.Context, pluginId string) (string, error) {
-	raw, err := c.getRaw(ctx, fmt.Sprintf("/Plugins/%s/Configuration", url.PathEscape(pluginId)))
+func (c *Client) GetPluginConfiguration(ctx context.Context, pluginID string) (string, error) {
+	raw, err := c.getRaw(ctx, fmt.Sprintf("/Plugins/%s/Configuration", url.PathEscape(pluginID)))
 	if err != nil {
-		return "", fmt.Errorf("getting configuration for plugin %s: %w", pluginId, err)
+		return "", fmt.Errorf("getting configuration for plugin %s: %w", pluginID, err)
 	}
 	return raw, nil
 }
 
 // UpdatePluginConfiguration updates the configuration for a plugin with raw JSON.
-func (c *Client) UpdatePluginConfiguration(ctx context.Context, pluginId string, configJSON string) error {
-	path := fmt.Sprintf("/Plugins/%s/Configuration", url.PathEscape(pluginId))
+func (c *Client) UpdatePluginConfiguration(ctx context.Context, pluginID string, configJSON string) error {
+	path := fmt.Sprintf("/Plugins/%s/Configuration", url.PathEscape(pluginID))
 	if err := c.postRaw(ctx, path, configJSON); err != nil {
-		return fmt.Errorf("updating configuration for plugin %s: %w", pluginId, err)
+		return fmt.Errorf("updating configuration for plugin %s: %w", pluginID, err)
 	}
 	return nil
 }

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -18,6 +17,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -49,9 +50,11 @@ func (r *PluginResource) Metadata(_ context.Context, req resource.MetadataReques
 
 func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description:         "Installs a plugin on the Jellyfin server. The server may require a restart after installation.",
 		MarkdownDescription: "Installs a plugin on the Jellyfin server. The server may require a restart after installation.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
+				Description:         "The plugin ID assigned by Jellyfin after installation.",
 				MarkdownDescription: "The plugin ID assigned by Jellyfin after installation.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -59,6 +62,7 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"name": schema.StringAttribute{
+				Description:         "The plugin package name.",
 				MarkdownDescription: "The plugin package name.",
 				Required:            true,
 				Validators:          requiredIdentifierValidators(),
@@ -67,6 +71,7 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"version": schema.StringAttribute{
+				Description:         "The plugin version to install.",
 				MarkdownDescription: "The plugin version to install.",
 				Required:            true,
 				Validators: []validator.String{
@@ -77,6 +82,7 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"repository_url": schema.StringAttribute{
+				Description:         "The repository URL from which to install the plugin. Required when creating the resource and resolved automatically on import when the exact package version is still available.",
 				MarkdownDescription: "The repository URL from which to install the plugin. Required when creating the resource and resolved automatically on import when the exact package version is still available.",
 				Optional:            true,
 				Computed:            true,
@@ -156,8 +162,8 @@ func (r *PluginResource) Read(ctx context.Context, req resource.ReadRequest, res
 
 	found := false
 	for _, p := range plugins {
-		if p.Id == data.ID.ValueString() || p.Name == data.Name.ValueString() {
-			data.ID = types.StringValue(p.Id)
+		if p.ID == data.ID.ValueString() || p.Name == data.Name.ValueString() {
+			data.ID = types.StringValue(p.ID)
 			data.Name = types.StringValue(p.Name)
 			data.Version = types.StringValue(p.Version)
 			found = true
@@ -210,7 +216,7 @@ func (r *PluginResource) waitForPlugin(ctx context.Context, name string, timeout
 		}
 		for _, p := range plugins {
 			if p.Name == name {
-				return p.Id, nil
+				return p.ID, nil
 			}
 		}
 		tflog.Debug(ctx, "Waiting for plugin to appear", map[string]interface{}{"plugin": name})
@@ -238,8 +244,8 @@ func (r *PluginResource) resolveRepositoryURL(ctx context.Context, name, version
 	for _, pkg := range pkgs {
 		if pkg.Name == name {
 			for _, v := range pkg.Versions {
-				if v.Version == version && v.RepositoryUrl != "" {
-					return v.RepositoryUrl
+				if v.Version == version && v.RepositoryURL != "" {
+					return v.RepositoryURL
 				}
 			}
 

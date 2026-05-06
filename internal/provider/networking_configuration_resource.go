@@ -7,13 +7,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -43,11 +44,15 @@ func (r *NetworkingConfigurationResource) Metadata(_ context.Context, req resour
 
 func (r *NetworkingConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Manages the Jellyfin networking configuration. " +
+			"Controls network settings including HTTPS, ports, remote access, proxy settings, and IP filtering. " +
+			"The configuration is passed as a JSON string for full flexibility.",
 		MarkdownDescription: "Manages the Jellyfin networking configuration. " +
 			"Controls network settings including HTTPS, ports, remote access, proxy settings, and IP filtering. " +
 			"The configuration is passed as a JSON string for full flexibility.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
+				Description:         "Resource identifier. Always set to `networking` for this singleton resource.",
 				MarkdownDescription: "Resource identifier. Always set to `networking` for this singleton resource.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -55,6 +60,9 @@ func (r *NetworkingConfigurationResource) Schema(_ context.Context, _ resource.S
 				},
 			},
 			"configuration_json": schema.StringAttribute{
+				Description: "The networking configuration as a JSON string. Supports all Jellyfin network settings " +
+					"including BaseUrl, EnableHttps, RequireHttps, CertificatePath, InternalHttpPort, PublicHttpPort, " +
+					"EnableRemoteAccess, KnownProxies, RemoteIPFilter, and more.",
 				MarkdownDescription: "The networking configuration as a JSON string. Supports all Jellyfin network settings " +
 					"including BaseUrl, EnableHttps, RequireHttps, CertificatePath, InternalHttpPort, PublicHttpPort, " +
 					"EnableRemoteAccess, KnownProxies, RemoteIPFilter, and more.",
@@ -158,7 +166,7 @@ func (r *NetworkingConfigurationResource) Delete(_ context.Context, _ resource.D
 	// Networking configuration cannot be deleted. We just remove from state.
 }
 
-func (r *NetworkingConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *NetworkingConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Singleton resource — the import ID is not used. Read will populate all fields.
 	data := NetworkingConfigurationResourceModel{
 		ID:                types.StringValue("networking"),

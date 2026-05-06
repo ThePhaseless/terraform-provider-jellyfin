@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -19,6 +18,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -52,9 +53,11 @@ func (r *LibraryResource) Metadata(_ context.Context, req resource.MetadataReque
 
 func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description:         "Manages a Jellyfin media library (virtual folder).",
 		MarkdownDescription: "Manages a Jellyfin media library (virtual folder).",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
+				Description:         "The library name.",
 				MarkdownDescription: "The library name.",
 				Required:            true,
 				Validators: []validator.String{
@@ -65,6 +68,7 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"collection_type": schema.StringAttribute{
+				Description:         "The collection type (e.g., `movies`, `tvshows`, `music`, `books`, `homevideos`, `boxsets`, `mixed`).",
 				MarkdownDescription: "The collection type (e.g., `movies`, `tvshows`, `music`, `books`, `homevideos`, `boxsets`, `mixed`).",
 				Required:            true,
 				Validators: []validator.String{
@@ -75,6 +79,7 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"paths": schema.ListAttribute{
+				Description:         "List of file system paths for this library.",
 				MarkdownDescription: "List of file system paths for this library.",
 				Required:            true,
 				ElementType:         types.StringType,
@@ -83,12 +88,14 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"library_options_json": schema.StringAttribute{
+				Description:         "Library options as a JSON string. Allows full customization of library settings.",
 				MarkdownDescription: "Library options as a JSON string. Allows full customization of library settings.",
 				Optional:            true,
 				Computed:            true,
 				CustomType:          jsontypes.NormalizedType{},
 			},
 			"item_id": schema.StringAttribute{
+				Description:         "The internal item ID assigned by Jellyfin.",
 				MarkdownDescription: "The internal item ID assigned by Jellyfin.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -96,6 +103,7 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"id": schema.StringAttribute{
+				Description:         "The library resource identifier.",
 				MarkdownDescription: "The library resource identifier.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -146,14 +154,14 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	// Read back to get the ItemId.
+	// Read back to get the ItemID.
 	folder, err := r.findFolder(ctx, data.Name.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read library after creation", err.Error())
 		return
 	}
 
-	data.ItemID = types.StringValue(folder.ItemId)
+	data.ItemID = types.StringValue(folder.ItemID)
 	data.ID = types.StringValue(folder.Name)
 
 	opts := folder.GetLibraryOptions()
@@ -184,7 +192,7 @@ func (r *LibraryResource) Read(ctx context.Context, req resource.ReadRequest, re
 	}
 
 	data.CollectionType = types.StringValue(folder.CollectionType)
-	data.ItemID = types.StringValue(folder.ItemId)
+	data.ItemID = types.StringValue(folder.ItemID)
 	data.ID = types.StringValue(folder.Name)
 
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, folder.Locations)
@@ -225,7 +233,7 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	data.ItemID = types.StringValue(folder.ItemId)
+	data.ItemID = types.StringValue(folder.ItemID)
 	data.ID = types.StringValue(folder.Name)
 
 	opts := folder.GetLibraryOptions()

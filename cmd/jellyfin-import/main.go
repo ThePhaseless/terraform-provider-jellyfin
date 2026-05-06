@@ -169,7 +169,7 @@ func (g *generator) generateUsers() ([]string, []string, error) {
 	var imports, resources []string
 	for _, user := range users {
 		name := g.uniqueName("jellyfin_user", sanitizeName(user.Name))
-		imports = append(imports, importBlock("jellyfin_user", name, user.Id))
+		imports = append(imports, importBlock("jellyfin_user", name, user.ID))
 
 		attrs := map[string]string{
 			"name":               quote(user.Name),
@@ -243,7 +243,7 @@ func (g *generator) generatePluginRepositories() ([]string, []string, error) {
 
 		attrs := map[string]string{
 			"name":    quote(repo.Name),
-			"url":     quote(repo.Url),
+			"url":     quote(repo.URL),
 			"enabled": fmt.Sprintf("%t", repo.Enabled),
 		}
 		resources = append(resources, resourceBlock("jellyfin_plugin_repository", name, attrs))
@@ -264,9 +264,9 @@ func (g *generator) generatePlugins() ([]string, []string, error) {
 	var imports, resources []string
 	for _, plugin := range plugins {
 		name := g.uniqueName("jellyfin_plugin", sanitizeName(plugin.Name))
-		imports = append(imports, importBlock("jellyfin_plugin", name, plugin.Id))
+		imports = append(imports, importBlock("jellyfin_plugin", name, plugin.ID))
 
-		repoURL := repoURLs[plugin.Id]
+		repoURL := repoURLs[plugin.ID]
 
 		attrs := map[string]string{
 			"name":           quote(plugin.Name),
@@ -284,7 +284,7 @@ func (g *generator) generatePlugins() ([]string, []string, error) {
 func (g *generator) resolvePluginRepoURLs(plugins []client.InstalledPlugin) map[string]string {
 	result := make(map[string]string)
 	for _, p := range plugins {
-		result[p.Id] = ""
+		result[p.ID] = ""
 	}
 
 	packages, err := g.client.GetAvailablePackages(g.context())
@@ -300,16 +300,16 @@ func (g *generator) resolvePluginRepoURLs(plugins []client.InstalledPlugin) map[
 			}
 			for _, v := range pkg.Versions {
 				if v.Version == p.Version {
-					result[p.Id] = v.RepositoryUrl
+					result[p.ID] = v.RepositoryURL
 					break
 				}
 			}
-			if result[p.Id] != "" {
+			if result[p.ID] != "" {
 				break
 			}
 			// Fallback: use a version's repository URL for this package.
 			if len(pkg.Versions) > 0 {
-				result[p.Id] = pkg.Versions[0].RepositoryUrl
+				result[p.ID] = pkg.Versions[0].RepositoryURL
 			}
 			break
 		}
@@ -331,20 +331,20 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 		}
 
 		name := g.uniqueName("jellyfin_scheduled_task", sanitizeName(task.Name))
-		imports = append(imports, importBlock("jellyfin_scheduled_task", name, task.Id))
+		imports = append(imports, importBlock("jellyfin_scheduled_task", name, task.ID))
 
 		triggersJSON, err := json.Marshal(task.Triggers)
 		if err != nil {
-			return nil, nil, fmt.Errorf("marshaling triggers for task %s: %w", task.Id, err)
+			return nil, nil, fmt.Errorf("marshaling triggers for task %s: %w", task.ID, err)
 		}
 
 		prettyTriggers, err := prettyJSON(string(triggersJSON))
 		if err != nil {
-			return nil, nil, fmt.Errorf("formatting triggers for task %s: %w", task.Id, err)
+			return nil, nil, fmt.Errorf("formatting triggers for task %s: %w", task.ID, err)
 		}
 
 		attrs := map[string]string{
-			"task_id":       quote(task.Id),
+			"task_id":       quote(task.ID),
 			"triggers_json": "jsonencode(" + prettyTriggers + ")",
 		}
 		resources = append(resources, resourceBlock("jellyfin_scheduled_task", name, attrs))
@@ -446,7 +446,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 
 func (g *generator) writeFile(name, content string) error {
 	p := filepath.Join(g.outputDir, name)
-	return os.WriteFile(p, []byte(content+"\n"), 0o644)
+	return os.WriteFile(p, []byte(content+"\n"), 0o600)
 }
 
 // sanitizeName converts a human-readable name to a valid Terraform identifier.

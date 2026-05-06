@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -15,6 +14,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -45,10 +46,13 @@ func (r *PluginConfigurationResource) Metadata(_ context.Context, req resource.M
 
 func (r *PluginConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Manages plugin configuration in Jellyfin. Configuration is passed as a JSON string, " +
+			"allowing universal support for any plugin settings including SSO-Auth.",
 		MarkdownDescription: "Manages plugin configuration in Jellyfin. Configuration is passed as a JSON string, " +
 			"allowing universal support for any plugin settings including SSO-Auth.",
 		Attributes: map[string]schema.Attribute{
 			"plugin_id": schema.StringAttribute{
+				Description:         "The plugin ID (GUID).",
 				MarkdownDescription: "The plugin ID (GUID).",
 				Required:            true,
 				Validators:          requiredIdentifierValidators(),
@@ -57,6 +61,7 @@ func (r *PluginConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				},
 			},
 			"id": schema.StringAttribute{
+				Description:         "The plugin configuration resource identifier.",
 				MarkdownDescription: "The plugin configuration resource identifier.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -64,6 +69,9 @@ func (r *PluginConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				},
 			},
 			"configuration_json": schema.StringAttribute{
+				Description: "The plugin configuration as a JSON string. " +
+					"For SSO-Auth, this would include SAML/OIDC configuration. " +
+					"This allows universal configuration of any plugin.",
 				MarkdownDescription: "The plugin configuration as a JSON string. " +
 					"For SSO-Auth, this would include SAML/OIDC configuration. " +
 					"This allows universal configuration of any plugin.",
@@ -164,7 +172,7 @@ func (r *PluginConfigurationResource) Update(ctx context.Context, req resource.U
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func (r *PluginConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, resp *resource.DeleteResponse) {
+func (r *PluginConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
 	// Plugin configuration cannot truly be deleted — it resets when the plugin is uninstalled.
 	// We simply remove it from state.
 }

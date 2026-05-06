@@ -15,7 +15,7 @@ import (
 
 // User represents a Jellyfin user.
 type User struct {
-	Id     string     `json:"Id"`
+	ID     string     `json:"Id"`
 	Name   string     `json:"Name"`
 	Policy UserPolicy `json:"Policy"`
 }
@@ -59,8 +59,8 @@ type UserPolicy struct {
 	BlockedMediaFolders              []string          `json:"BlockedMediaFolders"`
 	BlockedChannels                  []string          `json:"BlockedChannels"`
 	RemoteClientBitrateLimit         int               `json:"RemoteClientBitrateLimit"`
-	AuthenticationProviderId         string            `json:"AuthenticationProviderId"`
-	PasswordResetProviderId          string            `json:"PasswordResetProviderId"`
+	AuthenticationProviderID         string            `json:"AuthenticationProviderID"`
+	PasswordResetProviderID          string            `json:"PasswordResetProviderID"`
 	SyncPlayAccess                   string            `json:"SyncPlayAccess"`
 	EnableCollectionManagement       bool              `json:"EnableCollectionManagement"`
 	EnableSubtitleManagement         bool              `json:"EnableSubtitleManagement"`
@@ -71,7 +71,7 @@ type UserPolicy struct {
 type AuthResult struct {
 	User        User   `json:"User"`
 	AccessToken string `json:"AccessToken"`
-	ServerId    string `json:"ServerId"`
+	ServerID    string `json:"ServerID"`
 }
 
 // GetUsers retrieves all users.
@@ -127,10 +127,10 @@ func (c *Client) DeleteUser(ctx context.Context, id string) error {
 func (c *Client) UpdateUser(ctx context.Context, user *User) error {
 	jsonBody, err := json.Marshal(user)
 	if err != nil {
-		return fmt.Errorf("marshaling update user request for %s: %w", user.Id, err)
+		return fmt.Errorf("marshaling update user request for %s: %w", user.ID, err)
 	}
-	if err := c.post(ctx, fmt.Sprintf("/Users/%s", url.PathEscape(user.Id)), jsonBody); err != nil {
-		return fmt.Errorf("updating user %s: %w", user.Id, err)
+	if err := c.post(ctx, fmt.Sprintf("/Users/%s", url.PathEscape(user.ID)), jsonBody); err != nil {
+		return fmt.Errorf("updating user %s: %w", user.ID, err)
 	}
 	return nil
 }

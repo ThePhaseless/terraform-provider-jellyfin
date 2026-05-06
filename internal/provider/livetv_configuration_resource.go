@@ -7,13 +7,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -43,10 +44,13 @@ func (r *LiveTVConfigurationResource) Metadata(_ context.Context, req resource.M
 
 func (r *LiveTVConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Manages the Jellyfin Live TV configuration. " +
+			"Controls Live TV settings such as recording options, tuner hosts, and listing providers.",
 		MarkdownDescription: "Manages the Jellyfin Live TV configuration. " +
 			"Controls Live TV settings such as recording options, tuner hosts, and listing providers.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
+				Description:         "Resource identifier. Always set to `livetv` for this singleton resource.",
 				MarkdownDescription: "Resource identifier. Always set to `livetv` for this singleton resource.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -54,6 +58,9 @@ func (r *LiveTVConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				},
 			},
 			"configuration_json": schema.StringAttribute{
+				Description: "The Live TV configuration as a JSON string. " +
+					"Supports settings like EnableRecordingSubfolders, PrePaddingSeconds, PostPaddingSeconds, " +
+					"TunerHosts, ListingProviders, SaveRecordingNFO, and SaveRecordingImages.",
 				MarkdownDescription: "The Live TV configuration as a JSON string. " +
 					"Supports settings like EnableRecordingSubfolders, PrePaddingSeconds, PostPaddingSeconds, " +
 					"TunerHosts, ListingProviders, SaveRecordingNFO, and SaveRecordingImages.",
@@ -157,7 +164,7 @@ func (r *LiveTVConfigurationResource) Delete(_ context.Context, _ resource.Delet
 	// Live TV configuration cannot be deleted. We just remove from state.
 }
 
-func (r *LiveTVConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *LiveTVConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Singleton resource — the import ID is not used. Read will populate all fields.
 	data := LiveTVConfigurationResourceModel{
 		ID:                types.StringValue("livetv"),

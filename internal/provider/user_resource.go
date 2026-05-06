@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -19,6 +18,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -53,9 +54,11 @@ func (r *UserResource) Metadata(_ context.Context, req resource.MetadataRequest,
 
 func (r *UserResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description:         "Manages a Jellyfin user.",
 		MarkdownDescription: "Manages a Jellyfin user.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
+				Description:         "The unique user identifier.",
 				MarkdownDescription: "The unique user identifier.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -63,6 +66,7 @@ func (r *UserResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 				},
 			},
 			"name": schema.StringAttribute{
+				Description:         "The username.",
 				MarkdownDescription: "The username.",
 				Required:            true,
 				Validators: []validator.String{
@@ -70,29 +74,37 @@ func (r *UserResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 				},
 			},
 			"password": schema.StringAttribute{
+				Description:         "The user password.",
 				MarkdownDescription: "The user password.",
 				Optional:            true,
 				Sensitive:           true,
 			},
 			"is_administrator": schema.BoolAttribute{
+				Description:         "Whether the user is an administrator.",
 				MarkdownDescription: "Whether the user is an administrator.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
 			},
 			"is_disabled": schema.BoolAttribute{
+				Description:         "Whether the user is disabled.",
 				MarkdownDescription: "Whether the user is disabled.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
 			},
 			"enable_all_folders": schema.BoolAttribute{
+				Description:         "Whether the user has access to all folders.",
 				MarkdownDescription: "Whether the user has access to all folders.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(true),
 			},
 			"policy_json": schema.StringAttribute{
+				Description: "The full user policy as a JSON string. When provided, this will be merged with " +
+					"the existing policy. This allows configuring all policy fields including access schedules, " +
+					"parental controls, transcoding permissions, and more. Individual policy attributes like " +
+					"`is_administrator` take precedence over values in this JSON.",
 				MarkdownDescription: "The full user policy as a JSON string. When provided, this will be merged with " +
 					"the existing policy. This allows configuring all policy fields including access schedules, " +
 					"parental controls, transcoding permissions, and more. Individual policy attributes like " +
@@ -139,10 +151,10 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
-	data.ID = types.StringValue(user.Id)
+	data.ID = types.StringValue(user.ID)
 
 	// Read back the user to get the full policy with provider IDs.
-	freshUser, err := r.client.GetUserByID(ctx, user.Id)
+	freshUser, err := r.client.GetUserByID(ctx, user.ID)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read user after creation", err.Error())
 		return
@@ -162,7 +174,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	freshUser.Policy.IsDisabled = data.IsDisabled.ValueBool()
 	freshUser.Policy.EnableAllFolders = data.EnableAllFolders.ValueBool()
 
-	if err := r.client.UpdateUserPolicy(ctx, freshUser.Id, &freshUser.Policy); err != nil {
+	if err := r.client.UpdateUserPolicy(ctx, freshUser.ID, &freshUser.Policy); err != nil {
 		resp.Diagnostics.AddError("Failed to update user policy", err.Error())
 		return
 	}
@@ -251,14 +263,14 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	currentUser.Policy.IsDisabled = data.IsDisabled.ValueBool()
 	currentUser.Policy.EnableAllFolders = data.EnableAllFolders.ValueBool()
 
-	if err := r.client.UpdateUserPolicy(ctx, currentUser.Id, &currentUser.Policy); err != nil {
+	if err := r.client.UpdateUserPolicy(ctx, currentUser.ID, &currentUser.Policy); err != nil {
 		resp.Diagnostics.AddError("Failed to update user policy", err.Error())
 		return
 	}
 
 	// Update password if changed.
 	if !data.Password.IsNull() && !data.Password.Equal(state.Password) {
-		if err := r.client.UpdateUserPassword(ctx, currentUser.Id, "", data.Password.ValueString()); err != nil {
+		if err := r.client.UpdateUserPassword(ctx, currentUser.ID, "", data.Password.ValueString()); err != nil {
 			resp.Diagnostics.AddError("Failed to update user password", err.Error())
 			return
 		}

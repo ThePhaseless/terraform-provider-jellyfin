@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -18,6 +17,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -48,11 +49,15 @@ func (r *SystemConfigurationResource) Metadata(_ context.Context, req resource.M
 
 func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Manages the Jellyfin system configuration. Can be used for initial setup and ongoing configuration. " +
+			"The `configuration_json` attribute accepts the full system configuration as JSON, allowing " +
+			"complete control over all settings.",
 		MarkdownDescription: "Manages the Jellyfin system configuration. Can be used for initial setup and ongoing configuration. " +
 			"The `configuration_json` attribute accepts the full system configuration as JSON, allowing " +
 			"complete control over all settings.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
+				Description:         "Resource identifier. Always set to `system` for this singleton resource.",
 				MarkdownDescription: "Resource identifier. Always set to `system` for this singleton resource.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -60,6 +65,7 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				},
 			},
 			"server_name": schema.StringAttribute{
+				Description:         "The server display name.",
 				MarkdownDescription: "The server display name.",
 				Optional:            true,
 				Computed:            true,
@@ -68,6 +74,8 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				},
 			},
 			"configuration_json": schema.StringAttribute{
+				Description: "The full system configuration as a JSON string. " +
+					"When provided, it will be merged with the existing configuration.",
 				MarkdownDescription: "The full system configuration as a JSON string. " +
 					"When provided, it will be merged with the existing configuration.",
 				Optional:   true,
@@ -292,7 +300,7 @@ func normalizeJSONRaw(raw json.RawMessage, depth int) (json.RawMessage, error) {
 	return result, nil
 }
 
-func (r *SystemConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *SystemConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Singleton resource — the import ID is not used. Read will populate all fields.
 	data := SystemConfigurationResourceModel{
 		ID:                types.StringValue("system"),
