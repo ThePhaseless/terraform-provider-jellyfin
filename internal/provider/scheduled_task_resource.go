@@ -190,10 +190,30 @@ func (r *ScheduledTaskResource) Delete(_ context.Context, _ resource.DeleteReque
 }
 
 func (r *ScheduledTaskResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	triggersJSON := jsontypes.NewNormalizedNull()
+	if r.client != nil {
+		task, err := r.client.GetScheduledTask(ctx, req.ID)
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to read scheduled task during import", err.Error())
+			return
+		}
+		rawTriggers, err := json.Marshal(task.Triggers)
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to serialize task triggers during import", err.Error())
+			return
+		}
+		normalizedTriggers, err := normalizeJSON(string(rawTriggers))
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to normalize task triggers during import", err.Error())
+			return
+		}
+		triggersJSON = jsontypes.NewNormalizedValue(normalizedTriggers)
+	}
+
 	data := ScheduledTaskResourceModel{
 		ID:           types.StringValue(req.ID),
 		TaskID:       types.StringValue(req.ID),
-		TriggersJSON: jsontypes.NewNormalizedNull(),
+		TriggersJSON: triggersJSON,
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
