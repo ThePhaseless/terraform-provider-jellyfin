@@ -6,7 +6,6 @@ package client
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -185,10 +184,6 @@ func (c *Client) delete(ctx context.Context, path string) error {
 	}
 
 	return nil
-}
-
-func decodeJSON(reader io.Reader, target func(*json.Decoder) error) error {
-	return target(json.NewDecoder(reader))
 }
 
 func readResponseBody(body io.Reader) string {
