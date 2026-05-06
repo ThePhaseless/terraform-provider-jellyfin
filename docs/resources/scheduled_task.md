@@ -15,7 +15,7 @@ Manages triggers for a Jellyfin scheduled task. Allows configuring when schedule
 ```terraform
 # Configure the "Scan Media Library" task to run every 12 hours
 resource "jellyfin_scheduled_task" "scan_library" {
-  id = "7738148ffcd07979c7ceb148e06b3aed"
+  task_id = "7738148ffcd07979c7ceb148e06b3aed"
 
   triggers_json = jsonencode([
     {
@@ -31,8 +31,12 @@ resource "jellyfin_scheduled_task" "scan_library" {
 
 ### Required
 
-- `id` (String) The unique identifier of the scheduled task.
+- `task_id` (String) The unique identifier of the scheduled task.
 - `triggers_json` (String) The task triggers as a JSON array string. Each trigger object can have Type (DailyTrigger, IntervalTrigger, StartupTrigger, WeeklyTrigger), TimeOfDayTicks, IntervalTicks, DayOfWeek, MaxRuntimeTicks.
+
+### Read-Only
+
+- `id` (String) The resource identifier, matching the scheduled task ID.
 
 ## Import
 

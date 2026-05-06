@@ -8,15 +8,18 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -51,9 +54,11 @@ func (r *UserResource) Metadata(_ context.Context, req resource.MetadataRequest,
 
 func (r *UserResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description:         "Manages a Jellyfin user.",
 		MarkdownDescription: "Manages a Jellyfin user.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
+				Description:         "The unique user identifier.",
 				MarkdownDescription: "The unique user identifier.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -61,33 +66,45 @@ func (r *UserResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 				},
 			},
 			"name": schema.StringAttribute{
+				Description:         "The username.",
 				MarkdownDescription: "The username.",
 				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 			},
 			"password": schema.StringAttribute{
+				Description:         "The user password.",
 				MarkdownDescription: "The user password.",
 				Optional:            true,
 				Sensitive:           true,
 			},
 			"is_administrator": schema.BoolAttribute{
+				Description:         "Whether the user is an administrator.",
 				MarkdownDescription: "Whether the user is an administrator.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
 			},
 			"is_disabled": schema.BoolAttribute{
+				Description:         "Whether the user is disabled.",
 				MarkdownDescription: "Whether the user is disabled.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
 			},
 			"enable_all_folders": schema.BoolAttribute{
+				Description:         "Whether the user has access to all folders.",
 				MarkdownDescription: "Whether the user has access to all folders.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(true),
 			},
 			"policy_json": schema.StringAttribute{
+				Description: "The full user policy as a JSON string. When provided, this will be merged with " +
+					"the existing policy. This allows configuring all policy fields including access schedules, " +
+					"parental controls, transcoding permissions, and more. Individual policy attributes like " +
+					"`is_administrator` take precedence over values in this JSON.",
 				MarkdownDescription: "The full user policy as a JSON string. When provided, this will be merged with " +
 					"the existing policy. This allows configuring all policy fields including access schedules, " +
 					"parental controls, transcoding permissions, and more. Individual policy attributes like " +
@@ -128,16 +145,16 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		password = data.Password.ValueString()
 	}
 
-	user, err := r.client.CreateUser(data.Name.ValueString(), password)
+	user, err := r.client.CreateUser(ctx, data.Name.ValueString(), password)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to create user", err.Error())
 		return
 	}
 
-	data.ID = types.StringValue(user.Id)
+	data.ID = types.StringValue(user.ID)
 
 	// Read back the user to get the full policy with provider IDs.
-	freshUser, err := r.client.GetUserByID(user.Id)
+	freshUser, err := r.client.GetUserByID(ctx, user.ID)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read user after creation", err.Error())
 		return
@@ -157,7 +174,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	freshUser.Policy.IsDisabled = data.IsDisabled.ValueBool()
 	freshUser.Policy.EnableAllFolders = data.EnableAllFolders.ValueBool()
 
-	if err := r.client.UpdateUserPolicy(freshUser.Id, &freshUser.Policy); err != nil {
+	if err := r.client.UpdateUserPolicy(ctx, freshUser.ID, &freshUser.Policy); err != nil {
 		resp.Diagnostics.AddError("Failed to update user policy", err.Error())
 		return
 	}
@@ -172,8 +189,12 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 
-	user, err := r.client.GetUserByID(data.ID.ValueString())
+	user, err := r.client.GetUserByID(ctx, data.ID.ValueString())
 	if err != nil {
+		if client.IsNotFound(err) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Failed to read user", err.Error())
 		return
 	}
@@ -215,7 +236,7 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	}
 
 	// Read current user to get existing policy with required fields.
-	currentUser, err := r.client.GetUserByID(state.ID.ValueString())
+	currentUser, err := r.client.GetUserByID(ctx, state.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read current user", err.Error())
 		return
@@ -223,7 +244,7 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 
 	currentUser.Name = data.Name.ValueString()
 
-	if err := r.client.UpdateUser(currentUser); err != nil {
+	if err := r.client.UpdateUser(ctx, currentUser); err != nil {
 		resp.Diagnostics.AddError("Failed to update user", err.Error())
 		return
 	}
@@ -242,20 +263,42 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	currentUser.Policy.IsDisabled = data.IsDisabled.ValueBool()
 	currentUser.Policy.EnableAllFolders = data.EnableAllFolders.ValueBool()
 
-	if err := r.client.UpdateUserPolicy(currentUser.Id, &currentUser.Policy); err != nil {
+	if err := r.client.UpdateUserPolicy(ctx, currentUser.ID, &currentUser.Policy); err != nil {
 		resp.Diagnostics.AddError("Failed to update user policy", err.Error())
 		return
 	}
 
 	// Update password if changed.
 	if !data.Password.IsNull() && !data.Password.Equal(state.Password) {
-		if err := r.client.UpdateUserPassword(currentUser.Id, "", data.Password.ValueString()); err != nil {
+		if err := r.client.UpdateUserPassword(ctx, currentUser.ID, "", data.Password.ValueString()); err != nil {
 			resp.Diagnostics.AddError("Failed to update user password", err.Error())
 			return
 		}
 	}
 
 	data.ID = state.ID
+	updatedUser, err := r.client.GetUserByID(ctx, state.ID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read user after update", err.Error())
+		return
+	}
+	data.Name = types.StringValue(updatedUser.Name)
+	data.IsAdministrator = types.BoolValue(updatedUser.Policy.IsAdministrator)
+	data.IsDisabled = types.BoolValue(updatedUser.Policy.IsDisabled)
+	data.EnableAllFolders = types.BoolValue(updatedUser.Policy.EnableAllFolders)
+	if !data.PolicyJSON.IsNull() {
+		policyBytes, err := json.Marshal(updatedUser.Policy)
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to serialize user policy", err.Error())
+			return
+		}
+		normalizedPolicy, err := normalizeJSON(string(policyBytes))
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to normalize user policy", err.Error())
+			return
+		}
+		data.PolicyJSON = jsontypes.NewNormalizedValue(normalizedPolicy)
+	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -267,7 +310,10 @@ func (r *UserResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 		return
 	}
 
-	if err := r.client.DeleteUser(data.ID.ValueString()); err != nil {
+	if err := r.client.DeleteUser(ctx, data.ID.ValueString()); err != nil {
+		if client.IsNotFound(err) {
+			return
+		}
 		resp.Diagnostics.AddError("Failed to delete user", err.Error())
 	}
 }

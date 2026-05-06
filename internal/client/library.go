@@ -4,8 +4,10 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"strings"
 )
@@ -15,7 +17,7 @@ type VirtualFolder struct {
 	Name           string          `json:"Name"`
 	Locations      []string        `json:"Locations"`
 	CollectionType string          `json:"CollectionType"`
-	ItemId         string          `json:"ItemId"`
+	ItemID         string          `json:"ItemId"`
 	LibraryOptions json.RawMessage `json:"LibraryOptions,omitempty"`
 }
 
@@ -40,16 +42,18 @@ func (lo *LibraryOptions) UnmarshalJSON(data []byte) error {
 }
 
 // GetVirtualFolders retrieves all virtual folders (libraries).
-func (c *Client) GetVirtualFolders() ([]VirtualFolder, error) {
+func (c *Client) GetVirtualFolders(ctx context.Context) ([]VirtualFolder, error) {
 	var folders []VirtualFolder
-	if err := c.get("/Library/VirtualFolders", &folders); err != nil {
+	if err := c.get(ctx, "/Library/VirtualFolders", func(reader io.Reader) error {
+		return json.NewDecoder(reader).Decode(&folders)
+	}); err != nil {
 		return nil, fmt.Errorf("getting virtual folders: %w", err)
 	}
 	return folders, nil
 }
 
 // AddVirtualFolder creates a new virtual folder (library).
-func (c *Client) AddVirtualFolder(name, collectionType string, paths []string, libraryOptions *LibraryOptions) error {
+func (c *Client) AddVirtualFolder(ctx context.Context, name, collectionType string, paths []string, libraryOptions *LibraryOptions) error {
 	params := url.Values{}
 	params.Set("name", name)
 	params.Set("collectionType", collectionType)
@@ -60,35 +64,40 @@ func (c *Client) AddVirtualFolder(name, collectionType string, paths []string, l
 
 	apiPath := "/Library/VirtualFolders?" + params.Encode()
 
-	var body interface{}
+	var body []byte
 	if libraryOptions != nil {
-		body = struct {
+		requestBody := struct {
 			LibraryOptions *LibraryOptions `json:"LibraryOptions"`
 		}{LibraryOptions: libraryOptions}
+		jsonBody, err := json.Marshal(requestBody)
+		if err != nil {
+			return fmt.Errorf("marshaling virtual folder %s request: %w", name, err)
+		}
+		body = jsonBody
 	}
 
-	if err := c.post(apiPath, body); err != nil {
+	if err := c.post(ctx, apiPath, body); err != nil {
 		return fmt.Errorf("adding virtual folder %s: %w", name, err)
 	}
 	return nil
 }
 
 // RemoveVirtualFolder removes a virtual folder (library) by name.
-func (c *Client) RemoveVirtualFolder(name string) error {
+func (c *Client) RemoveVirtualFolder(ctx context.Context, name string) error {
 	params := url.Values{}
 	params.Set("name", name)
 	params.Set("refreshLibrary", "false")
 
 	path := "/Library/VirtualFolders?" + params.Encode()
 
-	if err := c.delete(path); err != nil {
+	if err := c.delete(ctx, path); err != nil {
 		return fmt.Errorf("removing virtual folder %s: %w", name, err)
 	}
 	return nil
 }
 
 // UpdateVirtualFolder updates the library options for a virtual folder.
-func (c *Client) UpdateVirtualFolder(name string, libraryOptions *LibraryOptions) error {
+func (c *Client) UpdateVirtualFolder(ctx context.Context, name string, libraryOptions *LibraryOptions) error {
 	// Build a JSON body that includes the Name field alongside the library options.
 	rawOpts := "{}"
 	if libraryOptions != nil && libraryOptions.RawJSON != "" {
@@ -112,7 +121,7 @@ func (c *Client) UpdateVirtualFolder(name string, libraryOptions *LibraryOptions
 		return fmt.Errorf("marshaling library options for virtual folder %s: %w", name, err)
 	}
 
-	if err := c.postRaw("/Library/VirtualFolders/LibraryOptions", string(body)); err != nil {
+	if err := c.postRaw(ctx, "/Library/VirtualFolders/LibraryOptions", string(body)); err != nil {
 		return fmt.Errorf("updating virtual folder %s: %w", name, err)
 	}
 	return nil

@@ -17,6 +17,8 @@ import (
 )
 
 func TestSanitizeName(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		input    string
 		expected string
@@ -35,6 +37,8 @@ func TestSanitizeName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+
 			result := sanitizeName(tt.input)
 			if result != tt.expected {
 				t.Errorf("sanitizeName(%q) = %q, want %q", tt.input, result, tt.expected)
@@ -44,6 +48,8 @@ func TestSanitizeName(t *testing.T) {
 }
 
 func TestQuote(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		input    string
 		expected string
@@ -56,6 +62,8 @@ func TestQuote(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+
 			result := quote(tt.input)
 			if result != tt.expected {
 				t.Errorf("quote(%q) = %q, want %q", tt.input, result, tt.expected)
@@ -128,7 +136,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/Users", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/Users", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, []map[string]interface{}{
 			{
 				"Id":   "user-id-1",
@@ -151,7 +159,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 		})
 	})
 
-	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, []map[string]interface{}{
 			{
 				"Name":           "Movies",
@@ -162,7 +170,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 		})
 	})
 
-	mux.HandleFunc("/Auth/Keys", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/Auth/Keys", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, map[string]interface{}{
 			"Items": []map[string]interface{}{
 				{
@@ -173,7 +181,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 		})
 	})
 
-	mux.HandleFunc("/Repositories", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/Repositories", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, []map[string]interface{}{
 			{
 				"Name":    "Jellyfin Stable",
@@ -183,7 +191,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 		})
 	})
 
-	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, []map[string]interface{}{
 			{
 				"Name":    "MusicBrainz",
@@ -193,7 +201,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 		})
 	})
 
-	mux.HandleFunc("/Packages", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/Packages", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, []map[string]interface{}{
 			{
 				"name": "MusicBrainz",
@@ -208,7 +216,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 		})
 	})
 
-	mux.HandleFunc("/ScheduledTasks", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ScheduledTasks", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, []map[string]interface{}{
 			{
 				"Name":     "Scan Media Library",
@@ -230,39 +238,39 @@ func setupTestServer(t *testing.T) *httptest.Server {
 		})
 	})
 
-	mux.HandleFunc("/System/Configuration", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/System/Configuration", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, map[string]interface{}{
 			"ServerName":               "Test Server",
 			"IsStartupWizardCompleted": true,
 		})
 	})
 
-	mux.HandleFunc("/System/Configuration/encoding", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/System/Configuration/encoding", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, map[string]interface{}{
 			"EncodingThreadCount": -1,
 		})
 	})
 
-	mux.HandleFunc("/System/Configuration/network", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/System/Configuration/network", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, map[string]interface{}{
 			"BaseUrl":     "",
 			"EnableHttps": false,
 		})
 	})
 
-	mux.HandleFunc("/System/Configuration/branding", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/System/Configuration/branding", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, map[string]interface{}{
 			"SplashscreenEnabled": false,
 		})
 	})
 
-	mux.HandleFunc("/System/Configuration/livetv", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/System/Configuration/livetv", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, map[string]interface{}{
 			"EnableRecordingSubfolders": false,
 		})
 	})
 
-	mux.HandleFunc("/System/Configuration/metadata", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/System/Configuration/metadata", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, map[string]interface{}{
 			"UseFileCreationTimeForDateAdded": true,
 		})
@@ -557,7 +565,7 @@ func TestFullGenerate(t *testing.T) {
 
 func TestGenerateWithServerError(t *testing.T) {
 	// Server that returns errors
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprint(w, "Internal Server Error")
 	}))
@@ -576,6 +584,8 @@ func TestGenerateWithServerError(t *testing.T) {
 }
 
 func TestSanitizeNameEdgeCases(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		input    string
 		expected string
@@ -591,6 +601,8 @@ func TestSanitizeNameEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+
 			result := sanitizeName(tt.input)
 			if result != tt.expected {
 				t.Errorf("sanitizeName(%q) = %q, want %q", tt.input, result, tt.expected)
@@ -630,7 +642,7 @@ func TestUniqueName(t *testing.T) {
 func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
 	// Server that has /Plugins but returns 500 for /Packages
 	mux := http.NewServeMux()
-	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, []map[string]interface{}{
 			{
 				"Name":    "TestPlugin",
@@ -639,7 +651,7 @@ func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
 			},
 		})
 	})
-	mux.HandleFunc("/Packages", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/Packages", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprint(w, "error")
 	})

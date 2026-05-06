@@ -7,11 +7,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -41,14 +44,21 @@ func (r *EncodingConfigurationResource) Metadata(_ context.Context, req resource
 
 func (r *EncodingConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Manages the Jellyfin encoding/transcoding configuration. " +
+			"The configuration is passed as a JSON string for full flexibility over all encoding options.",
 		MarkdownDescription: "Manages the Jellyfin encoding/transcoding configuration. " +
 			"The configuration is passed as a JSON string for full flexibility over all encoding options.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
+				Description:         "Resource identifier. Always set to `encoding` for this singleton resource.",
 				MarkdownDescription: "Resource identifier. Always set to `encoding` for this singleton resource.",
 				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"configuration_json": schema.StringAttribute{
+				Description:         "The encoding configuration as a JSON string.",
 				MarkdownDescription: "The encoding configuration as a JSON string.",
 				Required:            true,
 				CustomType:          jsontypes.NormalizedType{},
@@ -82,12 +92,23 @@ func (r *EncodingConfigurationResource) Create(ctx context.Context, req resource
 	}
 
 	config := &client.EncodingOptions{RawJSON: data.ConfigurationJSON.ValueString()}
-	if err := r.client.UpdateEncodingOptions(config); err != nil {
+	if err := r.client.UpdateEncodingOptions(ctx, config); err != nil {
 		resp.Diagnostics.AddError("Failed to update encoding configuration", err.Error())
 		return
 	}
 
 	data.ID = types.StringValue("encoding")
+	updated, err := r.client.GetEncodingOptions(ctx)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read encoding configuration after update", err.Error())
+		return
+	}
+	normalized, err := normalizeJSON(updated.RawJSON)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to normalize encoding configuration", err.Error())
+		return
+	}
+	data.ConfigurationJSON = jsontypes.NewNormalizedValue(normalized)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -99,7 +120,7 @@ func (r *EncodingConfigurationResource) Read(ctx context.Context, req resource.R
 		return
 	}
 
-	config, err := r.client.GetEncodingOptions()
+	config, err := r.client.GetEncodingOptions(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read encoding configuration", err.Error())
 		return
@@ -125,7 +146,7 @@ func (r *EncodingConfigurationResource) Update(ctx context.Context, req resource
 	}
 
 	config := &client.EncodingOptions{RawJSON: data.ConfigurationJSON.ValueString()}
-	if err := r.client.UpdateEncodingOptions(config); err != nil {
+	if err := r.client.UpdateEncodingOptions(ctx, config); err != nil {
 		resp.Diagnostics.AddError("Failed to update encoding configuration", err.Error())
 		return
 	}
@@ -139,7 +160,7 @@ func (r *EncodingConfigurationResource) Delete(_ context.Context, _ resource.Del
 	// Encoding configuration cannot be deleted. We just remove from state.
 }
 
-func (r *EncodingConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *EncodingConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Singleton resource — the import ID is not used. Read will populate all fields.
 	data := EncodingConfigurationResourceModel{
 		ID:                types.StringValue("encoding"),

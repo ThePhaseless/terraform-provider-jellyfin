@@ -32,6 +32,10 @@ resource "jellyfin_plugin_repository" "stable" {
 
 - `enabled` (Boolean) Whether the repository is enabled.
 
+### Read-Only
+
+- `id` (String) The plugin repository resource identifier.
+
 ## Import
 
 Import is supported using the following syntax:

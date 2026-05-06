@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -43,6 +44,7 @@ func main() {
 
 	g := &generator{
 		client:    c,
+		ctx:       context.Background(),
 		outputDir: *outputDir,
 		usedNames: make(map[string]int),
 	}
@@ -57,8 +59,16 @@ func main() {
 
 type generator struct {
 	client    *client.Client
+	ctx       context.Context
 	outputDir string
 	usedNames map[string]int // tracks used resource addresses to avoid collisions
+}
+
+func (g *generator) context() context.Context {
+	if g.ctx != nil {
+		return g.ctx
+	}
+	return context.Background()
 }
 
 // uniqueName returns a unique Terraform resource name, appending a numeric suffix on collision.
@@ -151,7 +161,7 @@ func (g *generator) Generate() error {
 }
 
 func (g *generator) generateUsers() ([]string, []string, error) {
-	users, err := g.client.GetUsers()
+	users, err := g.client.GetUsers(g.context())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -159,7 +169,7 @@ func (g *generator) generateUsers() ([]string, []string, error) {
 	var imports, resources []string
 	for _, user := range users {
 		name := g.uniqueName("jellyfin_user", sanitizeName(user.Name))
-		imports = append(imports, importBlock("jellyfin_user", name, user.Id))
+		imports = append(imports, importBlock("jellyfin_user", name, user.ID))
 
 		attrs := map[string]string{
 			"name":               quote(user.Name),
@@ -174,7 +184,7 @@ func (g *generator) generateUsers() ([]string, []string, error) {
 }
 
 func (g *generator) generateLibraries() ([]string, []string, error) {
-	folders, err := g.client.GetVirtualFolders()
+	folders, err := g.client.GetVirtualFolders(g.context())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -201,7 +211,7 @@ func (g *generator) generateLibraries() ([]string, []string, error) {
 }
 
 func (g *generator) generateAPIKeys() ([]string, []string, error) {
-	keys, err := g.client.GetAPIKeys()
+	keys, err := g.client.GetAPIKeys(g.context())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -221,7 +231,7 @@ func (g *generator) generateAPIKeys() ([]string, []string, error) {
 }
 
 func (g *generator) generatePluginRepositories() ([]string, []string, error) {
-	repos, err := g.client.GetPluginRepositories()
+	repos, err := g.client.GetPluginRepositories(g.context())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -233,7 +243,7 @@ func (g *generator) generatePluginRepositories() ([]string, []string, error) {
 
 		attrs := map[string]string{
 			"name":    quote(repo.Name),
-			"url":     quote(repo.Url),
+			"url":     quote(repo.URL),
 			"enabled": fmt.Sprintf("%t", repo.Enabled),
 		}
 		resources = append(resources, resourceBlock("jellyfin_plugin_repository", name, attrs))
@@ -243,7 +253,7 @@ func (g *generator) generatePluginRepositories() ([]string, []string, error) {
 }
 
 func (g *generator) generatePlugins() ([]string, []string, error) {
-	plugins, err := g.client.GetInstalledPlugins()
+	plugins, err := g.client.GetInstalledPlugins(g.context())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -254,9 +264,9 @@ func (g *generator) generatePlugins() ([]string, []string, error) {
 	var imports, resources []string
 	for _, plugin := range plugins {
 		name := g.uniqueName("jellyfin_plugin", sanitizeName(plugin.Name))
-		imports = append(imports, importBlock("jellyfin_plugin", name, plugin.Id))
+		imports = append(imports, importBlock("jellyfin_plugin", name, plugin.ID))
 
-		repoURL := repoURLs[plugin.Id]
+		repoURL := repoURLs[plugin.ID]
 
 		attrs := map[string]string{
 			"name":           quote(plugin.Name),
@@ -274,10 +284,10 @@ func (g *generator) generatePlugins() ([]string, []string, error) {
 func (g *generator) resolvePluginRepoURLs(plugins []client.InstalledPlugin) map[string]string {
 	result := make(map[string]string)
 	for _, p := range plugins {
-		result[p.Id] = ""
+		result[p.ID] = ""
 	}
 
-	packages, err := g.client.GetAvailablePackages()
+	packages, err := g.client.GetAvailablePackages(g.context())
 	if err != nil {
 		// Non-fatal: we'll use empty repository URLs.
 		return result
@@ -290,16 +300,16 @@ func (g *generator) resolvePluginRepoURLs(plugins []client.InstalledPlugin) map[
 			}
 			for _, v := range pkg.Versions {
 				if v.Version == p.Version {
-					result[p.Id] = v.RepositoryUrl
+					result[p.ID] = v.RepositoryURL
 					break
 				}
 			}
-			if result[p.Id] != "" {
+			if result[p.ID] != "" {
 				break
 			}
-			// Fallback: use any version's repository URL for this package.
+			// Fallback: use a version's repository URL for this package.
 			if len(pkg.Versions) > 0 {
-				result[p.Id] = pkg.Versions[0].RepositoryUrl
+				result[p.ID] = pkg.Versions[0].RepositoryURL
 			}
 			break
 		}
@@ -309,7 +319,7 @@ func (g *generator) resolvePluginRepoURLs(plugins []client.InstalledPlugin) map[
 }
 
 func (g *generator) generateScheduledTasks() ([]string, []string, error) {
-	tasks, err := g.client.GetScheduledTasks()
+	tasks, err := g.client.GetScheduledTasks(g.context())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -321,20 +331,20 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 		}
 
 		name := g.uniqueName("jellyfin_scheduled_task", sanitizeName(task.Name))
-		imports = append(imports, importBlock("jellyfin_scheduled_task", name, task.Id))
+		imports = append(imports, importBlock("jellyfin_scheduled_task", name, task.ID))
 
 		triggersJSON, err := json.Marshal(task.Triggers)
 		if err != nil {
-			return nil, nil, fmt.Errorf("marshaling triggers for task %s: %w", task.Id, err)
+			return nil, nil, fmt.Errorf("marshaling triggers for task %s: %w", task.ID, err)
 		}
 
 		prettyTriggers, err := prettyJSON(string(triggersJSON))
 		if err != nil {
-			return nil, nil, fmt.Errorf("formatting triggers for task %s: %w", task.Id, err)
+			return nil, nil, fmt.Errorf("formatting triggers for task %s: %w", task.ID, err)
 		}
 
 		attrs := map[string]string{
-			"id":            quote(task.Id),
+			"task_id":       quote(task.ID),
 			"triggers_json": "jsonencode(" + prettyTriggers + ")",
 		}
 		resources = append(resources, resourceBlock("jellyfin_scheduled_task", name, attrs))
@@ -347,7 +357,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	var imports, resources []string
 
 	// System Configuration
-	sysConfig, err := g.client.GetSystemConfiguration()
+	sysConfig, err := g.client.GetSystemConfiguration(g.context())
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting system configuration: %w", err)
 	}
@@ -362,7 +372,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	}))
 
 	// Encoding Configuration
-	encConfig, err := g.client.GetEncodingOptions()
+	encConfig, err := g.client.GetEncodingOptions(g.context())
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting encoding configuration: %w", err)
 	}
@@ -376,7 +386,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	}))
 
 	// Networking Configuration
-	netConfig, err := g.client.GetNetworkConfiguration()
+	netConfig, err := g.client.GetNetworkConfiguration(g.context())
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting networking configuration: %w", err)
 	}
@@ -390,7 +400,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	}))
 
 	// Branding Configuration
-	brandConfig, err := g.client.GetBrandingConfiguration()
+	brandConfig, err := g.client.GetBrandingConfiguration(g.context())
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting branding configuration: %w", err)
 	}
@@ -404,7 +414,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	}))
 
 	// Live TV Configuration
-	livetvConfig, err := g.client.GetLiveTVConfiguration()
+	livetvConfig, err := g.client.GetLiveTVConfiguration(g.context())
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting livetv configuration: %w", err)
 	}
@@ -418,7 +428,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	}))
 
 	// Metadata Configuration
-	metaConfig, err := g.client.GetMetadataConfiguration()
+	metaConfig, err := g.client.GetMetadataConfiguration(g.context())
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting metadata configuration: %w", err)
 	}
@@ -436,7 +446,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 
 func (g *generator) writeFile(name, content string) error {
 	p := filepath.Join(g.outputDir, name)
-	return os.WriteFile(p, []byte(content+"\n"), 0o644)
+	return os.WriteFile(p, []byte(content+"\n"), 0o600)
 }
 
 // sanitizeName converts a human-readable name to a valid Terraform identifier.

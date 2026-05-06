@@ -7,10 +7,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var _ datasource.DataSource = &SystemInfoDataSource{}
@@ -40,25 +41,31 @@ func (d *SystemInfoDataSource) Metadata(_ context.Context, req datasource.Metada
 
 func (d *SystemInfoDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description:         "Retrieves system information from the Jellyfin server.",
 		MarkdownDescription: "Retrieves system information from the Jellyfin server.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
+				Description:         "The unique server identifier.",
 				MarkdownDescription: "The unique server identifier.",
 				Computed:            true,
 			},
 			"server_name": schema.StringAttribute{
+				Description:         "The server name.",
 				MarkdownDescription: "The server name.",
 				Computed:            true,
 			},
 			"version": schema.StringAttribute{
+				Description:         "The Jellyfin server version.",
 				MarkdownDescription: "The Jellyfin server version.",
 				Computed:            true,
 			},
 			"operating_system": schema.StringAttribute{
+				Description:         "The server operating system.",
 				MarkdownDescription: "The server operating system.",
 				Computed:            true,
 			},
 			"local_address": schema.StringAttribute{
+				Description:         "The local network address of the server.",
 				MarkdownDescription: "The local network address of the server.",
 				Computed:            true,
 			},
@@ -84,14 +91,14 @@ func (d *SystemInfoDataSource) Configure(_ context.Context, req datasource.Confi
 }
 
 func (d *SystemInfoDataSource) Read(ctx context.Context, _ datasource.ReadRequest, resp *datasource.ReadResponse) {
-	info, err := d.client.GetSystemInfo()
+	info, err := d.client.GetSystemInfo(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to get system info", err.Error())
 		return
 	}
 
 	data := SystemInfoDataSourceModel{
-		ID:              types.StringValue(info.Id),
+		ID:              types.StringValue(info.ID),
 		ServerName:      types.StringValue(info.ServerName),
 		Version:         types.StringValue(info.Version),
 		OperatingSystem: types.StringValue(info.OperatingSystem),

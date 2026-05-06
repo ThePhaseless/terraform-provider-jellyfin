@@ -4,12 +4,12 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -17,6 +17,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -47,15 +49,23 @@ func (r *SystemConfigurationResource) Metadata(_ context.Context, req resource.M
 
 func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Manages the Jellyfin system configuration. Can be used for initial setup and ongoing configuration. " +
+			"The `configuration_json` attribute accepts the full system configuration as JSON, allowing " +
+			"complete control over all settings.",
 		MarkdownDescription: "Manages the Jellyfin system configuration. Can be used for initial setup and ongoing configuration. " +
 			"The `configuration_json` attribute accepts the full system configuration as JSON, allowing " +
 			"complete control over all settings.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
+				Description:         "Resource identifier. Always set to `system` for this singleton resource.",
 				MarkdownDescription: "Resource identifier. Always set to `system` for this singleton resource.",
 				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"server_name": schema.StringAttribute{
+				Description:         "The server display name.",
 				MarkdownDescription: "The server display name.",
 				Optional:            true,
 				Computed:            true,
@@ -64,6 +74,8 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				},
 			},
 			"configuration_json": schema.StringAttribute{
+				Description: "The full system configuration as a JSON string. " +
+					"When provided, it will be merged with the existing configuration.",
 				MarkdownDescription: "The full system configuration as a JSON string. " +
 					"When provided, it will be merged with the existing configuration.",
 				Optional:   true,
@@ -108,7 +120,7 @@ func (r *SystemConfigurationResource) Read(ctx context.Context, req resource.Rea
 		return
 	}
 
-	config, err := r.client.GetSystemConfiguration()
+	config, err := r.client.GetSystemConfiguration(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read system configuration", err.Error())
 		return
@@ -141,7 +153,7 @@ func (r *SystemConfigurationResource) Delete(_ context.Context, _ resource.Delet
 }
 
 func (r *SystemConfigurationResource) applyConfiguration(ctx context.Context, data *SystemConfigurationResourceModel, diagnostics *diag.Diagnostics, state *tfsdk.State) {
-	current, err := r.client.GetSystemConfiguration()
+	current, err := r.client.GetSystemConfiguration(ctx)
 	if err != nil {
 		diagnostics.AddError("Failed to read current system configuration", err.Error())
 		return
@@ -175,12 +187,12 @@ func (r *SystemConfigurationResource) applyConfiguration(ctx context.Context, da
 	}
 
 	config := &client.SystemConfiguration{RawJSON: rawJSON}
-	if err := r.client.UpdateSystemConfiguration(config); err != nil {
+	if err := r.client.UpdateSystemConfiguration(ctx, config); err != nil {
 		diagnostics.AddError("Failed to update system configuration", err.Error())
 		return
 	}
 
-	updated, err := r.client.GetSystemConfiguration()
+	updated, err := r.client.GetSystemConfiguration(ctx)
 	if err != nil {
 		diagnostics.AddError("Failed to read updated system configuration", err.Error())
 		return
@@ -222,20 +234,73 @@ func mergeJSON(base, override string) (string, error) {
 	return string(result), nil
 }
 
-// normalizeJSON re-encodes JSON through interface{} to produce canonical key ordering.
+// normalizeJSON re-encodes JSON to remove insignificant formatting and sort object keys.
 func normalizeJSON(raw string) (string, error) {
-	var generic interface{}
-	if err := json.Unmarshal([]byte(raw), &generic); err != nil {
+	normalized, err := normalizeJSONRaw(json.RawMessage(raw), 0)
+	if err != nil {
 		return "", fmt.Errorf("parsing JSON for normalization: %w", err)
 	}
-	result, err := json.Marshal(generic)
-	if err != nil {
-		return "", fmt.Errorf("serializing normalized JSON: %w", err)
-	}
-	return string(result), nil
+	return string(normalized), nil
 }
 
-func (r *SystemConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+const maxJSONNormalizeDepth = 100
+
+func normalizeJSONRaw(raw json.RawMessage, depth int) (json.RawMessage, error) {
+	if depth > maxJSONNormalizeDepth {
+		return nil, fmt.Errorf("JSON nesting exceeds maximum depth of %d", maxJSONNormalizeDepth)
+	}
+
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw); err != nil {
+		return nil, err
+	}
+
+	trimmed := bytes.TrimSpace(compact.Bytes())
+	if len(trimmed) == 0 {
+		return nil, fmt.Errorf("empty JSON value")
+	}
+
+	switch trimmed[0] {
+	case '{':
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(trimmed, &object); err != nil {
+			return nil, err
+		}
+		for key, value := range object {
+			normalized, err := normalizeJSONRaw(value, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			object[key] = normalized
+		}
+		return json.Marshal(object)
+	case '[':
+		var list []json.RawMessage
+		if err := json.Unmarshal(trimmed, &list); err != nil {
+			return nil, err
+		}
+		for i, value := range list {
+			normalized, err := normalizeJSONRaw(value, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			list[i] = normalized
+		}
+		return json.Marshal(list)
+	}
+
+	var rawValue json.RawMessage
+	if err := json.Unmarshal(trimmed, &rawValue); err != nil {
+		return nil, err
+	}
+	result, err := json.Marshal(rawValue)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (r *SystemConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Singleton resource — the import ID is not used. Read will populate all fields.
 	data := SystemConfigurationResourceModel{
 		ID:                types.StringValue("system"),

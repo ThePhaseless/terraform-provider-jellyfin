@@ -7,12 +7,15 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -32,6 +35,7 @@ type PluginConfigurationResource struct {
 
 // PluginConfigurationResourceModel describes the resource data model.
 type PluginConfigurationResourceModel struct {
+	ID            types.String         `tfsdk:"id"`
 	PluginID      types.String         `tfsdk:"plugin_id"`
 	Configuration jsontypes.Normalized `tfsdk:"configuration_json"`
 }
@@ -42,14 +46,32 @@ func (r *PluginConfigurationResource) Metadata(_ context.Context, req resource.M
 
 func (r *PluginConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Manages plugin configuration in Jellyfin. Configuration is passed as a JSON string, " +
+			"allowing universal support for any plugin settings including SSO-Auth.",
 		MarkdownDescription: "Manages plugin configuration in Jellyfin. Configuration is passed as a JSON string, " +
 			"allowing universal support for any plugin settings including SSO-Auth.",
 		Attributes: map[string]schema.Attribute{
 			"plugin_id": schema.StringAttribute{
+				Description:         "The plugin ID (GUID).",
 				MarkdownDescription: "The plugin ID (GUID).",
 				Required:            true,
+				Validators:          requiredIdentifierValidators(),
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"id": schema.StringAttribute{
+				Description:         "The plugin configuration resource identifier.",
+				MarkdownDescription: "The plugin configuration resource identifier.",
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"configuration_json": schema.StringAttribute{
+				Description: "The plugin configuration as a JSON string. " +
+					"For SSO-Auth, this would include SAML/OIDC configuration. " +
+					"This allows universal configuration of any plugin.",
 				MarkdownDescription: "The plugin configuration as a JSON string. " +
 					"For SSO-Auth, this would include SAML/OIDC configuration. " +
 					"This allows universal configuration of any plugin.",
@@ -84,11 +106,12 @@ func (r *PluginConfigurationResource) Create(ctx context.Context, req resource.C
 		return
 	}
 
-	if err := r.client.UpdatePluginConfiguration(data.PluginID.ValueString(), data.Configuration.ValueString()); err != nil {
+	if err := r.client.UpdatePluginConfiguration(ctx, data.PluginID.ValueString(), data.Configuration.ValueString()); err != nil {
 		resp.Diagnostics.AddError("Failed to update plugin configuration", err.Error())
 		return
 	}
 
+	data.ID = data.PluginID
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -99,8 +122,12 @@ func (r *PluginConfigurationResource) Read(ctx context.Context, req resource.Rea
 		return
 	}
 
-	configJSON, err := r.client.GetPluginConfiguration(data.PluginID.ValueString())
+	configJSON, err := r.client.GetPluginConfiguration(ctx, data.PluginID.ValueString())
 	if err != nil {
+		if client.IsNotFound(err) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Failed to read plugin configuration", err.Error())
 		return
 	}
@@ -112,6 +139,7 @@ func (r *PluginConfigurationResource) Read(ctx context.Context, req resource.Rea
 	}
 
 	data.Configuration = jsontypes.NewNormalizedValue(normalized)
+	data.ID = data.PluginID
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -123,15 +151,28 @@ func (r *PluginConfigurationResource) Update(ctx context.Context, req resource.U
 		return
 	}
 
-	if err := r.client.UpdatePluginConfiguration(data.PluginID.ValueString(), data.Configuration.ValueString()); err != nil {
+	if err := r.client.UpdatePluginConfiguration(ctx, data.PluginID.ValueString(), data.Configuration.ValueString()); err != nil {
 		resp.Diagnostics.AddError("Failed to update plugin configuration", err.Error())
 		return
 	}
 
+	configJSON, err := r.client.GetPluginConfiguration(ctx, data.PluginID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read plugin configuration after update", err.Error())
+		return
+	}
+	normalized, err := normalizeJSON(configJSON)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to normalize plugin configuration", err.Error())
+		return
+	}
+	data.Configuration = jsontypes.NewNormalizedValue(normalized)
+	data.ID = data.PluginID
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func (r *PluginConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, resp *resource.DeleteResponse) {
+func (r *PluginConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
 	// Plugin configuration cannot truly be deleted — it resets when the plugin is uninstalled.
 	// We simply remove it from state.
 }

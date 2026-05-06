@@ -8,11 +8,14 @@ linters:
     - errcheck
     - forcetypeassert
     - godot
+    - gosec
+    - govet
     - ineffassign
     - makezero
     - misspell
     - nilerr
     - predeclared
+    - revive
     - staticcheck
     - unconvert
     - unparam
@@ -53,6 +56,11 @@ issues:
 formatters:
   enable:
     - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/ThePhaseless/terraform-provider-jellyfin
   exclusions:
     generated: lax
     paths:

@@ -3,7 +3,10 @@
 
 package client
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // MetadataConfiguration represents the metadata configuration.
 // RawJSON stores the complete JSON for the metadata settings.
@@ -12,8 +15,8 @@ type MetadataConfiguration struct {
 }
 
 // GetMetadataConfiguration retrieves the metadata configuration.
-func (c *Client) GetMetadataConfiguration() (*MetadataConfiguration, error) {
-	raw, err := c.getRaw("/System/Configuration/metadata")
+func (c *Client) GetMetadataConfiguration(ctx context.Context) (*MetadataConfiguration, error) {
+	raw, err := c.getRaw(ctx, "/System/Configuration/metadata")
 	if err != nil {
 		return nil, fmt.Errorf("getting metadata configuration: %w", err)
 	}
@@ -22,8 +25,8 @@ func (c *Client) GetMetadataConfiguration() (*MetadataConfiguration, error) {
 }
 
 // UpdateMetadataConfiguration updates the metadata configuration.
-func (c *Client) UpdateMetadataConfiguration(config *MetadataConfiguration) error {
-	if err := c.postRaw("/System/Configuration/metadata", config.RawJSON); err != nil {
+func (c *Client) UpdateMetadataConfiguration(ctx context.Context, config *MetadataConfiguration) error {
+	if err := c.postRaw(ctx, "/System/Configuration/metadata", config.RawJSON); err != nil {
 		return fmt.Errorf("updating metadata configuration: %w", err)
 	}
 	return nil

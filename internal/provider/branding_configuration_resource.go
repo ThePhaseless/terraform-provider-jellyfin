@@ -7,11 +7,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -41,14 +44,22 @@ func (r *BrandingConfigurationResource) Metadata(_ context.Context, req resource
 
 func (r *BrandingConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Manages the Jellyfin branding configuration. " +
+			"Controls branding settings such as the splashscreen.",
 		MarkdownDescription: "Manages the Jellyfin branding configuration. " +
 			"Controls branding settings such as the splashscreen.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
+				Description:         "Resource identifier. Always set to `branding` for this singleton resource.",
 				MarkdownDescription: "Resource identifier. Always set to `branding` for this singleton resource.",
 				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"configuration_json": schema.StringAttribute{
+				Description: "The branding configuration as a JSON string. " +
+					"Supports settings like SplashscreenEnabled.",
 				MarkdownDescription: "The branding configuration as a JSON string. " +
 					"Supports settings like SplashscreenEnabled.",
 				Required:   true,
@@ -83,12 +94,23 @@ func (r *BrandingConfigurationResource) Create(ctx context.Context, req resource
 	}
 
 	config := &client.BrandingConfiguration{RawJSON: data.ConfigurationJSON.ValueString()}
-	if err := r.client.UpdateBrandingConfiguration(config); err != nil {
+	if err := r.client.UpdateBrandingConfiguration(ctx, config); err != nil {
 		resp.Diagnostics.AddError("Failed to update branding configuration", err.Error())
 		return
 	}
 
 	data.ID = types.StringValue("branding")
+	updated, err := r.client.GetBrandingConfiguration(ctx)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read branding configuration after update", err.Error())
+		return
+	}
+	normalized, err := normalizeJSON(updated.RawJSON)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to normalize branding configuration", err.Error())
+		return
+	}
+	data.ConfigurationJSON = jsontypes.NewNormalizedValue(normalized)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -100,7 +122,7 @@ func (r *BrandingConfigurationResource) Read(ctx context.Context, req resource.R
 		return
 	}
 
-	config, err := r.client.GetBrandingConfiguration()
+	config, err := r.client.GetBrandingConfiguration(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read branding configuration", err.Error())
 		return
@@ -126,7 +148,7 @@ func (r *BrandingConfigurationResource) Update(ctx context.Context, req resource
 	}
 
 	config := &client.BrandingConfiguration{RawJSON: data.ConfigurationJSON.ValueString()}
-	if err := r.client.UpdateBrandingConfiguration(config); err != nil {
+	if err := r.client.UpdateBrandingConfiguration(ctx, config); err != nil {
 		resp.Diagnostics.AddError("Failed to update branding configuration", err.Error())
 		return
 	}
@@ -140,7 +162,7 @@ func (r *BrandingConfigurationResource) Delete(_ context.Context, _ resource.Del
 	// Branding configuration cannot be deleted. We just remove from state.
 }
 
-func (r *BrandingConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *BrandingConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Singleton resource — the import ID is not used. Read will populate all fields.
 	data := BrandingConfigurationResourceModel{
 		ID:                types.StringValue("branding"),

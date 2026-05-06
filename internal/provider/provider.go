@@ -7,12 +7,15 @@ import (
 	"context"
 	"os"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 // Ensure JellyfinProvider satisfies various provider interfaces.
@@ -38,30 +41,52 @@ func (p *JellyfinProvider) Metadata(_ context.Context, _ provider.MetadataReques
 
 func (p *JellyfinProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "The Jellyfin provider allows you to manage a Jellyfin media server instance. " +
+			"It supports managing users, libraries, plugins, system configuration, and initial setup.",
 		MarkdownDescription: "The Jellyfin provider allows you to manage a Jellyfin media server instance. " +
 			"It supports managing users, libraries, plugins, system configuration, and initial setup.",
 		Attributes: map[string]schema.Attribute{
 			"endpoint": schema.StringAttribute{
+				Description: "The URL of the Jellyfin server (e.g., `http://localhost:8096`). " +
+					"Can also be set via the `JELLYFIN_ENDPOINT` environment variable.",
 				MarkdownDescription: "The URL of the Jellyfin server (e.g., `http://localhost:8096`). " +
 					"Can also be set via the `JELLYFIN_ENDPOINT` environment variable.",
 				Optional: true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 			},
 			"api_key": schema.StringAttribute{
+				Description: "The API key for authenticating with the Jellyfin server. " +
+					"Can also be set via the `JELLYFIN_API_KEY` environment variable.",
 				MarkdownDescription: "The API key for authenticating with the Jellyfin server. " +
 					"Can also be set via the `JELLYFIN_API_KEY` environment variable.",
 				Optional:  true,
 				Sensitive: true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 			},
 			"username": schema.StringAttribute{
+				Description: "Username for authenticating with the Jellyfin server (used during initial setup). " +
+					"Can also be set via the `JELLYFIN_USERNAME` environment variable.",
 				MarkdownDescription: "Username for authenticating with the Jellyfin server (used during initial setup). " +
 					"Can also be set via the `JELLYFIN_USERNAME` environment variable.",
 				Optional: true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 			},
 			"password": schema.StringAttribute{
+				Description: "Password for authenticating with the Jellyfin server (used during initial setup). " +
+					"Can also be set via the `JELLYFIN_PASSWORD` environment variable.",
 				MarkdownDescription: "Password for authenticating with the Jellyfin server (used during initial setup). " +
 					"Can also be set via the `JELLYFIN_PASSWORD` environment variable.",
 				Optional:  true,
 				Sensitive: true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 			},
 		},
 	}
@@ -76,22 +101,22 @@ func (p *JellyfinProvider) Configure(ctx context.Context, req provider.Configure
 	}
 
 	endpoint := os.Getenv("JELLYFIN_ENDPOINT")
-	if !data.Endpoint.IsNull() {
+	if !data.Endpoint.IsNull() && !data.Endpoint.IsUnknown() {
 		endpoint = data.Endpoint.ValueString()
 	}
 
 	apiKey := os.Getenv("JELLYFIN_API_KEY")
-	if !data.APIKey.IsNull() {
+	if !data.APIKey.IsNull() && !data.APIKey.IsUnknown() {
 		apiKey = data.APIKey.ValueString()
 	}
 
 	username := os.Getenv("JELLYFIN_USERNAME")
-	if !data.Username.IsNull() {
+	if !data.Username.IsNull() && !data.Username.IsUnknown() {
 		username = data.Username.ValueString()
 	}
 
 	password := os.Getenv("JELLYFIN_PASSWORD")
-	if !data.Password.IsNull() {
+	if !data.Password.IsNull() && !data.Password.IsUnknown() {
 		password = data.Password.ValueString()
 	}
 
@@ -116,7 +141,7 @@ func (p *JellyfinProvider) Configure(ctx context.Context, req provider.Configure
 			)
 			return
 		}
-		authResult, err := c.AuthenticateByName(username, password)
+		authResult, err := c.AuthenticateByName(ctx, username, password)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Authentication Failed",

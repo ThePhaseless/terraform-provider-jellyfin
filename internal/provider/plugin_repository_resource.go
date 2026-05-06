@@ -7,12 +7,17 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
@@ -32,6 +37,7 @@ type PluginRepositoryResource struct {
 
 // PluginRepositoryResourceModel describes the resource data model.
 type PluginRepositoryResourceModel struct {
+	ID      types.String `tfsdk:"id"`
 	Name    types.String `tfsdk:"name"`
 	URL     types.String `tfsdk:"url"`
 	Enabled types.Bool   `tfsdk:"enabled"`
@@ -43,19 +49,39 @@ func (r *PluginRepositoryResource) Metadata(_ context.Context, req resource.Meta
 
 func (r *PluginRepositoryResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Manages a plugin repository in Jellyfin. " +
+			"Plugin repositories are managed as a set — this resource adds, updates, or removes " +
+			"a single repository from the server's list.",
 		MarkdownDescription: "Manages a plugin repository in Jellyfin. " +
 			"Plugin repositories are managed as a set — this resource adds, updates, or removes " +
 			"a single repository from the server's list.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
+				Description:         "The repository name.",
 				MarkdownDescription: "The repository name.",
 				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 			},
 			"url": schema.StringAttribute{
+				Description:         "The repository URL.",
 				MarkdownDescription: "The repository URL.",
 				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
+			},
+			"id": schema.StringAttribute{
+				Description:         "The plugin repository resource identifier.",
+				MarkdownDescription: "The plugin repository resource identifier.",
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"enabled": schema.BoolAttribute{
+				Description:         "Whether the repository is enabled.",
 				MarkdownDescription: "Whether the repository is enabled.",
 				Optional:            true,
 				Computed:            true,
@@ -89,7 +115,7 @@ func (r *PluginRepositoryResource) Create(ctx context.Context, req resource.Crea
 		return
 	}
 
-	repos, err := r.client.GetPluginRepositories()
+	repos, err := r.client.GetPluginRepositories(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to get plugin repositories", err.Error())
 		return
@@ -105,17 +131,18 @@ func (r *PluginRepositoryResource) Create(ctx context.Context, req resource.Crea
 
 	newRepo := client.PluginRepository{
 		Name:    data.Name.ValueString(),
-		Url:     data.URL.ValueString(),
+		URL:     data.URL.ValueString(),
 		Enabled: data.Enabled.ValueBool(),
 	}
 
 	repos = append(repos, newRepo)
 
-	if err := r.client.SetPluginRepositories(repos); err != nil {
+	if err := r.client.SetPluginRepositories(ctx, repos); err != nil {
 		resp.Diagnostics.AddError("Failed to set plugin repositories", err.Error())
 		return
 	}
 
+	data.ID = types.StringValue(data.Name.ValueString())
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -126,7 +153,7 @@ func (r *PluginRepositoryResource) Read(ctx context.Context, req resource.ReadRe
 		return
 	}
 
-	repos, err := r.client.GetPluginRepositories()
+	repos, err := r.client.GetPluginRepositories(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to get plugin repositories", err.Error())
 		return
@@ -140,7 +167,9 @@ func (r *PluginRepositoryResource) Read(ctx context.Context, req resource.ReadRe
 	}
 	if index >= 0 {
 		repo := repos[index]
-		data.URL = types.StringValue(repo.Url)
+		data.ID = types.StringValue(repo.Name)
+		data.Name = types.StringValue(repo.Name)
+		data.URL = types.StringValue(repo.URL)
 		data.Enabled = types.BoolValue(repo.Enabled)
 		found = true
 	}
@@ -166,7 +195,7 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 		return
 	}
 
-	repos, err := r.client.GetPluginRepositories()
+	repos, err := r.client.GetPluginRepositories(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to get plugin repositories", err.Error())
 		return
@@ -194,19 +223,41 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 		return
 	}
 
-	for i, repo := range repos {
+	for i := range repos {
 		if i == index {
-			repo.Name = data.Name.ValueString()
-			repo.Url = data.URL.ValueString()
-			repo.Enabled = data.Enabled.ValueBool()
+			repos[i].Name = data.Name.ValueString()
+			repos[i].URL = data.URL.ValueString()
+			repos[i].Enabled = data.Enabled.ValueBool()
 		}
-		updated = append(updated, repo)
+		updated = append(updated, repos[i])
 	}
 
-	if err := r.client.SetPluginRepositories(updated); err != nil {
+	if err := r.client.SetPluginRepositories(ctx, updated); err != nil {
 		resp.Diagnostics.AddError("Failed to set plugin repositories", err.Error())
 		return
 	}
+
+	repos, err = r.client.GetPluginRepositories(ctx)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read plugin repositories after update", err.Error())
+		return
+	}
+	if index >= len(repos) || repos[index].Name != data.Name.ValueString() {
+		index, err = findPluginRepositoryIndex(repos, data.Name.ValueString(), data.URL.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Plugin repository is ambiguous", err.Error())
+			return
+		}
+	}
+	if index < 0 || index >= len(repos) {
+		resp.Diagnostics.AddError("Plugin repository not found", fmt.Sprintf("Plugin repository %q was not found after update.", state.Name.ValueString()))
+		return
+	}
+	repo := repos[index]
+	data.ID = types.StringValue(repo.Name)
+	data.Name = types.StringValue(repo.Name)
+	data.URL = types.StringValue(repo.URL)
+	data.Enabled = types.BoolValue(repo.Enabled)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -218,7 +269,7 @@ func (r *PluginRepositoryResource) Delete(ctx context.Context, req resource.Dele
 		return
 	}
 
-	repos, err := r.client.GetPluginRepositories()
+	repos, err := r.client.GetPluginRepositories(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to get plugin repositories", err.Error())
 		return
@@ -240,7 +291,7 @@ func (r *PluginRepositoryResource) Delete(ctx context.Context, req resource.Dele
 		}
 	}
 
-	if err := r.client.SetPluginRepositories(filtered); err != nil {
+	if err := r.client.SetPluginRepositories(ctx, filtered); err != nil {
 		resp.Diagnostics.AddError("Failed to set plugin repositories", err.Error())
 	}
 }
@@ -279,7 +330,7 @@ func findPluginRepositoryIndex(repos []client.PluginRepository, name, url string
 
 	if url != "" {
 		for _, i := range matches {
-			if repos[i].Url == url {
+			if repos[i].URL == url {
 				return i, nil
 			}
 		}

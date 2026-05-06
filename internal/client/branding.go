@@ -3,7 +3,10 @@
 
 package client
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // BrandingConfiguration represents the branding configuration.
 // RawJSON stores the complete JSON for the branding settings.
@@ -12,8 +15,8 @@ type BrandingConfiguration struct {
 }
 
 // GetBrandingConfiguration retrieves the branding configuration.
-func (c *Client) GetBrandingConfiguration() (*BrandingConfiguration, error) {
-	raw, err := c.getRaw("/System/Configuration/branding")
+func (c *Client) GetBrandingConfiguration(ctx context.Context) (*BrandingConfiguration, error) {
+	raw, err := c.getRaw(ctx, "/System/Configuration/branding")
 	if err != nil {
 		return nil, fmt.Errorf("getting branding configuration: %w", err)
 	}
@@ -22,8 +25,8 @@ func (c *Client) GetBrandingConfiguration() (*BrandingConfiguration, error) {
 }
 
 // UpdateBrandingConfiguration updates the branding configuration.
-func (c *Client) UpdateBrandingConfiguration(config *BrandingConfiguration) error {
-	if err := c.postRaw("/System/Configuration/branding", config.RawJSON); err != nil {
+func (c *Client) UpdateBrandingConfiguration(ctx context.Context, config *BrandingConfiguration) error {
+	if err := c.postRaw(ctx, "/System/Configuration/branding", config.RawJSON); err != nil {
 		return fmt.Errorf("updating branding configuration: %w", err)
 	}
 	return nil
