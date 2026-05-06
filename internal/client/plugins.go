@@ -45,7 +45,7 @@ type VersionInfo struct {
 	Checksum       string `json:"checksum"`
 	Timestamp      string `json:"timestamp"`
 	RepositoryName string `json:"repositoryName"`
-	RepositoryURL  string `json:"repositoryURL"`
+	RepositoryURL  string `json:"repositoryUrl"`
 }
 
 // GetPluginRepositories retrieves all configured plugin repositories.
@@ -86,7 +86,7 @@ func (c *Client) GetInstalledPlugins(ctx context.Context) ([]InstalledPlugin, er
 func (c *Client) InstallPlugin(ctx context.Context, name, version, repositoryURL string) error {
 	params := url.Values{}
 	params.Set("version", version)
-	params.Set("repositoryURL", repositoryURL)
+	params.Set("repositoryUrl", repositoryURL)
 
 	path := fmt.Sprintf("/Packages/Installed/%s?%s", url.PathEscape(name), params.Encode())
 

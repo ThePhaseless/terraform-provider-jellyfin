@@ -59,8 +59,8 @@ type UserPolicy struct {
 	BlockedMediaFolders              []string          `json:"BlockedMediaFolders"`
 	BlockedChannels                  []string          `json:"BlockedChannels"`
 	RemoteClientBitrateLimit         int               `json:"RemoteClientBitrateLimit"`
-	AuthenticationProviderID         string            `json:"AuthenticationProviderID"`
-	PasswordResetProviderID          string            `json:"PasswordResetProviderID"`
+	AuthenticationProviderID         string            `json:"AuthenticationProviderId"`
+	PasswordResetProviderID          string            `json:"PasswordResetProviderId"`
 	SyncPlayAccess                   string            `json:"SyncPlayAccess"`
 	EnableCollectionManagement       bool              `json:"EnableCollectionManagement"`
 	EnableSubtitleManagement         bool              `json:"EnableSubtitleManagement"`
@@ -71,7 +71,7 @@ type UserPolicy struct {
 type AuthResult struct {
 	User        User   `json:"User"`
 	AccessToken string `json:"AccessToken"`
-	ServerID    string `json:"ServerID"`
+	ServerID    string `json:"ServerId"`
 }
 
 // GetUsers retrieves all users.

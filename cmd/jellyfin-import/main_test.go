@@ -165,7 +165,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 				"Name":           "Movies",
 				"CollectionType": "movies",
 				"Locations":      []string{"/media/movies"},
-				"ItemID":         "item-1",
+				"ItemId":         "item-1",
 			},
 		})
 	})
@@ -208,7 +208,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 				"versions": []map[string]interface{}{
 					{
 						"version":        "14.0.0.0",
-						"repositoryURL":  "https://repo.jellyfin.org/files/plugin/manifest.json",
+						"repositoryUrl":  "https://repo.jellyfin.org/files/plugin/manifest.json",
 						"repositoryName": "Jellyfin Stable",
 					},
 				},
