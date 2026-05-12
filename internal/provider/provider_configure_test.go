@@ -78,6 +78,7 @@ func TestConfigureClientBootstrapsUnconfiguredServer(t *testing.T) {
 		t.Fatalf("APIKey = %q, want new-token", c.APIKey)
 	}
 
+	// Jellyfin initializes the placeholder user on GET /Startup/User before it can be updated with POST /Startup/User.
 	wantCalls := []string{"/Startup/Configuration", "/Startup/User", "/Startup/User", "/Startup/Complete", "/Users/AuthenticateByName"}
 	if strings.Join(calls, ",") != strings.Join(wantCalls, ",") {
 		t.Fatalf("calls = %#v, want %#v", calls, wantCalls)

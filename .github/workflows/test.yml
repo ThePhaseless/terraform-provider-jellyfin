@@ -77,10 +77,12 @@ jobs:
       - name: Run acceptance tests
         env:
           TF_ACC: "1"
+        # Disable Go test caching because these tests depend on fresh Jellyfin container state.
         run: go test -count=1 -v -cover -timeout 10m ./internal/provider/
 
       - name: Run import tool e2e tests
         # JELLYFIN_ENDPOINT, JELLYFIN_USERNAME, and JELLYFIN_PASSWORD are set via $GITHUB_ENV in "Setup Jellyfin" step.
+        # Disable Go test caching because these tests depend on the Jellyfin container state from the prior step.
         run: go test -count=1 -v -timeout 5m -run 'TestAcc' ./cmd/jellyfin-import/
 
       - name: Stop Jellyfin
