@@ -68,6 +68,12 @@ func importClient(ctx context.Context, endpoint, apiKey, username, password stri
 	if apiKey != "" {
 		return c, nil
 	}
+	if username == "" {
+		return nil, fmt.Errorf("missing Jellyfin username; set --username or JELLYFIN_USERNAME")
+	}
+	if password == "" {
+		return nil, fmt.Errorf("missing Jellyfin password; set --password or JELLYFIN_PASSWORD")
+	}
 
 	authResult, err := c.AuthenticateByName(ctx, username, password)
 	if err != nil {

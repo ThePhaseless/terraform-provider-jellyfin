@@ -200,7 +200,7 @@ func configureClient(ctx context.Context, endpoint, apiKey, username, password s
 
 func getPublicSystemInfo(ctx context.Context, c *client.Client) (*client.PublicSystemInfo, error) {
 	var lastErr error
-	for range startupStatusRetries {
+	for i := 0; i < startupStatusRetries; i++ {
 		info, err := c.GetPublicSystemInfo(ctx)
 		if err == nil {
 			return info, nil

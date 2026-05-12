@@ -719,6 +719,30 @@ func TestImportClientAuthenticatesWithCredentials(t *testing.T) {
 	}
 }
 
+func TestImportClientRequiresUsernameWhenAPIKeyMissing(t *testing.T) {
+	t.Parallel()
+
+	_, err := importClient(context.Background(), "http://example.test", "", "", "Admin123!")
+	if err == nil {
+		t.Fatal("importClient() error = nil, want missing username error")
+	}
+	if !strings.Contains(err.Error(), "missing Jellyfin username") {
+		t.Fatalf("importClient() error = %v, want missing username error", err)
+	}
+}
+
+func TestImportClientRequiresPasswordWhenAPIKeyMissing(t *testing.T) {
+	t.Parallel()
+
+	_, err := importClient(context.Background(), "http://example.test", "", "admin", "")
+	if err == nil {
+		t.Fatal("importClient() error = nil, want missing password error")
+	}
+	if !strings.Contains(err.Error(), "missing Jellyfin password") {
+		t.Fatalf("importClient() error = %v, want missing password error", err)
+	}
+}
+
 func testAccImportClient(t *testing.T) *client.Client {
 	t.Helper()
 
