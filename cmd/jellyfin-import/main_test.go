@@ -913,12 +913,8 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 			t.Fatalf("generateAPIKeys() error: %v", err)
 		}
 
-		// The setup script creates at least one API key.
-		if len(imports) == 0 {
-			t.Error("expected at least 1 API key import block")
-		}
-		if len(resources) == 0 {
-			t.Error("expected at least 1 API key resource block")
+		if len(imports) != len(resources) {
+			t.Errorf("API key import/resource count mismatch: imports=%d resources=%d", len(imports), len(resources))
 		}
 		if len(resources) > 0 && !strings.Contains(resources[0], "app_name") {
 			t.Errorf("API key resource should contain app_name: %s", resources[0])

@@ -13,8 +13,9 @@ MAX_WAIT=120
 
 echo "Waiting for Jellyfin to become ready at ${JELLYFIN_URL}..."
 for i in $(seq 1 "$MAX_WAIT"); do
-    HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "${JELLYFIN_URL}/System/Info/Public" 2>/dev/null || echo "000")
-    if [ "$HTTP_CODE" = "200" ]; then
+    # /Startup/User returns JSON when not configured, or 401 when already configured.
+    HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "${JELLYFIN_URL}/Startup/User" 2>/dev/null || echo "000")
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "401" ]; then
         echo "Jellyfin is ready! (waited ${i}s)"
         break
     fi

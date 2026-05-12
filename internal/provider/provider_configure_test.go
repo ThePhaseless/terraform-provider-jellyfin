@@ -35,6 +35,13 @@ func TestConfigureClientBootstrapsUnconfiguredServer(t *testing.T) {
 	})
 	mux.HandleFunc("/Startup/User", func(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, r.URL.Path)
+		if r.Method == http.MethodGet {
+			writeProviderJSON(t, w, map[string]string{"Name": "root"})
+			return
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("startup user method = %s, want GET or POST", r.Method)
+		}
 		var body map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decoding startup user body: %v", err)
@@ -71,7 +78,7 @@ func TestConfigureClientBootstrapsUnconfiguredServer(t *testing.T) {
 		t.Fatalf("APIKey = %q, want new-token", c.APIKey)
 	}
 
-	wantCalls := []string{"/Startup/Configuration", "/Startup/User", "/Startup/Complete", "/Users/AuthenticateByName"}
+	wantCalls := []string{"/Startup/Configuration", "/Startup/User", "/Startup/User", "/Startup/Complete", "/Users/AuthenticateByName"}
 	if strings.Join(calls, ",") != strings.Join(wantCalls, ",") {
 		t.Fatalf("calls = %#v, want %#v", calls, wantCalls)
 	}

@@ -7,7 +7,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -149,7 +151,7 @@ func (p *JellyfinProvider) Configure(ctx context.Context, req provider.Configure
 func configureClient(ctx context.Context, endpoint, apiKey, username, password string) (*client.Client, error) {
 	c := client.NewClient(endpoint, apiKey)
 
-	info, err := c.GetPublicSystemInfo(ctx)
+	info, err := getPublicSystemInfo(ctx, c)
 	if err != nil {
 		return nil, fmt.Errorf("checking Jellyfin startup status: %w", err)
 	}
@@ -164,6 +166,9 @@ func configureClient(ctx context.Context, endpoint, apiKey, username, password s
 			MetadataCountryCode:       "US",
 			PreferredMetadataLanguage: "en",
 		}); err != nil {
+			return nil, err
+		}
+		if _, err := c.GetFirstUser(ctx); err != nil {
 			return nil, err
 		}
 		if err := c.SetStartupUser(ctx, username, password); err != nil {
@@ -185,6 +190,30 @@ func configureClient(ctx context.Context, endpoint, apiKey, username, password s
 	}
 
 	return authenticateClient(ctx, c, username, password)
+}
+
+func getPublicSystemInfo(ctx context.Context, c *client.Client) (*client.PublicSystemInfo, error) {
+	var lastErr error
+	for range 30 {
+		info, err := c.GetPublicSystemInfo(ctx)
+		if err == nil {
+			return info, nil
+		}
+
+		var httpErr *client.HTTPError
+		if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusServiceUnavailable {
+			return nil, err
+		}
+		lastErr = err
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+
+	return nil, lastErr
 }
 
 func authenticateClient(ctx context.Context, c *client.Client, username, password string) (*client.Client, error) {
