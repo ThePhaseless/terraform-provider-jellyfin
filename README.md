@@ -105,6 +105,13 @@ All provider attributes can be set via environment variables:
 | `JELLYFIN_USERNAME` | Username for authentication |
 | `JELLYFIN_PASSWORD` | Password for authentication |
 
+You can keep the provider block empty and rely entirely on `JELLYFIN_*`
+environment variables for authentication, including bootstrap:
+
+```hcl
+provider "jellyfin" {}
+```
+
 ## Universal Plugin Configuration
 
 Any plugin can be configured using the `jellyfin_plugin_configuration` resource with JSON:

@@ -9,12 +9,8 @@ terraform {
 # Configure the provider using environment variables:
 # JELLYFIN_ENDPOINT - The Jellyfin server URL
 # JELLYFIN_API_KEY  - The API key for authentication
+# JELLYFIN_USERNAME - Username for authentication/bootstrap
+# JELLYFIN_PASSWORD - Password for authentication/bootstrap
 provider "jellyfin" {
-  endpoint = "http://localhost:8096"
-  api_key  = var.jellyfin_api_key
-}
-
-variable "jellyfin_api_key" {
-  type      = string
-  sensitive = true
+  # The block can stay empty when auth is provided via JELLYFIN_* env vars.
 }
