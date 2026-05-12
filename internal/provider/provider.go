@@ -5,6 +5,8 @@ package provider
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -58,9 +60,11 @@ func (p *JellyfinProvider) Schema(_ context.Context, _ provider.SchemaRequest, r
 			},
 			"api_key": schema.StringAttribute{
 				Description: "The API key for authenticating with the Jellyfin server. " +
-					"Can also be set via the `JELLYFIN_API_KEY` environment variable.",
+					"Can also be set via the `JELLYFIN_API_KEY` environment variable. " +
+					"Use username and password instead when bootstrapping a new server.",
 				MarkdownDescription: "The API key for authenticating with the Jellyfin server. " +
-					"Can also be set via the `JELLYFIN_API_KEY` environment variable.",
+					"Can also be set via the `JELLYFIN_API_KEY` environment variable. " +
+					"Use username and password instead when bootstrapping a new server.",
 				Optional:  true,
 				Sensitive: true,
 				Validators: []validator.String{
@@ -68,9 +72,9 @@ func (p *JellyfinProvider) Schema(_ context.Context, _ provider.SchemaRequest, r
 				},
 			},
 			"username": schema.StringAttribute{
-				Description: "Username for authenticating with the Jellyfin server (used during initial setup). " +
+				Description: "Username for authenticating with the Jellyfin server and creating the initial admin during bootstrap. " +
 					"Can also be set via the `JELLYFIN_USERNAME` environment variable.",
-				MarkdownDescription: "Username for authenticating with the Jellyfin server (used during initial setup). " +
+				MarkdownDescription: "Username for authenticating with the Jellyfin server and creating the initial admin during bootstrap. " +
 					"Can also be set via the `JELLYFIN_USERNAME` environment variable.",
 				Optional: true,
 				Validators: []validator.String{
@@ -78,9 +82,9 @@ func (p *JellyfinProvider) Schema(_ context.Context, _ provider.SchemaRequest, r
 				},
 			},
 			"password": schema.StringAttribute{
-				Description: "Password for authenticating with the Jellyfin server (used during initial setup). " +
+				Description: "Password for authenticating with the Jellyfin server and creating the initial admin during bootstrap. " +
 					"Can also be set via the `JELLYFIN_PASSWORD` environment variable.",
-				MarkdownDescription: "Password for authenticating with the Jellyfin server (used during initial setup). " +
+				MarkdownDescription: "Password for authenticating with the Jellyfin server and creating the initial admin during bootstrap. " +
 					"Can also be set via the `JELLYFIN_PASSWORD` environment variable.",
 				Optional:  true,
 				Sensitive: true,
@@ -129,31 +133,74 @@ func (p *JellyfinProvider) Configure(ctx context.Context, req provider.Configure
 		return
 	}
 
-	c := client.NewClient(endpoint, apiKey)
-
-	// If no API key is set but we have credentials, authenticate to get one.
-	if apiKey == "" && username != "" {
-		if password == "" {
-			resp.Diagnostics.AddError(
-				"Missing Jellyfin Password",
-				"A username was provided but no password was set. "+
-					"Set the password in the provider configuration or via the JELLYFIN_PASSWORD environment variable.",
-			)
-			return
-		}
-		authResult, err := c.AuthenticateByName(ctx, username, password)
-		if err != nil {
-			resp.Diagnostics.AddError(
-				"Authentication Failed",
-				"Failed to authenticate with Jellyfin: "+err.Error(),
-			)
-			return
-		}
-		c.APIKey = authResult.AccessToken
+	c, err := configureClient(ctx, endpoint, apiKey, username, password)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Jellyfin Configuration Failed",
+			err.Error(),
+		)
+		return
 	}
 
 	resp.DataSourceData = c
 	resp.ResourceData = c
+}
+
+func configureClient(ctx context.Context, endpoint, apiKey, username, password string) (*client.Client, error) {
+	c := client.NewClient(endpoint, apiKey)
+
+	info, err := c.GetPublicSystemInfo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("checking Jellyfin startup status: %w", err)
+	}
+
+	if !info.StartupWizardCompleted {
+		if username == "" || password == "" {
+			return nil, errors.New("Jellyfin has not been bootstrapped yet; set username and password in the provider configuration or via JELLYFIN_USERNAME and JELLYFIN_PASSWORD so the initial admin user can be created")
+		}
+
+		if err := c.UpdateStartupConfiguration(ctx, &client.StartupConfiguration{
+			UICulture:                 "en-US",
+			MetadataCountryCode:       "US",
+			PreferredMetadataLanguage: "en",
+		}); err != nil {
+			return nil, err
+		}
+		if err := c.SetStartupUser(ctx, username, password); err != nil {
+			return nil, err
+		}
+		if err := c.CompleteStartupWizard(ctx); err != nil {
+			return nil, err
+		}
+
+		return authenticateClient(ctx, c, username, password)
+	}
+
+	if apiKey != "" {
+		return c, nil
+	}
+
+	if username == "" && password == "" {
+		return nil, errors.New("set api_key or username and password in the provider configuration, or via JELLYFIN_API_KEY or JELLYFIN_USERNAME and JELLYFIN_PASSWORD")
+	}
+
+	return authenticateClient(ctx, c, username, password)
+}
+
+func authenticateClient(ctx context.Context, c *client.Client, username, password string) (*client.Client, error) {
+	if username == "" {
+		return nil, errors.New("missing Jellyfin username; set it in the provider configuration or via JELLYFIN_USERNAME")
+	}
+	if password == "" {
+		return nil, errors.New("missing Jellyfin password; set it in the provider configuration or via JELLYFIN_PASSWORD")
+	}
+
+	authResult, err := c.AuthenticateByName(ctx, username, password)
+	if err != nil {
+		return nil, fmt.Errorf("authenticating with Jellyfin: %w", err)
+	}
+	c.APIKey = authResult.AccessToken
+	return c, nil
 }
 
 func (p *JellyfinProvider) Resources(_ context.Context) []func() resource.Resource {

@@ -39,7 +39,7 @@ variable "jellyfin_api_key" {
 
 ### Optional
 
-- `api_key` (String, Sensitive) The API key for authenticating with the Jellyfin server. Can also be set via the `JELLYFIN_API_KEY` environment variable.
+- `api_key` (String, Sensitive) The API key for authenticating with the Jellyfin server. Can also be set via the `JELLYFIN_API_KEY` environment variable. Use username and password instead when bootstrapping a new server.
 - `endpoint` (String) The URL of the Jellyfin server (e.g., `http://localhost:8096`). Can also be set via the `JELLYFIN_ENDPOINT` environment variable.
-- `password` (String, Sensitive) Password for authenticating with the Jellyfin server (used during initial setup). Can also be set via the `JELLYFIN_PASSWORD` environment variable.
-- `username` (String) Username for authenticating with the Jellyfin server (used during initial setup). Can also be set via the `JELLYFIN_USERNAME` environment variable.
+- `password` (String, Sensitive) Password for authenticating with the Jellyfin server and creating the initial admin during bootstrap. Can also be set via the `JELLYFIN_PASSWORD` environment variable.
+- `username` (String) Username for authenticating with the Jellyfin server and creating the initial admin during bootstrap. Can also be set via the `JELLYFIN_USERNAME` environment variable.

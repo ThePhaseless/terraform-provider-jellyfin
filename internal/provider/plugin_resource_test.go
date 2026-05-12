@@ -4,9 +4,7 @@
 package provider
 
 import (
-	"context"
 	"fmt"
-	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -54,14 +52,9 @@ resource "jellyfin_plugin" "test" {
 func testAccFindInstallablePlugin(t *testing.T, repoURL string) (name, version string) {
 	t.Helper()
 
-	endpoint := os.Getenv("JELLYFIN_ENDPOINT")
-	apiKey := os.Getenv("JELLYFIN_API_KEY")
-	if endpoint == "" || apiKey == "" {
-		t.Skip("JELLYFIN_ENDPOINT or JELLYFIN_API_KEY not set")
-	}
-
-	c := client.NewClient(endpoint, apiKey)
-	ctx := context.Background()
+	testAccPreCheck(t)
+	c := testAccClient(t)
+	ctx := t.Context()
 
 	// Get currently registered repos.
 	repos, err := c.GetPluginRepositories(ctx)
