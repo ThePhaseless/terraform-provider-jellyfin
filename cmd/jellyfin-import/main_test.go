@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -679,18 +680,93 @@ func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
 	}
 }
 
-// TestAccImportToolE2E is an acceptance test that runs the import tool against a real
-// Jellyfin instance. It verifies that the tool generates valid import and resource files.
-// Set JELLYFIN_ENDPOINT and JELLYFIN_API_KEY to enable this test.
-func TestAccImportToolE2E(t *testing.T) {
+func TestImportClientUsesAPIKeyWhenProvided(t *testing.T) {
+	t.Parallel()
+
+	c, err := importClient(context.Background(), "http://example.test", "api-key", "", "")
+	if err != nil {
+		t.Fatalf("importClient() error = %v", err)
+	}
+	if c.APIKey != "api-key" {
+		t.Fatalf("APIKey = %q, want api-key", c.APIKey)
+	}
+}
+
+func TestImportClientAuthenticatesWithCredentials(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/Users/AuthenticateByName" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decoding auth body: %v", err)
+		}
+		if body["Username"] != "admin" || body["Pw"] != "Admin123!" {
+			t.Fatalf("unexpected auth body: %#v", body)
+		}
+		writeJSON(t, w, map[string]string{"AccessToken": "login-token"})
+	}))
+	defer server.Close()
+
+	c, err := importClient(context.Background(), server.URL, "", "admin", "Admin123!")
+	if err != nil {
+		t.Fatalf("importClient() error = %v", err)
+	}
+	if c.APIKey != "login-token" {
+		t.Fatalf("APIKey = %q, want login-token", c.APIKey)
+	}
+}
+
+func TestImportClientRequiresUsernameWhenAPIKeyMissing(t *testing.T) {
+	t.Parallel()
+
+	_, err := importClient(context.Background(), "http://example.test", "", "", "Admin123!")
+	if err == nil {
+		t.Fatal("importClient() error = nil, want missing username error")
+	}
+	if !strings.Contains(err.Error(), "missing Jellyfin username") {
+		t.Fatalf("importClient() error = %v, want missing username error", err)
+	}
+}
+
+func TestImportClientRequiresPasswordWhenAPIKeyMissing(t *testing.T) {
+	t.Parallel()
+
+	_, err := importClient(context.Background(), "http://example.test", "", "admin", "")
+	if err == nil {
+		t.Fatal("importClient() error = nil, want missing password error")
+	}
+	if !strings.Contains(err.Error(), "missing Jellyfin password") {
+		t.Fatalf("importClient() error = %v, want missing password error", err)
+	}
+}
+
+func testAccImportClient(t *testing.T) *client.Client {
+	t.Helper()
+
 	endpoint := os.Getenv("JELLYFIN_ENDPOINT")
 	apiKey := os.Getenv("JELLYFIN_API_KEY")
-	if endpoint == "" || apiKey == "" {
-		t.Skip("JELLYFIN_ENDPOINT and JELLYFIN_API_KEY must be set for acceptance tests")
+	username := os.Getenv("JELLYFIN_USERNAME")
+	password := os.Getenv("JELLYFIN_PASSWORD")
+	if endpoint == "" || (apiKey == "" && (username == "" || password == "")) {
+		t.Skip("JELLYFIN_ENDPOINT and either JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD must be set for acceptance tests")
 	}
 
+	c, err := importClient(context.Background(), endpoint, apiKey, username, password)
+	if err != nil {
+		t.Fatalf("failed to configure Jellyfin import acceptance test client: %v", err)
+	}
+	return c
+}
+
+// TestAccImportToolE2E is an acceptance test that runs the import tool against a real
+// Jellyfin instance. It verifies that the tool generates valid import and resource files.
+// Set JELLYFIN_ENDPOINT and either JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD to enable this test.
+func TestAccImportToolE2E(t *testing.T) {
 	outputDir := t.TempDir()
-	c := client.NewClient(endpoint, apiKey)
+	c := testAccImportClient(t)
 
 	g := &generator{
 		client:    c,
@@ -772,13 +848,7 @@ func TestAccImportToolE2E(t *testing.T) {
 // TestAccImportToolIndividualGenerators tests each generator function against a real
 // Jellyfin instance to verify they produce valid output.
 func TestAccImportToolIndividualGenerators(t *testing.T) {
-	endpoint := os.Getenv("JELLYFIN_ENDPOINT")
-	apiKey := os.Getenv("JELLYFIN_API_KEY")
-	if endpoint == "" || apiKey == "" {
-		t.Skip("JELLYFIN_ENDPOINT and JELLYFIN_API_KEY must be set for acceptance tests")
-	}
-
-	c := client.NewClient(endpoint, apiKey)
+	c := testAccImportClient(t)
 
 	t.Run("Users", func(t *testing.T) {
 		g := &generator{
@@ -867,12 +937,8 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 			t.Fatalf("generateAPIKeys() error: %v", err)
 		}
 
-		// The setup script creates at least one API key.
-		if len(imports) == 0 {
-			t.Error("expected at least 1 API key import block")
-		}
-		if len(resources) == 0 {
-			t.Error("expected at least 1 API key resource block")
+		if len(imports) != len(resources) {
+			t.Errorf("API key import/resource count mismatch: imports=%d resources=%d", len(imports), len(resources))
 		}
 		if len(resources) > 0 && !strings.Contains(resources[0], "app_name") {
 			t.Errorf("API key resource should contain app_name: %s", resources[0])

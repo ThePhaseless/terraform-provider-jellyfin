@@ -23,6 +23,8 @@ var sanitizeRe = regexp.MustCompile(`[^a-zA-Z0-9]+`)
 func main() {
 	endpoint := flag.String("endpoint", os.Getenv("JELLYFIN_ENDPOINT"), "Jellyfin server URL (or JELLYFIN_ENDPOINT env)")
 	apiKey := flag.String("api-key", os.Getenv("JELLYFIN_API_KEY"), "Jellyfin API key (or JELLYFIN_API_KEY env)")
+	username := flag.String("username", os.Getenv("JELLYFIN_USERNAME"), "Jellyfin username (or JELLYFIN_USERNAME env)")
+	password := flag.String("password", os.Getenv("JELLYFIN_PASSWORD"), "Jellyfin password (or JELLYFIN_PASSWORD env)")
 	outputDir := flag.String("output", ".", "Output directory for generated Terraform files")
 	flag.Parse()
 
@@ -30,12 +32,16 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Error: --endpoint or JELLYFIN_ENDPOINT is required")
 		os.Exit(1)
 	}
-	if *apiKey == "" {
-		fmt.Fprintln(os.Stderr, "Error: --api-key or JELLYFIN_API_KEY is required")
+	if *apiKey == "" && (*username == "" || *password == "") {
+		fmt.Fprintln(os.Stderr, "Error: Either --api-key (or JELLYFIN_API_KEY) or both --username/--password (or JELLYFIN_USERNAME/JELLYFIN_PASSWORD) must be set")
 		os.Exit(1)
 	}
 
-	c := client.NewClient(*endpoint, *apiKey)
+	c, err := importClient(context.Background(), *endpoint, *apiKey, *username, *password)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error configuring Jellyfin client: %v\n", err)
+		os.Exit(1)
+	}
 
 	if err := os.MkdirAll(*outputDir, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating output directory: %v\n", err)
@@ -55,6 +61,26 @@ func main() {
 	}
 
 	fmt.Println("Import files generated successfully in", *outputDir)
+}
+
+func importClient(ctx context.Context, endpoint, apiKey, username, password string) (*client.Client, error) {
+	c := client.NewClient(endpoint, apiKey)
+	if apiKey != "" {
+		return c, nil
+	}
+	if username == "" {
+		return nil, fmt.Errorf("missing Jellyfin username; set --username or JELLYFIN_USERNAME")
+	}
+	if password == "" {
+		return nil, fmt.Errorf("missing Jellyfin password; set --password or JELLYFIN_PASSWORD")
+	}
+
+	authResult, err := c.AuthenticateByName(ctx, username, password)
+	if err != nil {
+		return nil, fmt.Errorf("authenticating with Jellyfin: %w", err)
+	}
+	c.APIKey = authResult.AccessToken
+	return c, nil
 }
 
 type generator struct {

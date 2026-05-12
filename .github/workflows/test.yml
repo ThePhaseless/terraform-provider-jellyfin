@@ -71,16 +71,19 @@ jobs:
           chmod +x scripts/setup_jellyfin.sh
           eval "$(scripts/setup_jellyfin.sh 2>/dev/null | grep '^export ')"
           echo "JELLYFIN_ENDPOINT=${JELLYFIN_ENDPOINT}" >> "$GITHUB_ENV"
-          echo "JELLYFIN_API_KEY=${JELLYFIN_API_KEY}" >> "$GITHUB_ENV"
+          echo "JELLYFIN_USERNAME=${JELLYFIN_USERNAME}" >> "$GITHUB_ENV"
+          echo "JELLYFIN_PASSWORD=${JELLYFIN_PASSWORD}" >> "$GITHUB_ENV"
 
       - name: Run acceptance tests
         env:
           TF_ACC: "1"
-        run: go test -v -cover -timeout 10m ./internal/provider/
+        # Disable Go test caching because these tests depend on fresh Jellyfin container state.
+        run: go test -count=1 -v -cover -timeout 10m ./internal/provider/
 
       - name: Run import tool e2e tests
-        # JELLYFIN_ENDPOINT and JELLYFIN_API_KEY are set via $GITHUB_ENV in "Setup Jellyfin" step.
-        run: go test -v -timeout 5m -run 'TestAcc' ./cmd/jellyfin-import/
+        # JELLYFIN_ENDPOINT, JELLYFIN_USERNAME, and JELLYFIN_PASSWORD are set via $GITHUB_ENV in "Setup Jellyfin" step.
+        # Disable Go test caching because these tests depend on the Jellyfin container state from the prior step.
+        run: go test -count=1 -v -timeout 5m -run 'TestAcc' ./cmd/jellyfin-import/
 
       - name: Stop Jellyfin
         if: always()

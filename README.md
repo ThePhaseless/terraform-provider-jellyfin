@@ -79,7 +79,7 @@ provider "jellyfin" {
 }
 ```
 
-### Username/Password
+### Username/Password and Bootstrap
 
 ```hcl
 provider "jellyfin" {
@@ -88,6 +88,11 @@ provider "jellyfin" {
   password = "password"
 }
 ```
+
+If the Jellyfin startup wizard has not been completed yet, configure the
+provider with `username` and `password`. The provider uses them to create the
+initial admin user, completes the wizard, and then authenticates with that user.
+After bootstrap, either API key or username/password authentication can be used.
 
 ### Environment Variables
 
@@ -99,6 +104,13 @@ All provider attributes can be set via environment variables:
 | `JELLYFIN_API_KEY` | API key for authentication |
 | `JELLYFIN_USERNAME` | Username for authentication |
 | `JELLYFIN_PASSWORD` | Password for authentication |
+
+You can keep the provider block empty and rely entirely on `JELLYFIN_*`
+environment variables for authentication, including bootstrap:
+
+```hcl
+provider "jellyfin" {}
+```
 
 ## Universal Plugin Configuration
 
