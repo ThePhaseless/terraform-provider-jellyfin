@@ -33,7 +33,7 @@ func main() {
 		os.Exit(1)
 	}
 	if *apiKey == "" && (*username == "" || *password == "") {
-		fmt.Fprintln(os.Stderr, "Error: --api-key or JELLYFIN_API_KEY, or --username/--password or JELLYFIN_USERNAME/JELLYFIN_PASSWORD, is required")
+		fmt.Fprintln(os.Stderr, "Error: Either --api-key (or JELLYFIN_API_KEY) or both --username/--password (or JELLYFIN_USERNAME/JELLYFIN_PASSWORD) must be set")
 		os.Exit(1)
 	}
 

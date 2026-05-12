@@ -25,6 +25,12 @@ import (
 // Ensure JellyfinProvider satisfies various provider interfaces.
 var _ provider.Provider = &JellyfinProvider{}
 
+// Jellyfin can answer 503 briefly after the HTTP port opens while startup tasks finish.
+const (
+	startupStatusRetries = 30
+	startupStatusDelay   = time.Second
+)
+
 // JellyfinProvider defines the provider implementation.
 type JellyfinProvider struct {
 	version string
@@ -194,7 +200,7 @@ func configureClient(ctx context.Context, endpoint, apiKey, username, password s
 
 func getPublicSystemInfo(ctx context.Context, c *client.Client) (*client.PublicSystemInfo, error) {
 	var lastErr error
-	for range 30 {
+	for range startupStatusRetries {
 		info, err := c.GetPublicSystemInfo(ctx)
 		if err == nil {
 			return info, nil
@@ -209,7 +215,7 @@ func getPublicSystemInfo(ctx context.Context, c *client.Client) (*client.PublicS
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(time.Second):
+		case <-time.After(startupStatusDelay):
 		}
 	}
 
