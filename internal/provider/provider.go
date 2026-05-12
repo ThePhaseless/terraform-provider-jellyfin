@@ -164,7 +164,7 @@ func configureClient(ctx context.Context, endpoint, apiKey, username, password s
 
 	if !info.StartupWizardCompleted {
 		if username == "" || password == "" {
-			return nil, errors.New("Jellyfin has not been bootstrapped yet; set username and password in the provider configuration or via JELLYFIN_USERNAME and JELLYFIN_PASSWORD so the initial admin user can be created")
+			return nil, errors.New("jellyfin has not been bootstrapped yet; set username and password in the provider configuration or via JELLYFIN_USERNAME and JELLYFIN_PASSWORD so the initial admin user can be created")
 		}
 
 		if err := c.UpdateStartupConfiguration(ctx, &client.StartupConfiguration{

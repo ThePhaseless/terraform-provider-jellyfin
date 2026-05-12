@@ -20,7 +20,7 @@ func TestConfigureClientBootstrapsUnconfiguredServer(t *testing.T) {
 	mux.HandleFunc("/System/Info/Public", func(w http.ResponseWriter, _ *http.Request) {
 		writeProviderJSON(t, w, map[string]bool{"StartupWizardCompleted": false})
 	})
-	mux.HandleFunc("/Startup/Configuration", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/Startup/Configuration", func(_ http.ResponseWriter, r *http.Request) {
 		calls = append(calls, r.URL.Path)
 		if r.Method != http.MethodPost {
 			t.Fatalf("startup configuration method = %s, want POST", r.Method)
