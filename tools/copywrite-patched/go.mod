@@ -8,6 +8,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/bradleyfalzon/ghinstallation/v2 v2.18.0
 	github.com/google/go-github/v45 v45.2.0
+	github.com/google/go-github/v87 v87.0.0
 	github.com/knadh/koanf/parsers/dotenv v1.1.1
 	github.com/knadh/koanf/parsers/hcl v1.0.0
 	github.com/knadh/koanf/parsers/yaml v1.1.0
