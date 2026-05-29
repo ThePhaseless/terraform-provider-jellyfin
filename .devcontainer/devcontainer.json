@@ -2,7 +2,7 @@
 	"name": "terraform-provider-jellyfin",
 	"image": "mcr.microsoft.com/devcontainers/go:1.26-trixie",
 	"features": {
-		"ghcr.io/devcontainers/features/docker-in-docker:2": {
+		"ghcr.io/devcontainers/features/docker-in-docker:3": {
 			"moby": false
 		}
 	},
