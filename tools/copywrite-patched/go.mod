@@ -6,7 +6,7 @@ toolchain go1.26.5
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
-	github.com/bradleyfalzon/ghinstallation/v2 v2.18.0
+	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
 	github.com/google/go-github/v45 v45.2.0
 	github.com/google/go-github/v89 v89.0.0
 	github.com/knadh/koanf/parsers/dotenv v1.1.1
@@ -33,6 +33,7 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/google/go-github/v84 v84.0.0 // indirect
+	github.com/google/go-github/v88 v88.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/hashicorp/hcl v1.0.1-vault-7 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
