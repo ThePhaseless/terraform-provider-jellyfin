@@ -1,1 +1,1 @@
-terraform import jellyfin_plugin.example <plugin-id>
+terraform import jellyfin_plugin.example "<plugin-name>"

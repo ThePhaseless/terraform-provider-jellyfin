@@ -36,11 +36,43 @@ resource "jellyfin_plugin" "test" {
 					resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", pluginVersion),
 				),
 			},
-			// ImportState.
+			// ImportState by the resource's own ID (round-trip verification).
 			{
 				ResourceName:      "jellyfin_plugin.test",
 				ImportState:       true,
 				ImportStateVerify: true,
+			},
+			// Import by plugin *name* into a fresh resource address. This is the
+			// scenario from issue #84: the user runs `terraform import
+			// jellyfin_plugin.x "SSO-Auth"` using the plugin name, not the UUID.
+			{
+				ResourceName:            "jellyfin_plugin.imported",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"repository_url"},
+				Config: fmt.Sprintf(`
+resource "jellyfin_plugin" "imported" {
+  name           = %q
+  version        = %q
+  repository_url = %q
+}
+`, pluginName, pluginVersion, stableRepoURL),
+			},
+			// Apply the same resource again against the already-installed plugin.
+			// Create must detect the plugin is already installed and treat it as
+			// idempotent instead of erroring with a 404 (issue #84).
+			{
+				Config: fmt.Sprintf(`
+resource "jellyfin_plugin" "test" {
+  name           = %q
+  version        = %q
+  repository_url = %q
+}
+`, pluginName, pluginVersion, stableRepoURL),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("jellyfin_plugin.test", "id"),
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "name", pluginName),
+				),
 			},
 		},
 	})
