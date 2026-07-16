@@ -42,25 +42,22 @@ resource "jellyfin_plugin" "test" {
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
-			// Import by plugin *name* into a fresh resource address. This is the
-			// scenario from issue #84: the user runs `terraform import
-			// jellyfin_plugin.x "SSO-Auth"` using the plugin name, not the UUID.
+			// Import by plugin *name* — the scenario from issue #84: the user
+			// runs `terraform import jellyfin_plugin.x "SSO-Auth"` using the
+			// plugin name, not the server-assigned UUID. ImportStateId overrides
+			// the default behaviour (which imports using the state ID) so we can
+			// pass the plugin name explicitly.
 			{
-				ResourceName:            "jellyfin_plugin.imported",
+				ResourceName:            "jellyfin_plugin.test",
 				ImportState:             true,
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"repository_url"},
-				Config: fmt.Sprintf(`
-resource "jellyfin_plugin" "imported" {
-  name           = %q
-  version        = %q
-  repository_url = %q
-}
-`, pluginName, pluginVersion, stableRepoURL),
+				ImportStateId:           pluginName,
 			},
-			// Apply the same resource again against the already-installed plugin.
-			// Create must detect the plugin is already installed and treat it as
-			// idempotent instead of erroring with a 404 (issue #84).
+			// Verify Create is idempotent when the plugin is already installed
+			// (issue #84): adding a second resource for the same plugin name
+			// must not 404. Create detects the plugin is already present and
+			// reuses the existing install instead of POSTing again.
 			{
 				Config: fmt.Sprintf(`
 resource "jellyfin_plugin" "test" {
@@ -68,10 +65,17 @@ resource "jellyfin_plugin" "test" {
   version        = %q
   repository_url = %q
 }
-`, pluginName, pluginVersion, stableRepoURL),
+
+resource "jellyfin_plugin" "duplicate" {
+  name           = %q
+  version        = %q
+  repository_url = %q
+}
+`, pluginName, pluginVersion, stableRepoURL,
+					pluginName, pluginVersion, stableRepoURL),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("jellyfin_plugin.test", "id"),
-					resource.TestCheckResourceAttr("jellyfin_plugin.test", "name", pluginName),
+					resource.TestCheckResourceAttrSet("jellyfin_plugin.duplicate", "id"),
+					resource.TestCheckResourceAttr("jellyfin_plugin.duplicate", "name", pluginName),
 				),
 			},
 		},
