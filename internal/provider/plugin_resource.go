@@ -62,8 +62,8 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"name": schema.StringAttribute{
-				Description:         "The plugin package name.",
-				MarkdownDescription: "The plugin package name.",
+				Description:         "The plugin package name. Used as the import key (e.g. `terraform import jellyfin_plugin.x \"SSO-Auth\"`).",
+				MarkdownDescription: "The plugin package name. Used as the import key (e.g. `terraform import jellyfin_plugin.x \"SSO-Auth\"`).",
 				Required:            true,
 				Validators:          requiredIdentifierValidators(),
 				PlanModifiers: []planmodifier.String{
@@ -130,16 +130,33 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	if err := r.client.InstallPlugin(ctx, data.Name.ValueString(), data.Version.ValueString(), data.RepositoryURL.ValueString()); err != nil {
-		resp.Diagnostics.AddError("Failed to install plugin", err.Error())
+	// Check if the plugin is already installed. Jellyfin returns 404 when
+	// POSTing an install for a plugin that is already present, so we detect
+	// that case up front and treat it as idempotent rather than erroring.
+	pluginID, err := r.findInstalledPlugin(ctx, data.Name.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to check installed plugins", err.Error())
 		return
 	}
 
-	// Wait for the plugin to appear in the installed list.
-	pluginID, err := r.waitForPlugin(ctx, data.Name.ValueString(), 30*time.Second)
-	if err != nil {
-		resp.Diagnostics.AddError("Plugin installed but not found in installed list", err.Error())
-		return
+	if pluginID == "" {
+		if err := r.client.InstallPlugin(ctx, data.Name.ValueString(), data.Version.ValueString(), data.RepositoryURL.ValueString()); err != nil {
+			// If the install failed because the plugin is already installed
+			// (e.g. a concurrent install raced ahead of us), treat it as
+			// success and reconcile via the installed list below.
+			if !client.IsNotFound(err) {
+				resp.Diagnostics.AddError("Failed to install plugin", err.Error())
+				return
+			}
+		}
+
+		// Wait for the plugin to appear in the installed list.
+		id, err := r.waitForPlugin(ctx, data.Name.ValueString(), 30*time.Second)
+		if err != nil {
+			resp.Diagnostics.AddError("Plugin installed but not found in installed list", err.Error())
+			return
+		}
+		pluginID = id
 	}
 
 	data.ID = types.StringValue(pluginID)
@@ -226,7 +243,28 @@ func (r *PluginResource) waitForPlugin(ctx context.Context, name string, timeout
 }
 
 func (r *PluginResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	// Plugins can be imported by name (e.g. `terraform import jellyfin_plugin.x
+	// "SSO-Auth"`) or by the server-assigned UUID. We set the import ID into both
+	// `id` and `name` so Read can match whichever one is correct — it already
+	// checks `p.ID == data.ID || p.Name == data.Name` and overwrites both with
+	// the canonical values from the server afterward.
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), req.ID)...)
+}
+
+// findInstalledPlugin returns the plugin ID if a plugin with the given name is
+// already installed, or an empty string if it is not.
+func (r *PluginResource) findInstalledPlugin(ctx context.Context, name string) (string, error) {
+	plugins, err := r.client.GetInstalledPlugins(ctx)
+	if err != nil {
+		return "", fmt.Errorf("listing installed plugins: %w", err)
+	}
+	for _, p := range plugins {
+		if p.Name == name {
+			return p.ID, nil
+		}
+	}
+	return "", nil
 }
 
 // resolveRepositoryURL attempts to find the repository URL for a plugin by

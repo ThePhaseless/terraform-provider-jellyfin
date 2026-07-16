@@ -25,7 +25,7 @@ resource "jellyfin_plugin" "example" {
 
 ### Required
 
-- `name` (String) The plugin package name.
+- `name` (String) The plugin package name. Used as the import key (e.g. `terraform import jellyfin_plugin.x "SSO-Auth"`).
 - `version` (String) The plugin version to install.
 
 ### Optional
@@ -43,5 +43,5 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-terraform import jellyfin_plugin.example <plugin-id>
+terraform import jellyfin_plugin.example "<plugin-name>"
 ```
