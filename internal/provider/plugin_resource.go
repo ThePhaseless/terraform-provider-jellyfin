@@ -243,10 +243,12 @@ func (r *PluginResource) waitForPlugin(ctx context.Context, name string, timeout
 }
 
 func (r *PluginResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Plugins are imported by name (e.g. `terraform import jellyfin_plugin.x "SSO-Auth"`).
-	// The Jellyfin plugin ID is a server-assigned UUID that is not known to the
-	// user, so we route the import ID into the `name` attribute and let Read
-	// resolve the real ID from the installed-plugins list.
+	// Plugins can be imported by name (e.g. `terraform import jellyfin_plugin.x
+	// "SSO-Auth"`) or by the server-assigned UUID. We set the import ID into both
+	// `id` and `name` so Read can match whichever one is correct — it already
+	// checks `p.ID == data.ID || p.Name == data.Name` and overwrites both with
+	// the canonical values from the server afterward.
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), req.ID)...)
 }
 
