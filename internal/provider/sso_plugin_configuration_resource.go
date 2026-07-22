@@ -513,6 +513,8 @@ func (r *SSOPluginConfigurationResource) apply(ctx context.Context, data *SSOPlu
 
 	flattenSSOPluginConfiguration(ctx, updated, data, diags)
 	data.ID = data.PluginID
+
+	diags.Append(state.Set(ctx, data)...)
 }
 
 func (r *SSOPluginConfigurationResource) read(ctx context.Context, data *SSOPluginConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
@@ -528,6 +530,8 @@ func (r *SSOPluginConfigurationResource) read(ctx context.Context, data *SSOPlug
 
 	flattenSSOPluginConfiguration(ctx, current, data, diags)
 	data.ID = data.PluginID
+
+	diags.Append(state.Set(ctx, data)...)
 }
 
 func overlaySSOPluginConfiguration(ctx context.Context, m map[string]json.RawMessage, data *SSOPluginConfigurationResourceModel) diag.Diagnostics {
