@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-22
+
+### Fixed
+
+- `jellyfin_sso_plugin_configuration`: compare the installed SSO-Auth plugin ID with the provider’s hardcoded GUID in a case- and dash-insensitive way. Jellyfin returns the installed plugin ID without dashes, which caused the preinstall check to incorrectly reject servers that already had the plugin.
+
 ## [0.2.1] - 2026-07-22
 
 ### Fixed
@@ -50,7 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial Terraform provider implementation for managing Jellyfin users, libraries, plugins, API keys, scheduled tasks, and server configuration.
 
-[Unreleased]: https://github.com/ThePhaseless/terraform-provider-jellyfin/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/ThePhaseless/terraform-provider-jellyfin/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/ThePhaseless/terraform-provider-jellyfin/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ThePhaseless/terraform-provider-jellyfin/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ThePhaseless/terraform-provider-jellyfin/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ThePhaseless/terraform-provider-jellyfin/compare/v0.1.0...v0.1.1

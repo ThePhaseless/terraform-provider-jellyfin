@@ -439,8 +439,9 @@ func (r *SSOPluginConfigurationResource) requireSSOPluginInstalled(ctx context.C
 		return err
 	}
 
+	canonical := normalizeGUID(ssoPluginID)
 	for _, p := range installed {
-		if strings.EqualFold(p.ID, ssoPluginID) {
+		if normalizeGUID(p.ID) == canonical {
 			return nil
 		}
 	}
@@ -457,14 +458,21 @@ func (r *SSOPluginConfigurationResource) checkSSOVersionWarning(ctx context.Cont
 	if err != nil {
 		return
 	}
+	canonical := normalizeGUID(ssoPluginID)
 	for _, p := range installed {
-		if strings.EqualFold(p.ID, ssoPluginID) {
+		if normalizeGUID(p.ID) == canonical {
 			if detail, ok := versionNewerWarning("SSO-Auth plugin", p.Version, supportedSSOPluginVersion()); ok {
 				diags.AddWarning("SSO-Auth plugin version newer than supported", detail)
 			}
 			return
 		}
 	}
+}
+
+// normalizeGUID returns a lowercase, dash-free GUID so that the provider can
+// compare IDs regardless of whether Jellyfin returns them as "D" or "N" format.
+func normalizeGUID(s string) string {
+	return strings.ToLower(strings.ReplaceAll(s, "-", ""))
 }
 
 func (r *SSOPluginConfigurationResource) apply(ctx context.Context, data *SSOPluginConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
