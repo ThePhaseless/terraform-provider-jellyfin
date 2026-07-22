@@ -4,23 +4,25 @@ resource "jellyfin_user" "example" {
   is_administrator = false
 }
 
-# User with full policy control via policy_json
+# User with full typed policy control. Top-level IsAdministrator, IsDisabled,
+# and EnableAllFolders are managed outside the `policy` block; InvalidLoginAttemptCount
+# is server-managed and excluded.
 resource "jellyfin_user" "restricted" {
   name               = "restricted_user"
   password           = "secret456"
   is_administrator   = false
   enable_all_folders = false
 
-  policy_json = jsonencode({
-    EnableMediaPlayback            = true
-    EnableAudioPlaybackTranscoding = true
-    EnableVideoPlaybackTranscoding = false
-    EnableContentDeletion          = false
-    EnableRemoteAccess             = true
-    EnableLiveTvAccess             = false
-    LoginAttemptsBeforeLockout     = 3
-    MaxActiveSessions              = 2
-    SyncPlayAccess                 = "JoinGroups"
-    EnabledFolders                 = []
-  })
+  policy = {
+    enable_media_playback            = true
+    enable_audio_playback_transcoding = true
+    enable_video_playback_transcoding = false
+    enable_content_deletion          = false
+    enable_remote_access             = true
+    enable_live_tv_access            = false
+    login_attempts_before_lockout     = 3
+    max_active_sessions              = 2
+    sync_play_access                 = "JoinGroups"
+    enabled_folders                  = []
+  }
 }

@@ -5,5 +5,49 @@
     ":automergeMinor",
     ":automergeDigest",
     ":automergePr"
+  ],
+  "customDatasources": {
+    "jellyfin-sso-manifest": {
+      "defaultRegistryUrlTemplate": "https://raw.githubusercontent.com/9p4/jellyfin-plugin-sso/refs/heads/manifest/manifest.json",
+      "transformTemplates": [
+        "{ \"releases\": $.versions.map(v => { \"version\": v.version, \"releaseTimestamp\": v.timestamp }), \"sourceUrl\": \"https://github.com/9p4/jellyfin-plugin-sso\" }"
+      ]
+    }
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)supported_jellyfin_version\\.env$/"
+      ],
+      "matchStrings": [
+        "JELLYFIN_VERSION=(?<currentValue>\\d+(?:\\.\\d+)*)"
+      ],
+      "datasourceTemplate": "docker",
+      "depNameTemplate": "jellyfin/jellyfin",
+      "versioningTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)supported_sso_plugin_version\\.env$/"
+      ],
+      "matchStrings": [
+        "SSO_PLUGIN_VERSION=(?<currentValue>\\d+(?:\\.\\d+)*)"
+      ],
+      "datasourceTemplate": "custom.jellyfin-sso-manifest",
+      "depNameTemplate": "SSO-Auth"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "automerge": false,
+      "labels": [
+        "version-guard"
+      ]
+    }
   ]
 }

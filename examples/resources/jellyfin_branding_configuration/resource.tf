@@ -1,5 +1,6 @@
 resource "jellyfin_branding_configuration" "example" {
-  configuration_json = jsonencode({
-    SplashscreenEnabled = false
-  })
+  login_disclaimer = ""
+  custom_css = ""
+  splashscreen_enabled = false
+  splashscreen_location = ""
 }

@@ -141,7 +141,7 @@ func (p *JellyfinProvider) Configure(ctx context.Context, req provider.Configure
 		return
 	}
 
-	c, err := configureClient(ctx, endpoint, apiKey, username, password)
+	c, info, err := configureClient(ctx, endpoint, apiKey, username, password)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Jellyfin Configuration Failed",
@@ -150,21 +150,27 @@ func (p *JellyfinProvider) Configure(ctx context.Context, req provider.Configure
 		return
 	}
 
+	if info != nil {
+		if detail, ok := versionNewerWarning("Jellyfin server", info.Version, supportedJellyfinVersion()); ok {
+			resp.Diagnostics.AddWarning("Jellyfin version newer than supported", detail)
+		}
+	}
+
 	resp.DataSourceData = c
 	resp.ResourceData = c
 }
 
-func configureClient(ctx context.Context, endpoint, apiKey, username, password string) (*client.Client, error) {
+func configureClient(ctx context.Context, endpoint, apiKey, username, password string) (*client.Client, *client.PublicSystemInfo, error) {
 	c := client.NewClient(endpoint, apiKey)
 
 	info, err := getPublicSystemInfo(ctx, c)
 	if err != nil {
-		return nil, fmt.Errorf("checking Jellyfin startup status: %w", err)
+		return nil, nil, fmt.Errorf("checking Jellyfin startup status: %w", err)
 	}
 
 	if !info.StartupWizardCompleted {
 		if username == "" || password == "" {
-			return nil, errors.New("jellyfin has not been bootstrapped yet; set username and password in the provider configuration or via JELLYFIN_USERNAME and JELLYFIN_PASSWORD so the initial admin user can be created")
+			return nil, nil, errors.New("jellyfin has not been bootstrapped yet; set username and password in the provider configuration or via JELLYFIN_USERNAME and JELLYFIN_PASSWORD so the initial admin user can be created")
 		}
 
 		if err := c.UpdateStartupConfiguration(ctx, &client.StartupConfiguration{
@@ -172,30 +178,32 @@ func configureClient(ctx context.Context, endpoint, apiKey, username, password s
 			MetadataCountryCode:       "US",
 			PreferredMetadataLanguage: "en",
 		}); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if _, err := c.GetFirstUser(ctx); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := c.SetStartupUser(ctx, username, password); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := c.CompleteStartupWizard(ctx); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
-		return authenticateClient(ctx, c, username, password)
+		authenticated, err := authenticateClient(ctx, c, username, password)
+		return authenticated, info, err
 	}
 
 	if apiKey != "" {
-		return c, nil
+		return c, info, nil
 	}
 
 	if username == "" && password == "" {
-		return nil, errors.New("set api_key or username and password in the provider configuration, or via JELLYFIN_API_KEY or JELLYFIN_USERNAME and JELLYFIN_PASSWORD")
+		return nil, nil, errors.New("set api_key or username and password in the provider configuration, or via JELLYFIN_API_KEY or JELLYFIN_USERNAME and JELLYFIN_PASSWORD")
 	}
 
-	return authenticateClient(ctx, c, username, password)
+	authenticated, err := authenticateClient(ctx, c, username, password)
+	return authenticated, info, err
 }
 
 func getPublicSystemInfo(ctx context.Context, c *client.Client) (*client.PublicSystemInfo, error) {
@@ -245,6 +253,7 @@ func (p *JellyfinProvider) Resources(_ context.Context) []func() resource.Resour
 		NewPluginRepositoryResource,
 		NewPluginResource,
 		NewPluginConfigurationResource,
+		NewSSOPluginConfigurationResource,
 		NewSystemConfigurationResource,
 		NewEncodingConfigurationResource,
 		NewNetworkingConfigurationResource,

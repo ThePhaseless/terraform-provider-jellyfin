@@ -5,16 +5,17 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-
-	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 )
 
 var (
@@ -34,8 +35,8 @@ type MetadataConfigurationResource struct {
 
 // MetadataConfigurationResourceModel describes the resource data model.
 type MetadataConfigurationResourceModel struct {
-	ID                types.String         `tfsdk:"id"`
-	ConfigurationJSON jsontypes.Normalized `tfsdk:"configuration_json"`
+	ID types.String `tfsdk:"id"`
+	UseFileCreationTimeForDateAdded types.Bool `tfsdk:"use_file_creation_time_for_date_added"`
 }
 
 func (r *MetadataConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -44,10 +45,8 @@ func (r *MetadataConfigurationResource) Metadata(_ context.Context, req resource
 
 func (r *MetadataConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages the Jellyfin metadata configuration. " +
-			"Controls metadata settings such as how file creation time is used for date added.",
-		MarkdownDescription: "Manages the Jellyfin metadata configuration. " +
-			"Controls metadata settings such as how file creation time is used for date added.",
+		Description:         "Manages the Jellyfin metadata configuration.",
+		MarkdownDescription: "Manages the Jellyfin metadata configuration.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description:         "Resource identifier. Always set to `metadata` for this singleton resource.",
@@ -57,14 +56,7 @@ func (r *MetadataConfigurationResource) Schema(_ context.Context, _ resource.Sch
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"configuration_json": schema.StringAttribute{
-				Description: "The metadata configuration as a JSON string. " +
-					"Supports settings like UseFileCreationTimeForDateAdded.",
-				MarkdownDescription: "The metadata configuration as a JSON string. " +
-					"Supports settings like UseFileCreationTimeForDateAdded.",
-				Required:   true,
-				CustomType: jsontypes.NormalizedType{},
-			},
+			"use_file_creation_time_for_date_added": schema.BoolAttribute{Description: "Whether to use file creation time for date added.", MarkdownDescription: "Whether to use file creation time for date added.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 		},
 	}
 }
@@ -93,26 +85,7 @@ func (r *MetadataConfigurationResource) Create(ctx context.Context, req resource
 		return
 	}
 
-	config := &client.MetadataConfiguration{RawJSON: data.ConfigurationJSON.ValueString()}
-	if err := r.client.UpdateMetadataConfiguration(ctx, config); err != nil {
-		resp.Diagnostics.AddError("Failed to update metadata configuration", err.Error())
-		return
-	}
-
-	data.ID = types.StringValue("metadata")
-	updated, err := r.client.GetMetadataConfiguration(ctx)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to read metadata configuration after update", err.Error())
-		return
-	}
-	normalized, err := normalizeJSON(updated.RawJSON)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to normalize metadata configuration", err.Error())
-		return
-	}
-	data.ConfigurationJSON = jsontypes.NewNormalizedValue(normalized)
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
 }
 
 func (r *MetadataConfigurationResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -122,22 +95,7 @@ func (r *MetadataConfigurationResource) Read(ctx context.Context, req resource.R
 		return
 	}
 
-	config, err := r.client.GetMetadataConfiguration(ctx)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to read metadata configuration", err.Error())
-		return
-	}
-
-	normalized, err := normalizeJSON(config.RawJSON)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to normalize metadata configuration", err.Error())
-		return
-	}
-
-	data.ID = types.StringValue("metadata")
-	data.ConfigurationJSON = jsontypes.NewNormalizedValue(normalized)
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	r.read(ctx, &data, &resp.Diagnostics, &resp.State)
 }
 
 func (r *MetadataConfigurationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -147,15 +105,7 @@ func (r *MetadataConfigurationResource) Update(ctx context.Context, req resource
 		return
 	}
 
-	config := &client.MetadataConfiguration{RawJSON: data.ConfigurationJSON.ValueString()}
-	if err := r.client.UpdateMetadataConfiguration(ctx, config); err != nil {
-		resp.Diagnostics.AddError("Failed to update metadata configuration", err.Error())
-		return
-	}
-
-	data.ID = types.StringValue("metadata")
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
 }
 
 func (r *MetadataConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
@@ -164,9 +114,74 @@ func (r *MetadataConfigurationResource) Delete(_ context.Context, _ resource.Del
 
 func (r *MetadataConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Singleton resource — the import ID is not used. Read will populate all fields.
-	data := MetadataConfigurationResourceModel{
-		ID:                types.StringValue("metadata"),
-		ConfigurationJSON: jsontypes.NewNormalizedValue("{}"),
-	}
+	data := MetadataConfigurationResourceModel{ID: types.StringValue("metadata")}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+func (r *MetadataConfigurationResource) apply(ctx context.Context, data *MetadataConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+	current, err := r.client.GetMetadataConfiguration(ctx)
+	if err != nil {
+		diags.AddError("Failed to read current metadata configuration", err.Error())
+		return
+	}
+
+	base, err := parseJSONObject(current.RawJSON)
+	if err != nil {
+		diags.AddError("Failed to parse current metadata configuration", err.Error())
+		return
+	}
+
+	d := overlayMetadataConfiguration(ctx, base, data)
+	if d.HasError() {
+		diags.Append(d...)
+		return
+	}
+
+	payload, err := json.Marshal(base)
+	if err != nil {
+		diags.AddError("Failed to serialize metadata configuration", err.Error())
+		return
+	}
+
+	if err := r.client.UpdateMetadataConfiguration(ctx, &client.MetadataConfiguration{RawJSON: string(payload)}); err != nil {
+		diags.AddError("Failed to update metadata configuration", err.Error())
+		return
+	}
+
+	updated, err := r.client.GetMetadataConfiguration(ctx)
+	if err != nil {
+		diags.AddError("Failed to read metadata configuration after update", err.Error())
+		return
+	}
+
+	flattenMetadataConfiguration(ctx, updated.RawJSON, data, diags)
+	data.ID = types.StringValue("metadata")
+	diags.Append(state.Set(ctx, data)...)
+}
+
+func (r *MetadataConfigurationResource) read(ctx context.Context, data *MetadataConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+	current, err := r.client.GetMetadataConfiguration(ctx)
+	if err != nil {
+		diags.AddError("Failed to read metadata configuration", err.Error())
+		return
+	}
+
+	flattenMetadataConfiguration(ctx, current.RawJSON, data, diags)
+	data.ID = types.StringValue("metadata")
+	diags.Append(state.Set(ctx, data)...)
+}
+
+func overlayMetadataConfiguration(ctx context.Context, m map[string]json.RawMessage, data *MetadataConfigurationResourceModel) diag.Diagnostics {
+	var diags diag.Diagnostics
+	putJSONBool(m, "UseFileCreationTimeForDateAdded", data.UseFileCreationTimeForDateAdded)
+	return diags
+}
+
+func flattenMetadataConfiguration(ctx context.Context, raw string, data *MetadataConfigurationResourceModel, diags *diag.Diagnostics) {
+	m, err := parseJSONObject(raw)
+	if err != nil {
+		diags.AddError("Failed to parse metadata configuration", err.Error())
+		return
+	}
+	data.UseFileCreationTimeForDateAdded = getJSONBool(m, "UseFileCreationTimeForDateAdded")
 }

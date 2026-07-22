@@ -8,9 +8,13 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -35,9 +39,18 @@ type ScheduledTaskResource struct {
 
 // ScheduledTaskResourceModel describes the resource data model.
 type ScheduledTaskResourceModel struct {
-	ID           types.String         `tfsdk:"id"`
-	TaskID       types.String         `tfsdk:"task_id"`
-	TriggersJSON jsontypes.Normalized `tfsdk:"triggers_json"`
+	ID       types.String `tfsdk:"id"`
+	TaskID   types.String `tfsdk:"task_id"`
+	Triggers types.List   `tfsdk:"triggers"`
+}
+
+// ScheduledTaskTriggerModel describes one trigger element.
+type ScheduledTaskTriggerModel struct {
+	Type          types.String `tfsdk:"type"`
+	TimeOfDayTicks types.Int64  `tfsdk:"time_of_day_ticks"`
+	IntervalTicks  types.Int64  `tfsdk:"interval_ticks"`
+	DayOfWeek     types.String `tfsdk:"day_of_week"`
+	MaxRuntimeTicks types.Int64 `tfsdk:"max_runtime_ticks"`
 }
 
 func (r *ScheduledTaskResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -46,10 +59,8 @@ func (r *ScheduledTaskResource) Metadata(_ context.Context, req resource.Metadat
 
 func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages triggers for a Jellyfin scheduled task. " +
-			"Allows configuring when scheduled tasks run (e.g., library scans, trickplay generation).",
-		MarkdownDescription: "Manages triggers for a Jellyfin scheduled task. " +
-			"Allows configuring when scheduled tasks run (e.g., library scans, trickplay generation).",
+		Description:         "Manages triggers for a Jellyfin scheduled task.",
+		MarkdownDescription: "Manages triggers for a Jellyfin scheduled task.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description:         "The resource identifier, matching the scheduled task ID.",
@@ -68,15 +79,58 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"triggers_json": schema.StringAttribute{
-				Description: "The task triggers as a JSON array string. Each trigger object can have " +
-					"Type (DailyTrigger, IntervalTrigger, StartupTrigger, WeeklyTrigger), " +
-					"TimeOfDayTicks, IntervalTicks, DayOfWeek, MaxRuntimeTicks.",
-				MarkdownDescription: "The task triggers as a JSON array string. Each trigger object can have " +
-					"Type (DailyTrigger, IntervalTrigger, StartupTrigger, WeeklyTrigger), " +
-					"TimeOfDayTicks, IntervalTicks, DayOfWeek, MaxRuntimeTicks.",
-				Required:   true,
-				CustomType: jsontypes.NormalizedType{},
+			"triggers": schema.ListNestedAttribute{
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"type": schema.StringAttribute{
+							Description:         "The trigger type (DailyTrigger, WeeklyTrigger, IntervalTrigger, StartupTrigger).",
+							MarkdownDescription: "The trigger type (DailyTrigger, WeeklyTrigger, IntervalTrigger, StartupTrigger).",
+							Required:            true,
+						},
+						"time_of_day_ticks": schema.Int64Attribute{
+							Description:         "Time of day ticks.",
+							MarkdownDescription: "Time of day ticks.",
+							Optional:            true,
+							Computed:            true,
+							PlanModifiers: []planmodifier.Int64{
+								int64planmodifier.UseStateForUnknown(),
+							},
+						},
+						"interval_ticks": schema.Int64Attribute{
+							Description:         "Interval ticks.",
+							MarkdownDescription: "Interval ticks.",
+							Optional:            true,
+							Computed:            true,
+							PlanModifiers: []planmodifier.Int64{
+								int64planmodifier.UseStateForUnknown(),
+							},
+						},
+						"day_of_week": schema.StringAttribute{
+							Description:         "Day of week.",
+							MarkdownDescription: "Day of week.",
+							Optional:            true,
+							Computed:            true,
+							PlanModifiers: []planmodifier.String{
+								stringplanmodifier.UseStateForUnknown(),
+							},
+						},
+						"max_runtime_ticks": schema.Int64Attribute{
+							Description:         "Maximum runtime ticks.",
+							MarkdownDescription: "Maximum runtime ticks.",
+							Optional:            true,
+							Computed:            true,
+							PlanModifiers: []planmodifier.Int64{
+								int64planmodifier.UseStateForUnknown(),
+							},
+						},
+					},
+				},
+				Description:         "The task triggers.",
+				MarkdownDescription: "The task triggers.",
+				Required:            true,
+				PlanModifiers: []planmodifier.List{
+					listplanmodifier.UseStateForUnknown(),
+				},
 			},
 		},
 	}
@@ -107,13 +161,18 @@ func (r *ScheduledTaskResource) Create(ctx context.Context, req resource.CreateR
 	}
 
 	// Verify the task exists.
-	_, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString())
-	if err != nil {
+	if _, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString()); err != nil {
 		resp.Diagnostics.AddError("Failed to find scheduled task", err.Error())
 		return
 	}
 
-	if err := r.client.UpdateScheduledTaskTriggers(ctx, data.TaskID.ValueString(), data.TriggersJSON.ValueString()); err != nil {
+	triggersJSON, err := marshalTriggers(ctx, data.Triggers)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to serialize triggers", err.Error())
+		return
+	}
+
+	if err := r.client.UpdateScheduledTaskTriggers(ctx, data.TaskID.ValueString(), triggersJSON); err != nil {
 		resp.Diagnostics.AddError("Failed to update scheduled task triggers", err.Error())
 		return
 	}
@@ -139,19 +198,13 @@ func (r *ScheduledTaskResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
-	rawTriggers, err := json.Marshal(task.Triggers)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to serialize task triggers", err.Error())
+	triggers, diags := flattenTriggers(ctx, task.Triggers)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	normalizedTriggers, err := normalizeJSON(string(rawTriggers))
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to normalize task triggers", err.Error())
-		return
-	}
-
-	data.TriggersJSON = jsontypes.NewNormalizedValue(normalizedTriggers)
+	data.Triggers = triggers
 	data.ID = types.StringValue(task.ID)
 	data.TaskID = types.StringValue(task.ID)
 
@@ -165,7 +218,13 @@ func (r *ScheduledTaskResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
-	if err := r.client.UpdateScheduledTaskTriggers(ctx, data.TaskID.ValueString(), data.TriggersJSON.ValueString()); err != nil {
+	triggersJSON, err := marshalTriggers(ctx, data.Triggers)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to serialize triggers", err.Error())
+		return
+	}
+
+	if err := r.client.UpdateScheduledTaskTriggers(ctx, data.TaskID.ValueString(), triggersJSON); err != nil {
 		resp.Diagnostics.AddError("Failed to update scheduled task triggers", err.Error())
 		return
 	}
@@ -175,53 +234,86 @@ func (r *ScheduledTaskResource) Update(ctx context.Context, req resource.UpdateR
 		resp.Diagnostics.AddError("Failed to read scheduled task after update", err.Error())
 		return
 	}
-	rawTriggers, err := json.Marshal(task.Triggers)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to serialize task triggers", err.Error())
+
+	triggers, diags := flattenTriggers(ctx, task.Triggers)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
-	normalizedTriggers, err := normalizeJSON(string(rawTriggers))
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to normalize task triggers", err.Error())
-		return
-	}
+
+	data.Triggers = triggers
 	data.ID = types.StringValue(task.ID)
 	data.TaskID = types.StringValue(task.ID)
-	data.TriggersJSON = jsontypes.NewNormalizedValue(normalizedTriggers)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *ScheduledTaskResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
 	// Cannot delete a scheduled task - we just remove from state.
-	// The task will keep its current triggers.
 }
 
 func (r *ScheduledTaskResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	triggersJSON := jsontypes.NewNormalizedNull()
-	if r.client != nil {
-		task, err := r.client.GetScheduledTask(ctx, req.ID)
-		if err != nil {
-			resp.Diagnostics.AddError("Failed to read scheduled task during import", err.Error())
-			return
-		}
-		rawTriggers, err := json.Marshal(task.Triggers)
-		if err != nil {
-			resp.Diagnostics.AddError("Failed to serialize task triggers during import", err.Error())
-			return
-		}
-		normalizedTriggers, err := normalizeJSON(string(rawTriggers))
-		if err != nil {
-			resp.Diagnostics.AddError("Failed to normalize task triggers during import", err.Error())
-			return
-		}
-		triggersJSON = jsontypes.NewNormalizedValue(normalizedTriggers)
+	resource.ImportStatePassthroughID(ctx, path.Root("task_id"), req, resp)
+}
+
+func marshalTriggers(ctx context.Context, list types.List) (string, error) {
+	var triggers []ScheduledTaskTriggerModel
+	if diags := list.ElementsAs(ctx, &triggers, false); diags.HasError() {
+		return "", fmt.Errorf("extracting triggers: %v", diags)
 	}
 
-	data := ScheduledTaskResourceModel{
-		ID:           types.StringValue(req.ID),
-		TaskID:       types.StringValue(req.ID),
-		TriggersJSON: triggersJSON,
+	rawEntries := make([]map[string]json.RawMessage, len(triggers))
+	for i, t := range triggers {
+		entry := map[string]json.RawMessage{}
+		putJSONString(entry, "Type", t.Type)
+		putJSONInt64(entry, "TimeOfDayTicks", t.TimeOfDayTicks)
+		putJSONInt64(entry, "IntervalTicks", t.IntervalTicks)
+		putJSONString(entry, "DayOfWeek", t.DayOfWeek)
+		putJSONInt64(entry, "MaxRuntimeTicks", t.MaxRuntimeTicks)
+		rawEntries[i] = entry
 	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+
+	b, err := json.Marshal(rawEntries)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func flattenTriggers(ctx context.Context, raw []json.RawMessage) (types.List, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	objType := types.ObjectType{AttrTypes: map[string]attr.Type{
+		"type":              types.StringType,
+		"time_of_day_ticks": types.Int64Type,
+		"interval_ticks":    types.Int64Type,
+		"day_of_week":       types.StringType,
+		"max_runtime_ticks": types.Int64Type,
+	}}
+
+	objects := make([]attr.Value, len(raw))
+	for i, r := range raw {
+		var entry map[string]json.RawMessage
+		if err := json.Unmarshal(r, &entry); err != nil {
+			return types.ListNull(objType), append(diags, diag.NewErrorDiagnostic("Failed to parse trigger", err.Error()))
+		}
+
+		attrs := map[string]attr.Value{
+			"type":              getJSONString(entry, "Type"),
+			"time_of_day_ticks": getJSONInt64(entry, "TimeOfDayTicks"),
+			"interval_ticks":    getJSONInt64(entry, "IntervalTicks"),
+			"day_of_week":       getJSONString(entry, "DayOfWeek"),
+			"max_runtime_ticks": getJSONInt64(entry, "MaxRuntimeTicks"),
+		}
+		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
+		if d.HasError() {
+			return types.ListNull(objType), append(diags, d...)
+		}
+		objects[i] = obj
+	}
+
+	list, d := types.ListValue(objType, objects)
+	if d.HasError() {
+		return types.ListNull(objType), append(diags, d...)
+	}
+	return list, diags
 }

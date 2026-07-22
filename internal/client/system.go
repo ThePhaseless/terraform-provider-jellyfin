@@ -120,3 +120,12 @@ func (c *Client) UpdateEncodingOptions(ctx context.Context, config *EncodingOpti
 	}
 	return nil
 }
+
+// GetOpenAPISpec retrieves the Jellyfin OpenAPI specification.
+func (c *Client) GetOpenAPISpec(ctx context.Context) (string, error) {
+	raw, err := c.getRaw(ctx, "/api-docs/openapi.json")
+	if err != nil {
+		return "", fmt.Errorf("getting OpenAPI spec: %w", err)
+	}
+	return raw, nil
+}

@@ -32,7 +32,7 @@ func testAccPreCheck(t *testing.T) {
 func testAccClient(t *testing.T) *client.Client {
 	t.Helper()
 
-	c, err := configureClient(
+	c, _, err := configureClient(
 		context.Background(),
 		os.Getenv("JELLYFIN_ENDPOINT"),
 		os.Getenv("JELLYFIN_API_KEY"),

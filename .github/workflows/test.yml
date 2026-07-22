@@ -64,7 +64,7 @@ jobs:
       - run: go mod download
 
       - name: Start Jellyfin
-        run: docker compose up -d
+        run: docker compose --env-file internal/provider/supported_jellyfin_version.env up -d
 
       - name: Setup Jellyfin
         run: |
@@ -87,4 +87,4 @@ jobs:
 
       - name: Stop Jellyfin
         if: always()
-        run: docker compose down -v
+        run: docker compose --env-file internal/provider/supported_jellyfin_version.env down -v

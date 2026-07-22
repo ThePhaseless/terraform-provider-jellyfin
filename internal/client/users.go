@@ -151,13 +151,29 @@ func (c *Client) UpdateUserPassword(ctx context.Context, id, currentPassword, ne
 	return nil
 }
 
-// UpdateUserPolicy updates a user's policy/permissions.
-func (c *Client) UpdateUserPolicy(ctx context.Context, id string, policy *UserPolicy) error {
-	jsonBody, err := json.Marshal(policy)
+// GetUserPolicyRaw returns the raw JSON of the user's Policy object (extracted from GET /Users/{id}).
+func (c *Client) GetUserPolicyRaw(ctx context.Context, id string) (string, error) {
+	raw, err := c.getRaw(ctx, fmt.Sprintf("/Users/%s", url.PathEscape(id)))
 	if err != nil {
-		return fmt.Errorf("marshaling policy update request for user %s: %w", id, err)
+		return "", fmt.Errorf("getting user %s for policy: %w", id, err)
 	}
-	if err := c.post(ctx, fmt.Sprintf("/Users/%s/Policy", url.PathEscape(id)), jsonBody); err != nil {
+
+	var user User
+	if err := json.Unmarshal([]byte(raw), &user); err != nil {
+		return "", fmt.Errorf("parsing user %s for policy: %w", id, err)
+	}
+
+	policyBytes, err := json.Marshal(user.Policy)
+	if err != nil {
+		return "", fmt.Errorf("marshaling policy for user %s: %w", id, err)
+	}
+
+	return string(policyBytes), nil
+}
+
+// UpdateUserPolicyRaw POSTs a raw policy JSON to /Users/{id}/Policy.
+func (c *Client) UpdateUserPolicyRaw(ctx context.Context, id, policyJSON string) error {
+	if err := c.postRaw(ctx, fmt.Sprintf("/Users/%s/Policy", url.PathEscape(id)), policyJSON); err != nil {
 		return fmt.Errorf("updating policy for user %s: %w", id, err)
 	}
 	return nil

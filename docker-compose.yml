@@ -3,7 +3,7 @@
 
 services:
   jellyfin:
-    image: jellyfin/jellyfin:10.11.11@sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db
+    image: jellyfin/jellyfin:${JELLYFIN_VERSION:?pass --env-file internal/provider/supported_jellyfin_version.env}
     ports:
       - "8096:8096"
     volumes:

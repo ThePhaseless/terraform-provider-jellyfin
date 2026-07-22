@@ -1,0 +1,57 @@
+name: Tested version release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'internal/provider/supported_jellyfin_version.env'
+      - 'internal/provider/supported_sso_plugin_version.env'
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Changelog and patch tag
+        id: bump
+        run: |
+          set -euo pipefail
+          JV="$(grep -oP '(?<=JELLYFIN_VERSION=)[0-9]+(\.[0-9]+)*' internal/provider/supported_jellyfin_version.env)"
+          SV="$(grep -oP '(?<=SSO_PLUGIN_VERSION=)[0-9]+(\.[0-9]+)*' internal/provider/supported_sso_plugin_version.env)"
+          test -n "$JV" && test -n "$SV"
+          LATEST="$(git tag -l 'v*' --sort=-version:refname | head -1)"
+          BASE="${LATEST#v}"
+          IFS=. read -r MA MI PA <<< "$BASE"
+          NEXT="v${MA}.${MI}.$((PA + 1))"
+          DATE="$(date +%F)"
+          awk -v ver="${NEXT#v}" -v date="$DATE" -v jv="$JV" -v sv="$SV" '
+            /^## \[Unreleased\]$/ {
+              print; print "";
+              print "## [" ver "] - " date;
+              print "";
+              print "### Changed";
+              print "";
+              print "- Declared support for Jellyfin " jv " and SSO-Auth plugin " sv " (versions tested in CI).";
+              next
+            }
+            { print }
+          ' CHANGELOG.md > CHANGELOG.md.new && mv CHANGELOG.md.new CHANGELOG.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "chore: support Jellyfin $JV / SSO-Auth $SV and release $NEXT"
+          git tag "$NEXT"
+          git push origin main "$NEXT"
+          echo "tag=$NEXT" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: tag
+    uses: ./.github/workflows/release.yml
+    secrets: inherit

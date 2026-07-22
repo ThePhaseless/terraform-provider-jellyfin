@@ -19,7 +19,6 @@ func TestAccSystemConfigurationResource(t *testing.T) {
 				Config: testAccSystemConfigurationResourceConfig("TestServer"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "server_name", "TestServer"),
-					resource.TestCheckResourceAttrSet("jellyfin_system_configuration.test", "configuration_json"),
 				),
 			},
 			// ImportState.
@@ -28,7 +27,7 @@ func TestAccSystemConfigurationResource(t *testing.T) {
 				ImportState:             true,
 				ImportStateVerify:       true,
 				ImportStateId:           "system",
-				ImportStateVerifyIgnore: []string{"server_name", "configuration_json"},
+				ImportStateVerifyIgnore: []string{"server_name"},
 			},
 			// Update.
 			{

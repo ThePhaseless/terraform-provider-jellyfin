@@ -70,7 +70,7 @@ func TestConfigureClientBootstrapsUnconfiguredServer(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	c, err := configureClient(context.Background(), server.URL, "", "admin", "Admin123!")
+	c, _, err := configureClient(context.Background(), server.URL, "", "admin", "Admin123!")
 	if err != nil {
 		t.Fatalf("configureClient() error = %v", err)
 	}
@@ -96,7 +96,7 @@ func TestConfigureClientRequiresCredentialsForUnconfiguredServer(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := configureClient(context.Background(), server.URL, "stale-api-key", "", "")
+	_, _, err := configureClient(context.Background(), server.URL, "stale-api-key", "", "")
 	if err == nil {
 		t.Fatal("configureClient() error = nil, want missing credentials error")
 	}
@@ -116,7 +116,7 @@ func TestConfigureClientUsesAPIKeyForConfiguredServer(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c, err := configureClient(context.Background(), server.URL, "api-key", "", "")
+	c, _, err := configureClient(context.Background(), server.URL, "api-key", "", "")
 	if err != nil {
 		t.Fatalf("configureClient() error = %v", err)
 	}
@@ -145,7 +145,7 @@ func TestConfigureClientAuthenticatesConfiguredServerWithCredentials(t *testing.
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	c, err := configureClient(context.Background(), server.URL, "", "admin", "Admin123!")
+	c, _, err := configureClient(context.Background(), server.URL, "", "admin", "Admin123!")
 	if err != nil {
 		t.Fatalf("configureClient() error = %v", err)
 	}

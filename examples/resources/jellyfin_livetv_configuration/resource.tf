@@ -1,13 +1,7 @@
 resource "jellyfin_livetv_configuration" "example" {
-  configuration_json = jsonencode({
-    EnableRecordingSubfolders                = false
-    EnableOriginalAudioWithEncodedRecordings = false
-    PrePaddingSeconds                        = 120
-    PostPaddingSeconds                       = 120
-    SaveRecordingNFO                         = true
-    SaveRecordingImages                      = true
-    RecordingPostProcessorArguments          = "\"{path}\""
-    TunerHosts                               = []
-    ListingProviders                         = []
-  })
+  guide_days         = 14
+  recording_path     = "/recordings"
+  pre_padding_seconds  = 30
+  post_padding_seconds = 30
+  save_recording_nfo   = true
 }

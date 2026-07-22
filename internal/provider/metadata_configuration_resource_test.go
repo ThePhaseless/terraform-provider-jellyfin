@@ -18,34 +18,29 @@ func TestAccMetadataConfigurationResource(t *testing.T) {
 			{
 				Config: `
 resource "jellyfin_metadata_configuration" "test" {
-  configuration_json = jsonencode({
-    UseFileCreationTimeForDateAdded = true
-  })
+  use_file_creation_time_for_date_added = true
 }
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("jellyfin_metadata_configuration.test", "configuration_json"),
+resource.TestCheckResourceAttr("jellyfin_metadata_configuration.test", "use_file_creation_time_for_date_added", "true"),
 				),
 			},
 			// ImportState.
 			{
-				ResourceName:            "jellyfin_metadata_configuration.test",
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateId:           "metadata",
-				ImportStateVerifyIgnore: []string{"configuration_json"},
+				ResourceName:      "jellyfin_metadata_configuration.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateId:     "metadata",
 			},
 			// Update.
 			{
 				Config: `
 resource "jellyfin_metadata_configuration" "test" {
-  configuration_json = jsonencode({
-    UseFileCreationTimeForDateAdded = false
-  })
+  use_file_creation_time_for_date_added = false
 }
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("jellyfin_metadata_configuration.test", "configuration_json"),
+resource.TestCheckResourceAttr("jellyfin_metadata_configuration.test", "use_file_creation_time_for_date_added", "false"),
 				),
 			},
 		},

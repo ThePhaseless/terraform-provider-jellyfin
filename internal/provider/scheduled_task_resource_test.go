@@ -20,17 +20,17 @@ func TestAccScheduledTaskResource(t *testing.T) {
 resource "jellyfin_scheduled_task" "test" {
   task_id = "7738148ffcd07979c7ceb148e06b3aed"
 
-  triggers_json = jsonencode([
+  triggers = [
     {
-      Type          = "IntervalTrigger"
-      IntervalTicks = 432000000000
+      type           = "IntervalTrigger"
+      interval_ticks = 432000000000
     }
-  ])
+  ]
 }
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_scheduled_task.test", "id", "7738148ffcd07979c7ceb148e06b3aed"),
-					resource.TestCheckResourceAttrSet("jellyfin_scheduled_task.test", "triggers_json"),
+					resource.TestCheckResourceAttr("jellyfin_scheduled_task.test", "triggers.#", "1"),
 				),
 			},
 			// ImportState.
@@ -45,20 +45,20 @@ resource "jellyfin_scheduled_task" "test" {
 resource "jellyfin_scheduled_task" "test" {
   task_id = "7738148ffcd07979c7ceb148e06b3aed"
 
-  triggers_json = jsonencode([
+  triggers = [
     {
-      Type          = "IntervalTrigger"
-      IntervalTicks = 864000000000
+      type           = "IntervalTrigger"
+      interval_ticks = 864000000000
     },
     {
-      Type           = "DailyTrigger"
-      TimeOfDayTicks = 36000000000
+      type             = "DailyTrigger"
+      time_of_day_ticks = 36000000000
     }
-  ])
+  ]
 }
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("jellyfin_scheduled_task.test", "triggers_json"),
+					resource.TestCheckResourceAttr("jellyfin_scheduled_task.test", "triggers.#", "2"),
 				),
 			},
 		},

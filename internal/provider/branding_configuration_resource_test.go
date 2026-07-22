@@ -18,34 +18,29 @@ func TestAccBrandingConfigurationResource(t *testing.T) {
 			{
 				Config: `
 resource "jellyfin_branding_configuration" "test" {
-  configuration_json = jsonencode({
-    SplashscreenEnabled = false
-  })
+  splashscreen_enabled = false
 }
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("jellyfin_branding_configuration.test", "configuration_json"),
+resource.TestCheckResourceAttr("jellyfin_branding_configuration.test", "splashscreen_enabled", "false"),
 				),
 			},
 			// ImportState.
 			{
-				ResourceName:            "jellyfin_branding_configuration.test",
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateId:           "branding",
-				ImportStateVerifyIgnore: []string{"configuration_json"},
+				ResourceName:      "jellyfin_branding_configuration.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateId:     "branding",
 			},
 			// Update.
 			{
 				Config: `
 resource "jellyfin_branding_configuration" "test" {
-  configuration_json = jsonencode({
-    SplashscreenEnabled = true
-  })
+  splashscreen_enabled = true
 }
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("jellyfin_branding_configuration.test", "configuration_json"),
+resource.TestCheckResourceAttr("jellyfin_branding_configuration.test", "splashscreen_enabled", "true"),
 				),
 			},
 		},

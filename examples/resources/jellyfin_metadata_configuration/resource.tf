@@ -1,5 +1,3 @@
 resource "jellyfin_metadata_configuration" "example" {
-  configuration_json = jsonencode({
-    UseFileCreationTimeForDateAdded = true
-  })
+  use_file_creation_time_for_date_added = false
 }
