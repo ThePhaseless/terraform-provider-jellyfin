@@ -43,10 +43,10 @@ type SystemConfigurationResource struct {
 type SystemConfigurationResourceModel struct {
 	ID                                  types.String `tfsdk:"id"`
 	EnableMetrics                       types.Bool   `tfsdk:"enable_metrics"`
-	EnableNormalizedItemByNameIds       types.Bool   `tfsdk:"enable_normalized_item_by_name_ids"`
+	EnableNormalizedItemByNameIDs       types.Bool   `tfsdk:"enable_normalized_item_by_name_ids"`
 	IsPortAuthorized                    types.Bool   `tfsdk:"is_port_authorized"`
 	QuickConnectAvailable               types.Bool   `tfsdk:"quick_connect_available"`
-	EnableCaseSensitiveItemIds          types.Bool   `tfsdk:"enable_case_sensitive_item_ids"`
+	EnableCaseSensitiveItemIDs          types.Bool   `tfsdk:"enable_case_sensitive_item_ids"`
 	DisableLiveTvChannelUserDataName    types.Bool   `tfsdk:"disable_live_tv_channel_user_data_name"`
 	MetadataPath                        types.String `tfsdk:"metadata_path"`
 	PreferredMetadataLanguage           types.String `tfsdk:"preferred_metadata_language"`
@@ -475,10 +475,10 @@ func overlaySystemConfiguration(ctx context.Context, m map[string]json.RawMessag
 	var diags diag.Diagnostics
 
 	putJSONBool(m, "EnableMetrics", data.EnableMetrics)
-	putJSONBool(m, "EnableNormalizedItemByNameIds", data.EnableNormalizedItemByNameIds)
+	putJSONBool(m, "EnableNormalizedItemByNameIDs", data.EnableNormalizedItemByNameIDs)
 	putJSONBool(m, "IsPortAuthorized", data.IsPortAuthorized)
 	putJSONBool(m, "QuickConnectAvailable", data.QuickConnectAvailable)
-	putJSONBool(m, "EnableCaseSensitiveItemIds", data.EnableCaseSensitiveItemIds)
+	putJSONBool(m, "EnableCaseSensitiveItemIDs", data.EnableCaseSensitiveItemIDs)
 	putJSONBool(m, "DisableLiveTvChannelUserDataName", data.DisableLiveTvChannelUserDataName)
 	putJSONString(m, "MetadataPath", data.MetadataPath)
 	putJSONString(m, "PreferredMetadataLanguage", data.PreferredMetadataLanguage)
@@ -683,10 +683,10 @@ func flattenSystemConfiguration(ctx context.Context, raw string, data *SystemCon
 	}
 
 	data.EnableMetrics = getJSONBool(m, "EnableMetrics")
-	data.EnableNormalizedItemByNameIds = getJSONBool(m, "EnableNormalizedItemByNameIds")
+	data.EnableNormalizedItemByNameIDs = getJSONBool(m, "EnableNormalizedItemByNameIDs")
 	data.IsPortAuthorized = getJSONBool(m, "IsPortAuthorized")
 	data.QuickConnectAvailable = getJSONBool(m, "QuickConnectAvailable")
-	data.EnableCaseSensitiveItemIds = getJSONBool(m, "EnableCaseSensitiveItemIds")
+	data.EnableCaseSensitiveItemIDs = getJSONBool(m, "EnableCaseSensitiveItemIDs")
 	data.DisableLiveTvChannelUserDataName = getJSONBool(m, "DisableLiveTvChannelUserDataName")
 	data.MetadataPath = getJSONString(m, "MetadataPath")
 	data.PreferredMetadataLanguage = getJSONString(m, "PreferredMetadataLanguage")
@@ -806,7 +806,7 @@ func metadataOptionsObjectType() types.ObjectType {
 	}}
 }
 
-func flattenNameValuePairs(ctx context.Context, m map[string]json.RawMessage, key string, diags *diag.Diagnostics) types.List {
+func flattenNameValuePairs(_ context.Context, m map[string]json.RawMessage, key string, diags *diag.Diagnostics) types.List {
 	raw, ok := m[key]
 	if !ok {
 		return types.ListNull(nameValuePairObjectType())
@@ -848,7 +848,7 @@ func nameValuePairObjectType() types.ObjectType {
 	}}
 }
 
-func flattenPathSubstitutions(ctx context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
+func flattenPathSubstitutions(_ context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
 	raw, ok := m["PathSubstitutions"]
 	if !ok {
 		return types.ListNull(pathSubstitutionObjectType())
@@ -890,7 +890,7 @@ func pathSubstitutionObjectType() types.ObjectType {
 	}}
 }
 
-func flattenCastReceiverApplications(ctx context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
+func flattenCastReceiverApplications(_ context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
 	raw, ok := m["CastReceiverApplications"]
 	if !ok {
 		return types.ListNull(castReceiverApplicationObjectType())

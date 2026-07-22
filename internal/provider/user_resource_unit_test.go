@@ -32,20 +32,20 @@ func TestUnitUserPolicyOverlay(t *testing.T) {
 	}
 
 	policy := &UserPolicyModel{
-		IsHidden:                types.BoolValue(true),
-		EnableMediaPlayback:     types.BoolValue(false),
+		IsHidden:                   types.BoolValue(true),
+		EnableMediaPlayback:        types.BoolValue(false),
 		LoginAttemptsBeforeLockout: types.Int64Value(3),
-		MaxActiveSessions:       types.Int64Value(2),
-		SyncPlayAccess:          types.StringValue("JoinGroups"),
-		EnabledFolders:          mustStringList([]string{"/movies"}),
-		AccessSchedules:         mustAccessScheduleList(ctx, []UserAccessScheduleModel{{DayOfWeek: types.StringValue("Monday"), StartHour: types.Float64Value(9.0), EndHour: types.Float64Value(17.0)}}),
+		MaxActiveSessions:          types.Int64Value(2),
+		SyncPlayAccess:             types.StringValue("JoinGroups"),
+		EnabledFolders:             mustStringList([]string{"/movies"}),
+		AccessSchedules:            mustAccessScheduleList(ctx, []UserAccessScheduleModel{{DayOfWeek: types.StringValue("Monday"), StartHour: types.Float64Value(9.0), EndHour: types.Float64Value(17.0)}}),
 	}
 
 	if d := overlayPolicyIntoJSON(ctx, m, policy); d.HasError() {
 		t.Fatalf("overlay: %v", d)
 	}
 
-	got, _ := policyFromRaw(ctx, string(mustJSON(m)), nil)
+	got := policyFromRaw(ctx, string(mustJSON(m)), nil)
 	gotJSON, _ := json.Marshal(got)
 	wantJSON, _ := json.Marshal(policy)
 	if string(gotJSON) != string(wantJSON) {

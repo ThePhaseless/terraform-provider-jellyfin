@@ -7,15 +7,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 )
 
 var (
@@ -35,8 +37,8 @@ type MetadataConfigurationResource struct {
 
 // MetadataConfigurationResourceModel describes the resource data model.
 type MetadataConfigurationResourceModel struct {
-	ID types.String `tfsdk:"id"`
-	UseFileCreationTimeForDateAdded types.Bool `tfsdk:"use_file_creation_time_for_date_added"`
+	ID                              types.String `tfsdk:"id"`
+	UseFileCreationTimeForDateAdded types.Bool   `tfsdk:"use_file_creation_time_for_date_added"`
 }
 
 func (r *MetadataConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -131,11 +133,7 @@ func (r *MetadataConfigurationResource) apply(ctx context.Context, data *Metadat
 		return
 	}
 
-	d := overlayMetadataConfiguration(ctx, base, data)
-	if d.HasError() {
-		diags.Append(d...)
-		return
-	}
+	overlayMetadataConfiguration(ctx, base, data)
 
 	payload, err := json.Marshal(base)
 	if err != nil {
@@ -171,13 +169,11 @@ func (r *MetadataConfigurationResource) read(ctx context.Context, data *Metadata
 	diags.Append(state.Set(ctx, data)...)
 }
 
-func overlayMetadataConfiguration(ctx context.Context, m map[string]json.RawMessage, data *MetadataConfigurationResourceModel) diag.Diagnostics {
-	var diags diag.Diagnostics
+func overlayMetadataConfiguration(_ context.Context, m map[string]json.RawMessage, data *MetadataConfigurationResourceModel) {
 	putJSONBool(m, "UseFileCreationTimeForDateAdded", data.UseFileCreationTimeForDateAdded)
-	return diags
 }
 
-func flattenMetadataConfiguration(ctx context.Context, raw string, data *MetadataConfigurationResourceModel, diags *diag.Diagnostics) {
+func flattenMetadataConfiguration(_ context.Context, raw string, data *MetadataConfigurationResourceModel, diags *diag.Diagnostics) {
 	m, err := parseJSONObject(raw)
 	if err != nil {
 		diags.AddError("Failed to parse metadata configuration", err.Error())

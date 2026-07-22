@@ -3,18 +3,32 @@
 page_title: "jellyfin_system_configuration Resource - jellyfin"
 subcategory: ""
 description: |-
-  Manages the Jellyfin system configuration. Can be used for initial setup and ongoing configuration. The configuration_json attribute accepts the full system configuration as JSON, allowing complete control over all settings.
+  Manages the Jellyfin system configuration.
 ---
 
 # jellyfin_system_configuration (Resource)
 
-Manages the Jellyfin system configuration. Can be used for initial setup and ongoing configuration. The `configuration_json` attribute accepts the full system configuration as JSON, allowing complete control over all settings.
+Manages the Jellyfin system configuration.
 
 ## Example Usage
 
 ```terraform
 resource "jellyfin_system_configuration" "example" {
   server_name = "My Jellyfin Server"
+  cache_path  = "/cache"
+
+  metadata_options = [
+    {
+      item_type = "Movie"
+    }
+  ]
+
+  trickplay_options = {
+    interval          = 10000
+    width_resolutions = [320, 480, 640]
+    tile_width        = 10
+    tile_height       = 10
+  }
 }
 ```
 
@@ -23,12 +37,121 @@ resource "jellyfin_system_configuration" "example" {
 
 ### Optional
 
-- `configuration_json` (String) The full system configuration as a JSON string. When provided, it will be merged with the existing configuration.
-- `server_name` (String) The server display name.
+- `activity_log_retention_days` (Number) Activity log retention days.
+- `allow_client_log_upload` (Boolean) Allow client log upload.
+- `cache_path` (String) Cache path.
+- `cache_size` (Number) Cache size.
+- `cast_receiver_applications` (Attributes List) Cast receiver applications. (see [below for nested schema](#nestedatt--cast_receiver_applications))
+- `chapter_image_resolution` (String) Chapter image resolution.
+- `codecs_used` (List of String) Codecs used.
+- `content_types` (Attributes List) Content types. (see [below for nested schema](#nestedatt--content_types))
+- `cors_hosts` (List of String) CORS hosts.
+- `disable_live_tv_channel_user_data_name` (Boolean) Disable live TV channel user data name.
+- `display_specials_within_seasons` (Boolean) Display specials within seasons.
+- `dummy_chapter_duration` (Number) Dummy chapter duration.
+- `enable_case_sensitive_item_ids` (Boolean) Enable case sensitive item IDs.
+- `enable_external_content_in_suggestions` (Boolean) Enable external content in suggestions.
+- `enable_folder_view` (Boolean) Enable folder view.
+- `enable_grouping_movies_into_collections` (Boolean) Enable grouping movies into collections.
+- `enable_grouping_shows_into_collections` (Boolean) Enable grouping shows into collections.
+- `enable_legacy_authorization` (Boolean) Enable legacy authorization.
+- `enable_metrics` (Boolean) Enable metrics.
+- `enable_normalized_item_by_name_ids` (Boolean) Enable normalized item by name IDs.
+- `enable_slow_response_warning` (Boolean) Enable slow response warning.
+- `image_extraction_timeout_ms` (Number) Image extraction timeout in milliseconds.
+- `image_saving_convention` (String) Image saving convention.
+- `inactive_session_threshold` (Number) Inactive session threshold.
+- `is_port_authorized` (Boolean) Is port authorized.
+- `library_metadata_refresh_concurrency` (Number) Library metadata refresh concurrency.
+- `library_monitor_delay` (Number) Library monitor delay.
+- `library_scan_fanout_concurrency` (Number) Library scan fanout concurrency.
+- `library_update_duration` (Number) Library update duration.
+- `log_file_retention_days` (Number) Log file retention days.
+- `max_audiobook_resume` (Number) Maximum audiobook resume.
+- `max_resume_pct` (Number) Maximum resume percentage.
+- `metadata_country_code` (String) Metadata country code.
+- `metadata_options` (Attributes List) Metadata options. (see [below for nested schema](#nestedatt--metadata_options))
+- `metadata_path` (String) Metadata path.
+- `min_audiobook_resume` (Number) Minimum audiobook resume.
+- `min_resume_duration_seconds` (Number) Minimum resume duration seconds.
+- `min_resume_pct` (Number) Minimum resume percentage.
+- `parallel_image_encoding_limit` (Number) Parallel image encoding limit.
+- `path_substitutions` (Attributes List) Path substitutions. (see [below for nested schema](#nestedatt--path_substitutions))
+- `preferred_metadata_language` (String) Preferred metadata language.
+- `quick_connect_available` (Boolean) Quick connect available.
+- `remote_client_bitrate_limit` (Number) Remote client bitrate limit.
+- `save_metadata_hidden` (Boolean) Save metadata hidden.
+- `server_name` (String) Server display name.
+- `skip_deserialization_for_basic_types` (Boolean) Skip deserialization for basic types.
+- `slow_response_threshold_ms` (Number) Slow response threshold in milliseconds.
+- `sort_remove_characters` (List of String) Sort remove characters.
+- `sort_remove_words` (List of String) Sort remove words.
+- `sort_replace_characters` (List of String) Sort replace characters.
+- `trickplay_options` (Attributes) Trickplay options. (see [below for nested schema](#nestedatt--trickplay_options))
+- `ui_culture` (String) UI culture.
 
 ### Read-Only
 
 - `id` (String) Resource identifier. Always set to `system` for this singleton resource.
+
+<a id="nestedatt--cast_receiver_applications"></a>
+### Nested Schema for `cast_receiver_applications`
+
+Optional:
+
+- `id` (String) Application ID.
+- `name` (String) Application name.
+
+
+<a id="nestedatt--content_types"></a>
+### Nested Schema for `content_types`
+
+Optional:
+
+- `name` (String) Name.
+- `value` (String) Value.
+
+
+<a id="nestedatt--metadata_options"></a>
+### Nested Schema for `metadata_options`
+
+Optional:
+
+- `disabled_image_fetchers` (List of String) Disabled image fetchers.
+- `disabled_metadata_fetchers` (List of String) Disabled metadata fetchers.
+- `disabled_metadata_savers` (List of String) Disabled metadata savers.
+- `image_fetcher_order` (List of String) Image fetcher order.
+- `item_type` (String) Item type.
+- `local_metadata_reader_order` (List of String) Local metadata reader order.
+- `metadata_fetcher_order` (List of String) Metadata fetcher order.
+
+
+<a id="nestedatt--path_substitutions"></a>
+### Nested Schema for `path_substitutions`
+
+Optional:
+
+- `from` (String) From path.
+- `to` (String) To path.
+
+
+<a id="nestedatt--trickplay_options"></a>
+### Nested Schema for `trickplay_options`
+
+Optional:
+
+- `enable_hw_acceleration` (Boolean) Enable hardware acceleration.
+- `enable_hw_encoding` (Boolean) Enable hardware encoding.
+- `enable_key_frame_only_extraction` (Boolean) Enable key frame only extraction.
+- `interval` (Number) Interval.
+- `jpeg_quality` (Number) JPEG quality.
+- `process_priority` (String) Process priority class.
+- `process_threads` (Number) Process threads.
+- `qscale` (Number) Qscale.
+- `scan_behavior` (String) Scan behavior.
+- `tile_height` (Number) Tile height.
+- `tile_width` (Number) Tile width.
+- `width_resolutions` (List of Number) Width resolutions.
 
 ## Import
 

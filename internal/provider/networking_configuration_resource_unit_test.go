@@ -11,7 +11,7 @@ import (
 
 func TestUnitNetworkingConfigurationOverlay(t *testing.T) {
 	ctx := context.Background()
-	fixture := `{"BaseUrl":"BaseUrl","EnableHttps":true,"RequireHttps":true,"CertificatePath":"CertificatePath","CertificatePassword":"CertificatePassword","InternalHttpPort":8096,"InternalHttpsPort":8920,"PublicHttpPort":8096,"PublicHttpsPort":8920,"AutoDiscovery":true,"EnableUPnP":false,"EnableIPv4":true,"EnableIPv6":false,"EnableRemoteAccess":true,"LocalNetworkSubnets":["10.0.0.0/8"],"LocalNetworkAddresses":["localhost"],"KnownProxies":["10.244.0.0/16"],"IgnoreVirtualInterfaces":true,"VirtualInterfaceNames":["veth"],"EnablePublishedServerUriByRequest":true,"PublishedServerUriBySubnet":["all=https://example.com"],"RemoteIPFilter":[],"IsRemoteIPFilterBlacklist":false}`
+	fixture := `{"BaseURL":"BaseURL","EnableHTTPS":true,"RequireHTTPS":true,"CertificatePath":"CertificatePath","CertificatePassword":"CertificatePassword","InternalHTTPPort":8096,"InternalHTTPSPort":8920,"PublicHTTPPort":8096,"PublicHTTPSPort":8920,"AutoDiscovery":true,"EnableUPnP":false,"EnableIPv4":true,"EnableIPv6":false,"EnableRemoteAccess":true,"LocalNetworkSubnets":["10.0.0.0/8"],"LocalNetworkAddresses":["localhost"],"KnownProxies":["10.244.0.0/16"],"IgnoreVirtualInterfaces":true,"VirtualInterfaceNames":["veth"],"EnablePublishedServerURIByRequest":true,"PublishedServerURIBySubnet":["all=https://example.com"],"RemoteIPFilter":[],"IsRemoteIPFilterBlacklist":false}`
 
 	var data NetworkingConfigurationResourceModel
 	flattenNetworkingConfiguration(ctx, fixture, &data, nil)

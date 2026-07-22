@@ -22,7 +22,7 @@ resource "jellyfin_branding_configuration" "test" {
 }
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
-resource.TestCheckResourceAttr("jellyfin_branding_configuration.test", "splashscreen_enabled", "false"),
+					resource.TestCheckResourceAttr("jellyfin_branding_configuration.test", "splashscreen_enabled", "false"),
 				),
 			},
 			// ImportState.
@@ -40,7 +40,7 @@ resource "jellyfin_branding_configuration" "test" {
 }
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
-resource.TestCheckResourceAttr("jellyfin_branding_configuration.test", "splashscreen_enabled", "true"),
+					resource.TestCheckResourceAttr("jellyfin_branding_configuration.test", "splashscreen_enabled", "true"),
 				),
 			},
 		},

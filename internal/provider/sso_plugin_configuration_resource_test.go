@@ -182,7 +182,7 @@ func testAccSSOInjectCanonicalLink(t *testing.T) {
 }
 
 func testAccSSOCanonicalLinkSurvived(t *testing.T) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
+	return func(_ *terraform.State) error {
 		c := testAccClient(t)
 		ctx := context.Background()
 

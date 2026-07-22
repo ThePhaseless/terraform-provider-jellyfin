@@ -46,11 +46,11 @@ type ScheduledTaskResourceModel struct {
 
 // ScheduledTaskTriggerModel describes one trigger element.
 type ScheduledTaskTriggerModel struct {
-	Type          types.String `tfsdk:"type"`
-	TimeOfDayTicks types.Int64  `tfsdk:"time_of_day_ticks"`
-	IntervalTicks  types.Int64  `tfsdk:"interval_ticks"`
-	DayOfWeek     types.String `tfsdk:"day_of_week"`
-	MaxRuntimeTicks types.Int64 `tfsdk:"max_runtime_ticks"`
+	Type            types.String `tfsdk:"type"`
+	TimeOfDayTicks  types.Int64  `tfsdk:"time_of_day_ticks"`
+	IntervalTicks   types.Int64  `tfsdk:"interval_ticks"`
+	DayOfWeek       types.String `tfsdk:"day_of_week"`
+	MaxRuntimeTicks types.Int64  `tfsdk:"max_runtime_ticks"`
 }
 
 func (r *ScheduledTaskResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -280,7 +280,7 @@ func marshalTriggers(ctx context.Context, list types.List) (string, error) {
 	return string(b), nil
 }
 
-func flattenTriggers(ctx context.Context, raw []json.RawMessage) (types.List, diag.Diagnostics) {
+func flattenTriggers(_ context.Context, raw []json.RawMessage) (types.List, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	objType := types.ObjectType{AttrTypes: map[string]attr.Type{
 		"type":              types.StringType,

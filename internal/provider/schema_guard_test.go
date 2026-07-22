@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	jellyfinAPISchemaGolden    = "testdata/jellyfin_api_schema.golden"
+	jellyfinAPISchemaGolden     = "testdata/jellyfin_api_schema.golden"
 	ssoPluginConfigSchemaGolden = "testdata/sso_plugin_config_schema.golden"
 )
 
@@ -317,7 +317,7 @@ func checkSchemaGolden(t *testing.T, goldenPath string, actual []string) {
 		if err := os.MkdirAll(filepath.Dir(goldenPath), 0755); err != nil {
 			t.Fatalf("creating golden directory: %v", err)
 		}
-		if err := os.WriteFile(goldenPath, []byte(strings.Join(actual, "\n")+"\n"), 0644); err != nil {
+		if err := os.WriteFile(goldenPath, []byte(strings.Join(actual, "\n")+"\n"), 0600); err != nil {
 			t.Fatalf("writing golden file: %v", err)
 		}
 		t.Logf("updated golden file: %s", goldenPath)
@@ -415,4 +415,3 @@ func TestUnitReduceOpenAPISpec(t *testing.T) {
 		t.Fatalf("unexpected lines:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
 	}
 }
-

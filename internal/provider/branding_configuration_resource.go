@@ -7,15 +7,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 )
 
 var (
@@ -35,10 +37,10 @@ type BrandingConfigurationResource struct {
 
 // BrandingConfigurationResourceModel describes the resource data model.
 type BrandingConfigurationResourceModel struct {
-	ID types.String `tfsdk:"id"`
-	LoginDisclaimer types.String `tfsdk:"login_disclaimer"`
-	CustomCss types.String `tfsdk:"custom_css"`
-	SplashscreenEnabled types.Bool `tfsdk:"splashscreen_enabled"`
+	ID                   types.String `tfsdk:"id"`
+	LoginDisclaimer      types.String `tfsdk:"login_disclaimer"`
+	CustomCSS            types.String `tfsdk:"custom_css"`
+	SplashscreenEnabled  types.Bool   `tfsdk:"splashscreen_enabled"`
 	SplashscreenLocation types.String `tfsdk:"splashscreen_location"`
 }
 
@@ -59,9 +61,9 @@ func (r *BrandingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"login_disclaimer": schema.StringAttribute{Description: "The login disclaimer text.", MarkdownDescription: "The login disclaimer text.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
-			"custom_css": schema.StringAttribute{Description: "Custom CSS content.", MarkdownDescription: "Custom CSS content.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
-			"splashscreen_enabled": schema.BoolAttribute{Description: "Whether the splash screen is enabled.", MarkdownDescription: "Whether the splash screen is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
+			"login_disclaimer":      schema.StringAttribute{Description: "The login disclaimer text.", MarkdownDescription: "The login disclaimer text.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
+			"custom_css":            schema.StringAttribute{Description: "Custom CSS content.", MarkdownDescription: "Custom CSS content.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
+			"splashscreen_enabled":  schema.BoolAttribute{Description: "Whether the splash screen is enabled.", MarkdownDescription: "Whether the splash screen is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 			"splashscreen_location": schema.StringAttribute{Description: "The splash screen location.", MarkdownDescription: "The splash screen location.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 		},
 	}
@@ -137,11 +139,7 @@ func (r *BrandingConfigurationResource) apply(ctx context.Context, data *Brandin
 		return
 	}
 
-	d := overlayBrandingConfiguration(ctx, base, data)
-	if d.HasError() {
-		diags.Append(d...)
-		return
-	}
+	overlayBrandingConfiguration(ctx, base, data)
 
 	payload, err := json.Marshal(base)
 	if err != nil {
@@ -177,23 +175,21 @@ func (r *BrandingConfigurationResource) read(ctx context.Context, data *Branding
 	diags.Append(state.Set(ctx, data)...)
 }
 
-func overlayBrandingConfiguration(ctx context.Context, m map[string]json.RawMessage, data *BrandingConfigurationResourceModel) diag.Diagnostics {
-	var diags diag.Diagnostics
+func overlayBrandingConfiguration(_ context.Context, m map[string]json.RawMessage, data *BrandingConfigurationResourceModel) {
 	putJSONString(m, "LoginDisclaimer", data.LoginDisclaimer)
-	putJSONString(m, "CustomCss", data.CustomCss)
+	putJSONString(m, "CustomCSS", data.CustomCSS)
 	putJSONBool(m, "SplashscreenEnabled", data.SplashscreenEnabled)
 	putJSONString(m, "SplashscreenLocation", data.SplashscreenLocation)
-	return diags
 }
 
-func flattenBrandingConfiguration(ctx context.Context, raw string, data *BrandingConfigurationResourceModel, diags *diag.Diagnostics) {
+func flattenBrandingConfiguration(_ context.Context, raw string, data *BrandingConfigurationResourceModel, diags *diag.Diagnostics) {
 	m, err := parseJSONObject(raw)
 	if err != nil {
 		diags.AddError("Failed to parse branding configuration", err.Error())
 		return
 	}
 	data.LoginDisclaimer = getJSONString(m, "LoginDisclaimer")
-	data.CustomCss = getJSONString(m, "CustomCss")
+	data.CustomCSS = getJSONString(m, "CustomCSS")
 	data.SplashscreenEnabled = getJSONBool(m, "SplashscreenEnabled")
 	data.SplashscreenLocation = getJSONString(m, "SplashscreenLocation")
 }

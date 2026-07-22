@@ -17,6 +17,39 @@ resource "jellyfin_library" "movies" {
   name            = "Movies"
   collection_type = "movies"
   paths           = ["/media/movies"]
+
+  library_options = {
+    enable_photos                                 = true
+    enable_realtime_monitor                       = true
+    extract_chapters_during_library_scan          = false
+    enable_chapter_image_extraction               = false
+    extract_media_information_during_library_scan = true
+    download_images_in_advance                    = false
+    cache_images_in_library                       = true
+    preferred_metadata_language                   = "en"
+    metadata_country_code                         = "US"
+    save_local_metadata                           = true
+    save_local_thumbnail_sets                     = true
+    import_missing_episodes                       = true
+    season_zero_display_name                      = "Specials"
+    metadata_refresh_mode                         = "Default"
+    disabled                                      = false
+
+    type_options = [
+      {
+        type                = "Movie"
+        metadata_fetchers   = ["TheMovieDb"]
+        image_fetchers      = ["TheMovieDb"]
+        image_fetcher_order = ["TheMovieDb"]
+        image_options = [
+          {
+            type  = "Backdrop"
+            limit = 3
+          }
+        ]
+      }
+    ]
+  }
 }
 ```
 
@@ -31,12 +64,78 @@ resource "jellyfin_library" "movies" {
 
 ### Optional
 
-- `library_options_json` (String) Library options as a JSON string. Allows full customization of library settings.
+- `library_options` (Attributes) Typed library options. (see [below for nested schema](#nestedatt--library_options))
 
 ### Read-Only
 
 - `id` (String) The library resource identifier.
 - `item_id` (String) The internal item ID assigned by Jellyfin.
+
+<a id="nestedatt--library_options"></a>
+### Nested Schema for `library_options`
+
+Optional:
+
+- `cache_images_in_library` (Boolean) Whether images are cached in the library.
+- `chapter_image_interval_seconds` (Number) Chapter image interval in seconds.
+- `disabled` (Boolean) Whether the library is disabled.
+- `disabled_image_fetchers` (List of String) Disabled image fetchers.
+- `disabled_metadata_fetchers` (List of String) Disabled metadata fetchers.
+- `disabled_metadata_savers` (List of String) Disabled metadata savers.
+- `disabled_subtitle_fetchers` (List of String) Disabled subtitle fetchers.
+- `download_images_in_advance` (Boolean) Whether images are downloaded in advance.
+- `enable_automatic_series_grouping` (Boolean) Whether automatic series grouping is enabled.
+- `enable_chapter_image_extraction` (Boolean) Whether chapter image extraction is enabled.
+- `enable_emby_photos` (Boolean) Whether Emby photos are enabled.
+- `enable_media_conversion` (Boolean) Whether media conversion is enabled.
+- `enable_photo_subtitle` (Boolean) Whether photo subtitles are enabled.
+- `enable_photos` (Boolean) Whether photos are enabled.
+- `enable_realtime_monitor` (Boolean) Whether realtime monitoring is enabled.
+- `extract_chapters_during_library_scan` (Boolean) Whether chapters are extracted during library scan.
+- `extract_media_information_during_library_scan` (Boolean) Whether media information is extracted during library scan.
+- `image_fetcher_order` (List of String) Image fetcher order.
+- `import_missing_episodes` (Boolean) Whether missing episodes are imported.
+- `local_metadata_reader_order` (List of String) Local metadata reader order.
+- `metadata_country_code` (String) Metadata country code.
+- `metadata_fetcher_order` (List of String) Metadata fetcher order.
+- `metadata_refresh_mode` (String) Metadata refresh mode.
+- `path_infos` (Attributes List) Path information entries. (see [below for nested schema](#nestedatt--library_options--path_infos))
+- `preferred_metadata_language` (String) Preferred metadata language.
+- `save_local_metadata` (Boolean) Whether local metadata is saved.
+- `save_local_thumbnail_sets` (Boolean) Whether local thumbnail sets are saved.
+- `season_zero_display_name` (String) Season zero display name.
+- `subtitle_fetcher_order` (List of String) Subtitle fetcher order.
+- `type_options` (Attributes List) Type-specific options. (see [below for nested schema](#nestedatt--library_options--type_options))
+
+<a id="nestedatt--library_options--path_infos"></a>
+### Nested Schema for `library_options.path_infos`
+
+Optional:
+
+- `network_path` (String) Network path.
+- `password` (String, Sensitive) Password.
+- `path` (String) Local path.
+- `username` (String) Username.
+
+
+<a id="nestedatt--library_options--type_options"></a>
+### Nested Schema for `library_options.type_options`
+
+Optional:
+
+- `image_fetcher_order` (List of String) Image fetcher order for this type.
+- `image_fetchers` (List of String) Image fetchers for this type.
+- `image_options` (Attributes List) Image options for this type. (see [below for nested schema](#nestedatt--library_options--type_options--image_options))
+- `metadata_fetchers` (List of String) Metadata fetchers for this type.
+- `type` (String) Item type.
+
+<a id="nestedatt--library_options--type_options--image_options"></a>
+### Nested Schema for `library_options.type_options.image_options`
+
+Optional:
+
+- `limit` (Number) Image limit.
+- `type` (String) Image type.
 
 ## Import
 

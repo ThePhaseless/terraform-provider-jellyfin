@@ -40,42 +40,42 @@ type LiveTVConfigurationResource struct {
 
 // LiveTVConfigurationResourceModel describes the resource data model.
 type LiveTVConfigurationResourceModel struct {
-	ID                              types.String `tfsdk:"id"`
-	GuideDays                       types.Int64  `tfsdk:"guide_days"`
-	RecordingPath                   types.String `tfsdk:"recording_path"`
-	MovieRecordingPath              types.String `tfsdk:"movie_recording_path"`
-	SeriesRecordingPath             types.String `tfsdk:"series_recording_path"`
-	EnableRecordingSubfolders       types.Bool   `tfsdk:"enable_recording_subfolders"`
-	EnableOriginalAudioWithEncodedRecordings types.Bool `tfsdk:"enable_original_audio_with_encoded_recordings"`
-	TunerHosts                      types.List   `tfsdk:"tuner_hosts"`
-	ListingProviders                types.List   `tfsdk:"listing_providers"`
-	PrePaddingSeconds               types.Int64  `tfsdk:"pre_padding_seconds"`
-	PostPaddingSeconds              types.Int64  `tfsdk:"post_padding_seconds"`
-	MediaLocationsCreated           types.List   `tfsdk:"media_locations_created"`
-	RecordingPostProcessor          types.String `tfsdk:"recording_post_processor"`
-	RecordingPostProcessorArguments types.String `tfsdk:"recording_post_processor_arguments"`
-	SaveRecordingNFO                types.Bool   `tfsdk:"save_recording_nfo"`
-	SaveRecordingImages             types.Bool   `tfsdk:"save_recording_images"`
+	ID                                       types.String `tfsdk:"id"`
+	GuideDays                                types.Int64  `tfsdk:"guide_days"`
+	RecordingPath                            types.String `tfsdk:"recording_path"`
+	MovieRecordingPath                       types.String `tfsdk:"movie_recording_path"`
+	SeriesRecordingPath                      types.String `tfsdk:"series_recording_path"`
+	EnableRecordingSubfolders                types.Bool   `tfsdk:"enable_recording_subfolders"`
+	EnableOriginalAudioWithEncodedRecordings types.Bool   `tfsdk:"enable_original_audio_with_encoded_recordings"`
+	TunerHosts                               types.List   `tfsdk:"tuner_hosts"`
+	ListingProviders                         types.List   `tfsdk:"listing_providers"`
+	PrePaddingSeconds                        types.Int64  `tfsdk:"pre_padding_seconds"`
+	PostPaddingSeconds                       types.Int64  `tfsdk:"post_padding_seconds"`
+	MediaLocationsCreated                    types.List   `tfsdk:"media_locations_created"`
+	RecordingPostProcessor                   types.String `tfsdk:"recording_post_processor"`
+	RecordingPostProcessorArguments          types.String `tfsdk:"recording_post_processor_arguments"`
+	SaveRecordingNFO                         types.Bool   `tfsdk:"save_recording_nfo"`
+	SaveRecordingImages                      types.Bool   `tfsdk:"save_recording_images"`
 }
 
 // TunerHostModel describes a tuner host entry.
 type TunerHostModel struct {
-	ID                         types.String `tfsdk:"id"`
-	URL                        types.String `tfsdk:"url"`
-	Type                       types.String `tfsdk:"type"`
-	DeviceID                   types.String `tfsdk:"device_id"`
-	FriendlyName               types.String `tfsdk:"friendly_name"`
-	ImportFavoritesOnly        types.Bool   `tfsdk:"import_favorites_only"`
-	AllowHWTranscoding         types.Bool   `tfsdk:"allow_hw_transcoding"`
-	AllowFmp4TranscodingContainer types.Bool `tfsdk:"allow_fmp4_transcoding_container"`
-	AllowStreamSharing         types.Bool   `tfsdk:"allow_stream_sharing"`
-	FallbackMaxStreamingBitrate types.Int64 `tfsdk:"fallback_max_streaming_bitrate"`
-	EnableStreamLooping        types.Bool   `tfsdk:"enable_stream_looping"`
-	Source                     types.String `tfsdk:"source"`
-	TunerCount                 types.Int64  `tfsdk:"tuner_count"`
-	UserAgent                  types.String `tfsdk:"user_agent"`
-	IgnoreDts                  types.Bool   `tfsdk:"ignore_dts"`
-	ReadAtNativeFramerate      types.Bool   `tfsdk:"read_at_native_framerate"`
+	ID                            types.String `tfsdk:"id"`
+	URL                           types.String `tfsdk:"url"`
+	Type                          types.String `tfsdk:"type"`
+	DeviceID                      types.String `tfsdk:"device_id"`
+	FriendlyName                  types.String `tfsdk:"friendly_name"`
+	ImportFavoritesOnly           types.Bool   `tfsdk:"import_favorites_only"`
+	AllowHWTranscoding            types.Bool   `tfsdk:"allow_hw_transcoding"`
+	AllowFmp4TranscodingContainer types.Bool   `tfsdk:"allow_fmp4_transcoding_container"`
+	AllowStreamSharing            types.Bool   `tfsdk:"allow_stream_sharing"`
+	FallbackMaxStreamingBitrate   types.Int64  `tfsdk:"fallback_max_streaming_bitrate"`
+	EnableStreamLooping           types.Bool   `tfsdk:"enable_stream_looping"`
+	Source                        types.String `tfsdk:"source"`
+	TunerCount                    types.Int64  `tfsdk:"tuner_count"`
+	UserAgent                     types.String `tfsdk:"user_agent"`
+	IgnoreDts                     types.Bool   `tfsdk:"ignore_dts"`
+	ReadAtNativeFramerate         types.Bool   `tfsdk:"read_at_native_framerate"`
 }
 
 // ListingProviderModel describes a listings provider entry.
@@ -280,22 +280,22 @@ func tunerHostAttributes() map[string]schema.Attribute {
 		return schema.Int64Attribute{Description: desc, MarkdownDescription: desc, Optional: true, Computed: true, PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()}}
 	}
 	return map[string]schema.Attribute{
-		"id":                           optionalString("Tuner host ID."),
-		"url":                          optionalString("Tuner host URL."),
-		"type":                         optionalString("Tuner host type."),
-		"device_id":                    optionalString("Device ID."),
-		"friendly_name":                optionalString("Friendly name."),
-		"import_favorites_only":        optionalBool("Import favorites only."),
-		"allow_hw_transcoding":         optionalBool("Allow hardware transcoding."),
+		"id":                               optionalString("Tuner host ID."),
+		"url":                              optionalString("Tuner host URL."),
+		"type":                             optionalString("Tuner host type."),
+		"device_id":                        optionalString("Device ID."),
+		"friendly_name":                    optionalString("Friendly name."),
+		"import_favorites_only":            optionalBool("Import favorites only."),
+		"allow_hw_transcoding":             optionalBool("Allow hardware transcoding."),
 		"allow_fmp4_transcoding_container": optionalBool("Allow fmp4 transcoding container."),
-		"allow_stream_sharing":         optionalBool("Allow stream sharing."),
-		"fallback_max_streaming_bitrate": optionalInt("Fallback max streaming bitrate."),
-		"enable_stream_looping":        optionalBool("Enable stream looping."),
-		"source":                       optionalString("Source."),
-		"tuner_count":                  optionalInt("Tuner count."),
-		"user_agent":                   optionalString("User agent."),
-		"ignore_dts":                   optionalBool("Ignore DTS."),
-		"read_at_native_framerate":     optionalBool("Read at native framerate."),
+		"allow_stream_sharing":             optionalBool("Allow stream sharing."),
+		"fallback_max_streaming_bitrate":   optionalInt("Fallback max streaming bitrate."),
+		"enable_stream_looping":            optionalBool("Enable stream looping."),
+		"source":                           optionalString("Source."),
+		"tuner_count":                      optionalInt("Tuner count."),
+		"user_agent":                       optionalString("User agent."),
+		"ignore_dts":                       optionalBool("Ignore DTS."),
+		"read_at_native_framerate":         optionalBool("Read at native framerate."),
 	}
 }
 
@@ -310,24 +310,24 @@ func listingProviderAttributes() map[string]schema.Attribute {
 		return schema.ListAttribute{ElementType: types.StringType, Description: desc, MarkdownDescription: desc, Optional: true, Computed: true, PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}}
 	}
 	return map[string]schema.Attribute{
-		"id":                 optionalString("Provider ID."),
-		"type":               optionalString("Provider type."),
-		"username":           optionalString("Username."),
+		"id":       optionalString("Provider ID."),
+		"type":     optionalString("Provider type."),
+		"username": optionalString("Username."),
 		"password": schema.StringAttribute{
 			Description: "Password.", MarkdownDescription: "Password.",
 			Optional: true, Computed: true, Sensitive: true,
 			PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 		},
-		"listings_id":         optionalString("Listings ID."),
-		"zip_code":            optionalString("ZIP code."),
-		"country":             optionalString("Country."),
-		"path":                optionalString("Path."),
-		"enabled_tuners":      optionalStringList("Enabled tuners."),
-		"enable_all_tuners":   optionalBool("Enable all tuners."),
-		"news_categories":     optionalStringList("News categories."),
-		"sports_categories":   optionalStringList("Sports categories."),
-		"kids_categories":     optionalStringList("Kids categories."),
-		"movie_categories":    optionalStringList("Movie categories."),
+		"listings_id":       optionalString("Listings ID."),
+		"zip_code":          optionalString("ZIP code."),
+		"country":           optionalString("Country."),
+		"path":              optionalString("Path."),
+		"enabled_tuners":    optionalStringList("Enabled tuners."),
+		"enable_all_tuners": optionalBool("Enable all tuners."),
+		"news_categories":   optionalStringList("News categories."),
+		"sports_categories": optionalStringList("Sports categories."),
+		"kids_categories":   optionalStringList("Kids categories."),
+		"movie_categories":  optionalStringList("Movie categories."),
 		"channel_mappings": schema.ListNestedAttribute{
 			NestedObject: schema.NestedAttributeObject{
 				Attributes: map[string]schema.Attribute{
@@ -339,9 +339,9 @@ func listingProviderAttributes() map[string]schema.Attribute {
 			Optional: true, Computed: true,
 			PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()},
 		},
-		"movie_prefix":        optionalString("Movie prefix."),
-		"preferred_language":  optionalString("Preferred language."),
-		"user_agent":          optionalString("User agent."),
+		"movie_prefix":       optionalString("Movie prefix."),
+		"preferred_language": optionalString("Preferred language."),
+		"user_agent":         optionalString("User agent."),
 	}
 }
 
@@ -608,7 +608,7 @@ func flattenLiveTVConfiguration(ctx context.Context, raw string, data *LiveTVCon
 	data.SaveRecordingImages = getJSONBool(m, "SaveRecordingImages")
 }
 
-func flattenTunerHosts(ctx context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
+func flattenTunerHosts(_ context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
 	raw, ok := m["TunerHosts"]
 	if !ok {
 		return types.ListNull(tunerHostObjectType())
@@ -625,22 +625,22 @@ func flattenTunerHosts(ctx context.Context, m map[string]json.RawMessage, diags 
 	objects := make([]attr.Value, len(entries))
 	for i, entry := range entries {
 		attrs := map[string]attr.Value{
-			"id":                            getJSONString(entry, "Id"),
-			"url":                           getJSONString(entry, "Url"),
-			"type":                          getJSONString(entry, "Type"),
-			"device_id":                     getJSONString(entry, "DeviceId"),
-			"friendly_name":                 getJSONString(entry, "FriendlyName"),
-			"import_favorites_only":         getJSONBool(entry, "ImportFavoritesOnly"),
-			"allow_hw_transcoding":          getJSONBool(entry, "AllowHWTranscoding"),
+			"id":                               getJSONString(entry, "Id"),
+			"url":                              getJSONString(entry, "Url"),
+			"type":                             getJSONString(entry, "Type"),
+			"device_id":                        getJSONString(entry, "DeviceId"),
+			"friendly_name":                    getJSONString(entry, "FriendlyName"),
+			"import_favorites_only":            getJSONBool(entry, "ImportFavoritesOnly"),
+			"allow_hw_transcoding":             getJSONBool(entry, "AllowHWTranscoding"),
 			"allow_fmp4_transcoding_container": getJSONBool(entry, "AllowFmp4TranscodingContainer"),
-			"allow_stream_sharing":          getJSONBool(entry, "AllowStreamSharing"),
-			"fallback_max_streaming_bitrate": getJSONInt64(entry, "FallbackMaxStreamingBitrate"),
-			"enable_stream_looping":         getJSONBool(entry, "EnableStreamLooping"),
-			"source":                        getJSONString(entry, "Source"),
-			"tuner_count":                   getJSONInt64(entry, "TunerCount"),
-			"user_agent":                    getJSONString(entry, "UserAgent"),
-			"ignore_dts":                    getJSONBool(entry, "IgnoreDts"),
-			"read_at_native_framerate":      getJSONBool(entry, "ReadAtNativeFramerate"),
+			"allow_stream_sharing":             getJSONBool(entry, "AllowStreamSharing"),
+			"fallback_max_streaming_bitrate":   getJSONInt64(entry, "FallbackMaxStreamingBitrate"),
+			"enable_stream_looping":            getJSONBool(entry, "EnableStreamLooping"),
+			"source":                           getJSONString(entry, "Source"),
+			"tuner_count":                      getJSONInt64(entry, "TunerCount"),
+			"user_agent":                       getJSONString(entry, "UserAgent"),
+			"ignore_dts":                       getJSONBool(entry, "IgnoreDts"),
+			"read_at_native_framerate":         getJSONBool(entry, "ReadAtNativeFramerate"),
 		}
 		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
 		if d.HasError() {
@@ -659,22 +659,22 @@ func flattenTunerHosts(ctx context.Context, m map[string]json.RawMessage, diags 
 
 func tunerHostObjectType() types.ObjectType {
 	return types.ObjectType{AttrTypes: map[string]attr.Type{
-		"id":                             types.StringType,
-		"url":                            types.StringType,
-		"type":                           types.StringType,
-		"device_id":                      types.StringType,
-		"friendly_name":                  types.StringType,
-		"import_favorites_only":          types.BoolType,
-		"allow_hw_transcoding":           types.BoolType,
+		"id":                               types.StringType,
+		"url":                              types.StringType,
+		"type":                             types.StringType,
+		"device_id":                        types.StringType,
+		"friendly_name":                    types.StringType,
+		"import_favorites_only":            types.BoolType,
+		"allow_hw_transcoding":             types.BoolType,
 		"allow_fmp4_transcoding_container": types.BoolType,
-		"allow_stream_sharing":           types.BoolType,
-		"fallback_max_streaming_bitrate": types.Int64Type,
-		"enable_stream_looping":          types.BoolType,
-		"source":                         types.StringType,
-		"tuner_count":                    types.Int64Type,
-		"user_agent":                     types.StringType,
-		"ignore_dts":                     types.BoolType,
-		"read_at_native_framerate":       types.BoolType,
+		"allow_stream_sharing":             types.BoolType,
+		"fallback_max_streaming_bitrate":   types.Int64Type,
+		"enable_stream_looping":            types.BoolType,
+		"source":                           types.StringType,
+		"tuner_count":                      types.Int64Type,
+		"user_agent":                       types.StringType,
+		"ignore_dts":                       types.BoolType,
+		"read_at_native_framerate":         types.BoolType,
 	}}
 }
 
@@ -746,28 +746,28 @@ func flattenListingProviders(ctx context.Context, m map[string]json.RawMessage, 
 
 func listingProviderObjectType() types.ObjectType {
 	return types.ObjectType{AttrTypes: map[string]attr.Type{
-		"id":                types.StringType,
-		"type":              types.StringType,
-		"username":          types.StringType,
-		"password":          types.StringType,
-		"listings_id":       types.StringType,
-		"zip_code":          types.StringType,
-		"country":           types.StringType,
-		"path":              types.StringType,
-		"enabled_tuners":    types.ListType{ElemType: types.StringType},
-		"enable_all_tuners": types.BoolType,
-		"news_categories":   types.ListType{ElemType: types.StringType},
-		"sports_categories": types.ListType{ElemType: types.StringType},
-		"kids_categories":   types.ListType{ElemType: types.StringType},
-		"movie_categories":  types.ListType{ElemType: types.StringType},
-		"channel_mappings":  types.ListType{ElemType: types.ObjectType{AttrTypes: map[string]attr.Type{"name": types.StringType, "value": types.StringType}}},
-		"movie_prefix":      types.StringType,
+		"id":                 types.StringType,
+		"type":               types.StringType,
+		"username":           types.StringType,
+		"password":           types.StringType,
+		"listings_id":        types.StringType,
+		"zip_code":           types.StringType,
+		"country":            types.StringType,
+		"path":               types.StringType,
+		"enabled_tuners":     types.ListType{ElemType: types.StringType},
+		"enable_all_tuners":  types.BoolType,
+		"news_categories":    types.ListType{ElemType: types.StringType},
+		"sports_categories":  types.ListType{ElemType: types.StringType},
+		"kids_categories":    types.ListType{ElemType: types.StringType},
+		"movie_categories":   types.ListType{ElemType: types.StringType},
+		"channel_mappings":   types.ListType{ElemType: types.ObjectType{AttrTypes: map[string]attr.Type{"name": types.StringType, "value": types.StringType}}},
+		"movie_prefix":       types.StringType,
 		"preferred_language": types.StringType,
-		"user_agent":        types.StringType,
+		"user_agent":         types.StringType,
 	}}
 }
 
-func flattenChannelMappings(ctx context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
+func flattenChannelMappings(_ context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
 	raw, ok := m["ChannelMappings"]
 	if !ok {
 		return types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{"name": types.StringType, "value": types.StringType}})

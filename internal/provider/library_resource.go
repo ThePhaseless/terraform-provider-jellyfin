@@ -811,7 +811,7 @@ func flattenLibraryOptions(ctx context.Context, raw string, diags *diag.Diagnost
 	return opts
 }
 
-func flattenPathInfos(ctx context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
+func flattenPathInfos(_ context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
 	raw, ok := m["PathInfos"]
 	if !ok || isJSONNull(raw) {
 		return types.ListNull(pathInfoObjectType())
@@ -889,7 +889,7 @@ func flattenTypeOptions(ctx context.Context, m map[string]json.RawMessage, diags
 	return list
 }
 
-func flattenImageOptions(ctx context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
+func flattenImageOptions(_ context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
 	raw, ok := m["ImageOptions"]
 	if !ok || isJSONNull(raw) {
 		return types.ListNull(imageOptionsObjectType())

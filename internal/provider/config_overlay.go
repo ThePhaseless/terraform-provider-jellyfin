@@ -303,10 +303,9 @@ func isJSONNull(raw json.RawMessage) bool {
 	return v == nil
 }
 
-// diagsExtend appends diagnostics from err to diags and returns true if err has errors.
-func diagsExtend(diags *diag.Diagnostics, d diag.Diagnostics) bool {
+// diagsExtend appends diagnostics from d to diags.
+func diagsExtend(diags *diag.Diagnostics, d diag.Diagnostics) {
 	*diags = append(*diags, d...)
-	return d.HasError()
 }
 
 // diagsHasError returns true if the diagnostics contain any errors.

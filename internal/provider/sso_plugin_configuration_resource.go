@@ -45,77 +45,77 @@ type SSOPluginConfigurationResource struct {
 
 // SSOPluginConfigurationResourceModel describes the resource data model.
 type SSOPluginConfigurationResourceModel struct {
-	ID           types.String `tfsdk:"id"`
-	PluginID     types.String `tfsdk:"plugin_id"`
-	OidConfigs   types.Map    `tfsdk:"oid_configs"`
-	SamlConfigs  types.Map    `tfsdk:"saml_configs"`
+	ID          types.String `tfsdk:"id"`
+	PluginID    types.String `tfsdk:"plugin_id"`
+	OidConfigs  types.Map    `tfsdk:"oid_configs"`
+	SamlConfigs types.Map    `tfsdk:"saml_configs"`
 }
 
 // SSOOidConfigModel describes an OID provider configuration.
 type SSOOidConfigModel struct {
-	OidEndpoint                   types.String `tfsdk:"oid_endpoint"`
-	OidClientID                   types.String `tfsdk:"oid_client_id"`
-	OidSecret                     types.String `tfsdk:"oid_secret"`
-	Enabled                       types.Bool   `tfsdk:"enabled"`
-	EnableAuthorization           types.Bool   `tfsdk:"enable_authorization"`
-	EnableAllFolders              types.Bool   `tfsdk:"enable_all_folders"`
-	EnabledFolders                types.List   `tfsdk:"enabled_folders"`
-	AdminRoles                    types.List   `tfsdk:"admin_roles"`
-	Roles                         types.List   `tfsdk:"roles"`
-	EnableFolderRoles             types.Bool   `tfsdk:"enable_folder_roles"`
-	EnableLiveTvRoles             types.Bool   `tfsdk:"enable_live_tv_roles"`
-	EnableLiveTv                  types.Bool   `tfsdk:"enable_live_tv"`
-	EnableLiveTvManagement        types.Bool   `tfsdk:"enable_live_tv_management"`
-	LiveTvRoles                   types.List   `tfsdk:"live_tv_roles"`
-	LiveTvManagementRoles         types.List   `tfsdk:"live_tv_management_roles"`
-	FolderRoleMapping             types.List   `tfsdk:"folder_role_mapping"`
-	RoleClaim                     types.String `tfsdk:"role_claim"`
-	OidScopes                     types.List   `tfsdk:"oid_scopes"`
-	DefaultProvider               types.String `tfsdk:"default_provider"`
-	SchemeOverride                types.String `tfsdk:"scheme_override"`
-	PortOverride                  types.Int64  `tfsdk:"port_override"`
-	NewPath                       types.Bool   `tfsdk:"new_path"`
-	CanonicalLinks                types.Map    `tfsdk:"canonical_links"`
-	DefaultUsernameClaim          types.String `tfsdk:"default_username_claim"`
-	AvatarUrlFormat               types.String `tfsdk:"avatar_url_format"`
-	DisableHttps                  types.Bool   `tfsdk:"disable_https"`
-	DisablePushedAuthorization    types.Bool   `tfsdk:"disable_pushed_authorization"`
-	DoNotValidateEndpoints        types.Bool   `tfsdk:"do_not_validate_endpoints"`
-	DoNotValidateIssuerName       types.Bool   `tfsdk:"do_not_validate_issuer_name"`
-	DoNotLoadProfile              types.Bool   `tfsdk:"do_not_load_profile"`
+	OidEndpoint                types.String `tfsdk:"oid_endpoint"`
+	OidClientID                types.String `tfsdk:"oid_client_id"`
+	OidSecret                  types.String `tfsdk:"oid_secret"`
+	Enabled                    types.Bool   `tfsdk:"enabled"`
+	EnableAuthorization        types.Bool   `tfsdk:"enable_authorization"`
+	EnableAllFolders           types.Bool   `tfsdk:"enable_all_folders"`
+	EnabledFolders             types.List   `tfsdk:"enabled_folders"`
+	AdminRoles                 types.List   `tfsdk:"admin_roles"`
+	Roles                      types.List   `tfsdk:"roles"`
+	EnableFolderRoles          types.Bool   `tfsdk:"enable_folder_roles"`
+	EnableLiveTvRoles          types.Bool   `tfsdk:"enable_live_tv_roles"`
+	EnableLiveTv               types.Bool   `tfsdk:"enable_live_tv"`
+	EnableLiveTvManagement     types.Bool   `tfsdk:"enable_live_tv_management"`
+	LiveTvRoles                types.List   `tfsdk:"live_tv_roles"`
+	LiveTvManagementRoles      types.List   `tfsdk:"live_tv_management_roles"`
+	FolderRoleMapping          types.List   `tfsdk:"folder_role_mapping"`
+	RoleClaim                  types.String `tfsdk:"role_claim"`
+	OidScopes                  types.List   `tfsdk:"oid_scopes"`
+	DefaultProvider            types.String `tfsdk:"default_provider"`
+	SchemeOverride             types.String `tfsdk:"scheme_override"`
+	PortOverride               types.Int64  `tfsdk:"port_override"`
+	NewPath                    types.Bool   `tfsdk:"new_path"`
+	CanonicalLinks             types.Map    `tfsdk:"canonical_links"`
+	DefaultUsernameClaim       types.String `tfsdk:"default_username_claim"`
+	AvatarURLFormat            types.String `tfsdk:"avatar_url_format"`
+	DisableHTTPS               types.Bool   `tfsdk:"disable_https"`
+	DisablePushedAuthorization types.Bool   `tfsdk:"disable_pushed_authorization"`
+	DoNotValidateEndpoints     types.Bool   `tfsdk:"do_not_validate_endpoints"`
+	DoNotValidateIssuerName    types.Bool   `tfsdk:"do_not_validate_issuer_name"`
+	DoNotLoadProfile           types.Bool   `tfsdk:"do_not_load_profile"`
 }
 
 // SSOSamlConfigModel describes a SAML provider configuration.
 type SSOSamlConfigModel struct {
-	SamlEndpoint                  types.String `tfsdk:"saml_endpoint"`
-	SamlClientID                  types.String `tfsdk:"saml_client_id"`
-	SamlCertificate               types.String `tfsdk:"saml_certificate"`
-	Enabled                       types.Bool   `tfsdk:"enabled"`
-	EnableAuthorization           types.Bool   `tfsdk:"enable_authorization"`
-	EnableAllFolders              types.Bool   `tfsdk:"enable_all_folders"`
-	EnabledFolders                types.List   `tfsdk:"enabled_folders"`
-	AdminRoles                    types.List   `tfsdk:"admin_roles"`
-	Roles                         types.List   `tfsdk:"roles"`
-	EnableFolderRoles             types.Bool   `tfsdk:"enable_folder_roles"`
-	EnableLiveTvRoles             types.Bool   `tfsdk:"enable_live_tv_roles"`
-	EnableLiveTv                  types.Bool   `tfsdk:"enable_live_tv"`
-	EnableLiveTvManagement        types.Bool   `tfsdk:"enable_live_tv_management"`
-	LiveTvRoles                   types.List   `tfsdk:"live_tv_roles"`
-	LiveTvManagementRoles         types.List   `tfsdk:"live_tv_management_roles"`
-	FolderRoleMapping             types.List   `tfsdk:"folder_role_mapping"`
-	RoleClaim                     types.String `tfsdk:"role_claim"`
-	DefaultProvider               types.String `tfsdk:"default_provider"`
-	SchemeOverride                types.String `tfsdk:"scheme_override"`
-	PortOverride                  types.Int64  `tfsdk:"port_override"`
-	NewPath                       types.Bool   `tfsdk:"new_path"`
-	CanonicalLinks                types.Map    `tfsdk:"canonical_links"`
-	DefaultUsernameClaim          types.String `tfsdk:"default_username_claim"`
-	AvatarUrlFormat               types.String `tfsdk:"avatar_url_format"`
-	DisableHttps                  types.Bool   `tfsdk:"disable_https"`
-	DisablePushedAuthorization    types.Bool   `tfsdk:"disable_pushed_authorization"`
-	DoNotValidateEndpoints        types.Bool   `tfsdk:"do_not_validate_endpoints"`
-	DoNotValidateIssuerName       types.Bool   `tfsdk:"do_not_validate_issuer_name"`
-	DoNotLoadProfile              types.Bool   `tfsdk:"do_not_load_profile"`
+	SamlEndpoint               types.String `tfsdk:"saml_endpoint"`
+	SamlClientID               types.String `tfsdk:"saml_client_id"`
+	SamlCertificate            types.String `tfsdk:"saml_certificate"`
+	Enabled                    types.Bool   `tfsdk:"enabled"`
+	EnableAuthorization        types.Bool   `tfsdk:"enable_authorization"`
+	EnableAllFolders           types.Bool   `tfsdk:"enable_all_folders"`
+	EnabledFolders             types.List   `tfsdk:"enabled_folders"`
+	AdminRoles                 types.List   `tfsdk:"admin_roles"`
+	Roles                      types.List   `tfsdk:"roles"`
+	EnableFolderRoles          types.Bool   `tfsdk:"enable_folder_roles"`
+	EnableLiveTvRoles          types.Bool   `tfsdk:"enable_live_tv_roles"`
+	EnableLiveTv               types.Bool   `tfsdk:"enable_live_tv"`
+	EnableLiveTvManagement     types.Bool   `tfsdk:"enable_live_tv_management"`
+	LiveTvRoles                types.List   `tfsdk:"live_tv_roles"`
+	LiveTvManagementRoles      types.List   `tfsdk:"live_tv_management_roles"`
+	FolderRoleMapping          types.List   `tfsdk:"folder_role_mapping"`
+	RoleClaim                  types.String `tfsdk:"role_claim"`
+	DefaultProvider            types.String `tfsdk:"default_provider"`
+	SchemeOverride             types.String `tfsdk:"scheme_override"`
+	PortOverride               types.Int64  `tfsdk:"port_override"`
+	NewPath                    types.Bool   `tfsdk:"new_path"`
+	CanonicalLinks             types.Map    `tfsdk:"canonical_links"`
+	DefaultUsernameClaim       types.String `tfsdk:"default_username_claim"`
+	AvatarURLFormat            types.String `tfsdk:"avatar_url_format"`
+	DisableHTTPS               types.Bool   `tfsdk:"disable_https"`
+	DisablePushedAuthorization types.Bool   `tfsdk:"disable_pushed_authorization"`
+	DoNotValidateEndpoints     types.Bool   `tfsdk:"do_not_validate_endpoints"`
+	DoNotValidateIssuerName    types.Bool   `tfsdk:"do_not_validate_issuer_name"`
+	DoNotLoadProfile           types.Bool   `tfsdk:"do_not_load_profile"`
 }
 
 // SSOFolderRoleMappingModel describes a folder role mapping entry.
@@ -172,18 +172,18 @@ func ssoCommonConfigAttributes() map[string]schema.Attribute {
 	}
 
 	return map[string]schema.Attribute{
-		"enabled":                optionalBool("Whether this provider is enabled."),
-		"enable_authorization":   optionalBool("Whether authorization is enabled."),
-		"enable_all_folders":     optionalBool("Whether all folders are enabled."),
-		"enabled_folders":        optionalStringList("Folders enabled for this provider."),
-		"admin_roles":            optionalStringList("Roles that grant administrator access."),
-		"roles":                  optionalStringList("Roles that grant standard access."),
-		"enable_folder_roles":    optionalBool("Whether folder roles are enabled."),
-		"enable_live_tv_roles":   optionalBool("Whether live TV roles are enabled."),
-		"enable_live_tv":         optionalBool("Whether live TV is enabled."),
+		"enabled":                   optionalBool("Whether this provider is enabled."),
+		"enable_authorization":      optionalBool("Whether authorization is enabled."),
+		"enable_all_folders":        optionalBool("Whether all folders are enabled."),
+		"enabled_folders":           optionalStringList("Folders enabled for this provider."),
+		"admin_roles":               optionalStringList("Roles that grant administrator access."),
+		"roles":                     optionalStringList("Roles that grant standard access."),
+		"enable_folder_roles":       optionalBool("Whether folder roles are enabled."),
+		"enable_live_tv_roles":      optionalBool("Whether live TV roles are enabled."),
+		"enable_live_tv":            optionalBool("Whether live TV is enabled."),
 		"enable_live_tv_management": optionalBool("Whether live TV management is enabled."),
-		"live_tv_roles":          optionalStringList("Roles that grant live TV access."),
-		"live_tv_management_roles": optionalStringList("Roles that grant live TV management access."),
+		"live_tv_roles":             optionalStringList("Roles that grant live TV access."),
+		"live_tv_management_roles":  optionalStringList("Roles that grant live TV management access."),
 		"folder_role_mapping": schema.ListNestedAttribute{
 			NestedObject: schema.NestedAttributeObject{
 				Attributes: map[string]schema.Attribute{
@@ -207,11 +207,11 @@ func ssoCommonConfigAttributes() map[string]schema.Attribute {
 				listplanmodifier.UseStateForUnknown(),
 			},
 		},
-		"role_claim":               optionalString("Claim used for roles."),
-		"default_provider":         optionalString("Default authentication provider."),
-		"scheme_override":          optionalString("Scheme override."),
-		"port_override":            optionalInt("Port override."),
-		"new_path":                 optionalBool("Whether to use a new path."),
+		"role_claim":       optionalString("Claim used for roles."),
+		"default_provider": optionalString("Default authentication provider."),
+		"scheme_override":  optionalString("Scheme override."),
+		"port_override":    optionalInt("Port override."),
+		"new_path":         optionalBool("Whether to use a new path."),
 		"canonical_links": schema.MapAttribute{
 			ElementType:         types.StringType,
 			Description:         "Server-managed canonical links. Omit to preserve server-side mappings.",
@@ -222,9 +222,9 @@ func ssoCommonConfigAttributes() map[string]schema.Attribute {
 				mapplanmodifier.UseStateForUnknown(),
 			},
 		},
-		"default_username_claim":   optionalString("Claim used for the default username."),
-		"avatar_url_format":        optionalString("Avatar URL format."),
-		"disable_https":            optionalBool("Whether HTTPS is disabled."),
+		"default_username_claim":       optionalString("Claim used for the default username."),
+		"avatar_url_format":            optionalString("Avatar URL format."),
+		"disable_https":                optionalBool("Whether HTTPS is disabled."),
 		"disable_pushed_authorization": optionalBool("Whether pushed authorization is disabled."),
 		"do_not_validate_endpoints":    optionalBool("Whether endpoint validation is skipped."),
 		"do_not_validate_issuer_name":  optionalBool("Whether issuer name validation is skipped."),
@@ -588,21 +588,19 @@ func overlayOidConfig(ctx context.Context, m map[string]json.RawMessage, cfg *SS
 	overlayCommonConfig(ctx, m, &cfg.Enabled, &cfg.EnableAuthorization, &cfg.EnableAllFolders, cfg.EnabledFolders, cfg.AdminRoles, cfg.Roles,
 		&cfg.EnableFolderRoles, &cfg.EnableLiveTvRoles, &cfg.EnableLiveTv, &cfg.EnableLiveTvManagement, cfg.LiveTvRoles, cfg.LiveTvManagementRoles,
 		cfg.FolderRoleMapping, cfg.RoleClaim, cfg.DefaultProvider, cfg.SchemeOverride, cfg.PortOverride, &cfg.NewPath, cfg.CanonicalLinks,
-		cfg.DefaultUsernameClaim, cfg.AvatarUrlFormat, &cfg.DisableHttps, &cfg.DisablePushedAuthorization, &cfg.DoNotValidateEndpoints,
+		cfg.DefaultUsernameClaim, cfg.AvatarURLFormat, &cfg.DisableHTTPS, &cfg.DisablePushedAuthorization, &cfg.DoNotValidateEndpoints,
 		&cfg.DoNotValidateIssuerName, &cfg.DoNotLoadProfile)
 	putJSONString(m, "OidEndpoint", cfg.OidEndpoint)
 	putJSONString(m, "OidClientId", cfg.OidClientID)
 	putJSONString(m, "OidSecret", cfg.OidSecret)
-	if d := putJSONStringList(ctx, m, "OidScopes", cfg.OidScopes); d.HasError() {
-		// errors are not propagated because overlayOidConfig signature doesn't return diagnostics
-	}
+	putJSONStringList(ctx, m, "OidScopes", cfg.OidScopes)
 }
 
 func overlaySamlConfig(ctx context.Context, m map[string]json.RawMessage, cfg *SSOSamlConfigModel) {
 	overlayCommonConfig(ctx, m, &cfg.Enabled, &cfg.EnableAuthorization, &cfg.EnableAllFolders, cfg.EnabledFolders, cfg.AdminRoles, cfg.Roles,
 		&cfg.EnableFolderRoles, &cfg.EnableLiveTvRoles, &cfg.EnableLiveTv, &cfg.EnableLiveTvManagement, cfg.LiveTvRoles, cfg.LiveTvManagementRoles,
 		cfg.FolderRoleMapping, cfg.RoleClaim, cfg.DefaultProvider, cfg.SchemeOverride, cfg.PortOverride, &cfg.NewPath, cfg.CanonicalLinks,
-		cfg.DefaultUsernameClaim, cfg.AvatarUrlFormat, &cfg.DisableHttps, &cfg.DisablePushedAuthorization, &cfg.DoNotValidateEndpoints,
+		cfg.DefaultUsernameClaim, cfg.AvatarURLFormat, &cfg.DisableHTTPS, &cfg.DisablePushedAuthorization, &cfg.DoNotValidateEndpoints,
 		&cfg.DoNotValidateIssuerName, &cfg.DoNotLoadProfile)
 	putJSONString(m, "SamlEndpoint", cfg.SamlEndpoint)
 	putJSONString(m, "SamlClientId", cfg.SamlClientID)
@@ -619,8 +617,8 @@ func overlayCommonConfig(ctx context.Context, m map[string]json.RawMessage,
 	portOverride types.Int64,
 	newPath *types.Bool,
 	canonicalLinks types.Map,
-	defaultUsernameClaim, avatarUrlFormat types.String,
-	disableHttps, disablePushedAuthorization, doNotValidateEndpoints, doNotValidateIssuerName, doNotLoadProfile *types.Bool,
+	defaultUsernameClaim, avatarURLFormat types.String,
+	disableHTTPS, disablePushedAuthorization, doNotValidateEndpoints, doNotValidateIssuerName, doNotLoadProfile *types.Bool,
 ) {
 	putJSONBool(m, "Enabled", *enabled)
 	putJSONBool(m, "EnableAuthorization", *enableAuthorization)
@@ -634,9 +632,7 @@ func overlayCommonConfig(ctx context.Context, m map[string]json.RawMessage,
 	putJSONBool(m, "EnableLiveTvManagement", *enableLiveTvManagement)
 	putJSONStringList(ctx, m, "LiveTvRoles", liveTvRoles)
 	putJSONStringList(ctx, m, "LiveTvManagementRoles", liveTvManagementRoles)
-	if d := putFolderRoleMappings(ctx, m, folderRoleMapping); d.HasError() {
-		// ignored
-	}
+	putFolderRoleMappings(ctx, m, folderRoleMapping)
 	putJSONString(m, "RoleClaim", roleClaim)
 	putJSONString(m, "DefaultProvider", defaultProvider)
 	putJSONString(m, "SchemeOverride", schemeOverride)
@@ -644,8 +640,8 @@ func overlayCommonConfig(ctx context.Context, m map[string]json.RawMessage,
 	putJSONBool(m, "NewPath", *newPath)
 	putJSONStringMap(ctx, m, "CanonicalLinks", canonicalLinks)
 	putJSONString(m, "DefaultUsernameClaim", defaultUsernameClaim)
-	putJSONString(m, "AvatarUrlFormat", avatarUrlFormat)
-	putJSONBool(m, "DisableHttps", *disableHttps)
+	putJSONString(m, "AvatarURLFormat", avatarURLFormat)
+	putJSONBool(m, "DisableHTTPS", *disableHTTPS)
 	putJSONBool(m, "DisablePushedAuthorization", *disablePushedAuthorization)
 	putJSONBool(m, "DoNotValidateEndpoints", *doNotValidateEndpoints)
 	putJSONBool(m, "DoNotValidateIssuerName", *doNotValidateIssuerName)
@@ -776,32 +772,32 @@ func samlConfigObjectTypes() map[string]attr.Type {
 
 func commonConfigObjectTypes() map[string]attr.Type {
 	return map[string]attr.Type{
-		"enabled":                         types.BoolType,
-		"enable_authorization":            types.BoolType,
-		"enable_all_folders":              types.BoolType,
-		"enabled_folders":                 types.ListType{ElemType: types.StringType},
-		"admin_roles":                     types.ListType{ElemType: types.StringType},
-		"roles":                           types.ListType{ElemType: types.StringType},
-		"enable_folder_roles":             types.BoolType,
-		"enable_live_tv_roles":            types.BoolType,
-		"enable_live_tv":                  types.BoolType,
-		"enable_live_tv_management":       types.BoolType,
-		"live_tv_roles":                   types.ListType{ElemType: types.StringType},
-		"live_tv_management_roles":        types.ListType{ElemType: types.StringType},
-		"folder_role_mapping":             types.ListType{ElemType: types.ObjectType{AttrTypes: map[string]attr.Type{"role": types.StringType, "folders": types.ListType{ElemType: types.StringType}}}},
-		"role_claim":                      types.StringType,
-		"default_provider":                types.StringType,
-		"scheme_override":                 types.StringType,
-		"port_override":                   types.Int64Type,
-		"new_path":                        types.BoolType,
-		"canonical_links":                 types.MapType{ElemType: types.StringType},
-		"default_username_claim":          types.StringType,
-		"avatar_url_format":               types.StringType,
-		"disable_https":                   types.BoolType,
-		"disable_pushed_authorization":    types.BoolType,
-		"do_not_validate_endpoints":       types.BoolType,
-		"do_not_validate_issuer_name":     types.BoolType,
-		"do_not_load_profile":             types.BoolType,
+		"enabled":                      types.BoolType,
+		"enable_authorization":         types.BoolType,
+		"enable_all_folders":           types.BoolType,
+		"enabled_folders":              types.ListType{ElemType: types.StringType},
+		"admin_roles":                  types.ListType{ElemType: types.StringType},
+		"roles":                        types.ListType{ElemType: types.StringType},
+		"enable_folder_roles":          types.BoolType,
+		"enable_live_tv_roles":         types.BoolType,
+		"enable_live_tv":               types.BoolType,
+		"enable_live_tv_management":    types.BoolType,
+		"live_tv_roles":                types.ListType{ElemType: types.StringType},
+		"live_tv_management_roles":     types.ListType{ElemType: types.StringType},
+		"folder_role_mapping":          types.ListType{ElemType: types.ObjectType{AttrTypes: map[string]attr.Type{"role": types.StringType, "folders": types.ListType{ElemType: types.StringType}}}},
+		"role_claim":                   types.StringType,
+		"default_provider":             types.StringType,
+		"scheme_override":              types.StringType,
+		"port_override":                types.Int64Type,
+		"new_path":                     types.BoolType,
+		"canonical_links":              types.MapType{ElemType: types.StringType},
+		"default_username_claim":       types.StringType,
+		"avatar_url_format":            types.StringType,
+		"disable_https":                types.BoolType,
+		"disable_pushed_authorization": types.BoolType,
+		"do_not_validate_endpoints":    types.BoolType,
+		"do_not_validate_issuer_name":  types.BoolType,
+		"do_not_load_profile":          types.BoolType,
 	}
 }
 
@@ -844,8 +840,8 @@ func commonConfigAttrs(ctx context.Context, m map[string]json.RawMessage, diags 
 	attrs["new_path"] = getJSONBool(m, "NewPath")
 	attrs["canonical_links"], _ = getJSONStringMap(ctx, m, "CanonicalLinks")
 	attrs["default_username_claim"] = getJSONString(m, "DefaultUsernameClaim")
-	attrs["avatar_url_format"] = getJSONString(m, "AvatarUrlFormat")
-	attrs["disable_https"] = getJSONBool(m, "DisableHttps")
+	attrs["avatar_url_format"] = getJSONString(m, "AvatarURLFormat")
+	attrs["disable_https"] = getJSONBool(m, "DisableHTTPS")
 	attrs["disable_pushed_authorization"] = getJSONBool(m, "DisablePushedAuthorization")
 	attrs["do_not_validate_endpoints"] = getJSONBool(m, "DoNotValidateEndpoints")
 	attrs["do_not_validate_issuer_name"] = getJSONBool(m, "DoNotValidateIssuerName")

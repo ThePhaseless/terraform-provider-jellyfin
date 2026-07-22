@@ -13,10 +13,10 @@ func TestUnitSystemConfigurationOverlay(t *testing.T) {
 	ctx := context.Background()
 	fixture := `{
 		"EnableMetrics": true,
-		"EnableNormalizedItemByNameIds": false,
+		"EnableNormalizedItemByNameIDs": false,
 		"IsPortAuthorized": true,
 		"QuickConnectAvailable": false,
-		"EnableCaseSensitiveItemIds": false,
+		"EnableCaseSensitiveItemIDs": false,
 		"DisableLiveTvChannelUserDataName": false,
 		"MetadataPath": "/metadata",
 		"PreferredMetadataLanguage": "en",

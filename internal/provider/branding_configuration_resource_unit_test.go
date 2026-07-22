@@ -11,7 +11,7 @@ import (
 
 func TestUnitBrandingConfigurationOverlay(t *testing.T) {
 	ctx := context.Background()
-	fixture := `{"LoginDisclaimer":"LoginDisclaimer","CustomCss":"CustomCss","SplashscreenEnabled":true,"SplashscreenLocation":"SplashscreenLocation"}`
+	fixture := `{"LoginDisclaimer":"LoginDisclaimer","CustomCSS":"CustomCSS","SplashscreenEnabled":true,"SplashscreenLocation":"SplashscreenLocation"}`
 
 	var data BrandingConfigurationResourceModel
 	flattenBrandingConfiguration(ctx, fixture, &data, nil)

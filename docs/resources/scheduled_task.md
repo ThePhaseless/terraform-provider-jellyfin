@@ -3,26 +3,25 @@
 page_title: "jellyfin_scheduled_task Resource - jellyfin"
 subcategory: ""
 description: |-
-  Manages triggers for a Jellyfin scheduled task. Allows configuring when scheduled tasks run (e.g., library scans, trickplay generation).
+  Manages triggers for a Jellyfin scheduled task.
 ---
 
 # jellyfin_scheduled_task (Resource)
 
-Manages triggers for a Jellyfin scheduled task. Allows configuring when scheduled tasks run (e.g., library scans, trickplay generation).
+Manages triggers for a Jellyfin scheduled task.
 
 ## Example Usage
 
 ```terraform
-# Configure the "Scan Media Library" task to run every 12 hours
-resource "jellyfin_scheduled_task" "scan_library" {
+resource "jellyfin_scheduled_task" "example" {
   task_id = "7738148ffcd07979c7ceb148e06b3aed"
 
-  triggers_json = jsonencode([
+  triggers = [
     {
-      Type          = "IntervalTrigger"
-      IntervalTicks = 432000000000
+      type           = "IntervalTrigger"
+      interval_ticks = 432000000000
     }
-  ])
+  ]
 }
 ```
 
@@ -32,11 +31,25 @@ resource "jellyfin_scheduled_task" "scan_library" {
 ### Required
 
 - `task_id` (String) The unique identifier of the scheduled task.
-- `triggers_json` (String) The task triggers as a JSON array string. Each trigger object can have Type (DailyTrigger, IntervalTrigger, StartupTrigger, WeeklyTrigger), TimeOfDayTicks, IntervalTicks, DayOfWeek, MaxRuntimeTicks.
+- `triggers` (Attributes List) The task triggers. (see [below for nested schema](#nestedatt--triggers))
 
 ### Read-Only
 
 - `id` (String) The resource identifier, matching the scheduled task ID.
+
+<a id="nestedatt--triggers"></a>
+### Nested Schema for `triggers`
+
+Required:
+
+- `type` (String) The trigger type (DailyTrigger, WeeklyTrigger, IntervalTrigger, StartupTrigger).
+
+Optional:
+
+- `day_of_week` (String) Day of week.
+- `interval_ticks` (Number) Interval ticks.
+- `max_runtime_ticks` (Number) Maximum runtime ticks.
+- `time_of_day_ticks` (Number) Time of day ticks.
 
 ## Import
 

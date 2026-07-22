@@ -22,7 +22,7 @@ resource "jellyfin_metadata_configuration" "test" {
 }
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
-resource.TestCheckResourceAttr("jellyfin_metadata_configuration.test", "use_file_creation_time_for_date_added", "true"),
+					resource.TestCheckResourceAttr("jellyfin_metadata_configuration.test", "use_file_creation_time_for_date_added", "true"),
 				),
 			},
 			// ImportState.
@@ -40,7 +40,7 @@ resource "jellyfin_metadata_configuration" "test" {
 }
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
-resource.TestCheckResourceAttr("jellyfin_metadata_configuration.test", "use_file_creation_time_for_date_added", "false"),
+					resource.TestCheckResourceAttr("jellyfin_metadata_configuration.test", "use_file_creation_time_for_date_added", "false"),
 				),
 			},
 		},

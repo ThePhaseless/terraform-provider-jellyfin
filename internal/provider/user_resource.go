@@ -175,15 +175,15 @@ func userPolicyAttributes() map[string]schema.Attribute {
 	}
 
 	return map[string]schema.Attribute{
-		"is_hidden":                         optionalBool("Whether the user is hidden from login screens."),
-		"enable_collection_management":      optionalBool("Whether the user can manage collections."),
-		"enable_subtitle_management":        optionalBool("Whether the user can manage subtitles."),
-		"enable_lyric_management":           optionalBool("Whether the user can manage lyrics."),
-		"max_parental_rating":               optionalInt("Maximum parental rating allowed for the user."),
-		"max_parental_sub_rating":           optionalInt("Maximum parental sub-rating allowed for the user."),
-		"blocked_tags":                      optionalStringList("Tags that are blocked for the user."),
-		"allowed_tags":                      optionalStringList("Tags that are explicitly allowed for the user."),
-		"enable_user_preference_access":     optionalBool("Whether the user can access their own preferences."),
+		"is_hidden":                     optionalBool("Whether the user is hidden from login screens."),
+		"enable_collection_management":  optionalBool("Whether the user can manage collections."),
+		"enable_subtitle_management":    optionalBool("Whether the user can manage subtitles."),
+		"enable_lyric_management":       optionalBool("Whether the user can manage lyrics."),
+		"max_parental_rating":           optionalInt("Maximum parental rating allowed for the user."),
+		"max_parental_sub_rating":       optionalInt("Maximum parental sub-rating allowed for the user."),
+		"blocked_tags":                  optionalStringList("Tags that are blocked for the user."),
+		"allowed_tags":                  optionalStringList("Tags that are explicitly allowed for the user."),
+		"enable_user_preference_access": optionalBool("Whether the user can access their own preferences."),
 		"access_schedules": schema.ListNestedAttribute{
 			NestedObject: schema.NestedAttributeObject{
 				Attributes: map[string]schema.Attribute{
@@ -208,36 +208,36 @@ func userPolicyAttributes() map[string]schema.Attribute {
 				listplanmodifier.UseStateForUnknown(),
 			},
 		},
-		"block_unrated_items":                       optionalStringList("Item types that are blocked when unrated."),
-		"enable_remote_control_of_other_users":      optionalBool("Whether the user can remote-control other users' sessions."),
-		"enable_shared_device_control":              optionalBool("Whether shared device control is enabled for the user."),
-		"enable_remote_access":                      optionalBool("Whether remote access is enabled for the user."),
-		"enable_live_tv_management":                 optionalBool("Whether the user can manage live TV."),
-		"enable_live_tv_access":                     optionalBool("Whether the user can access live TV."),
-		"enable_media_playback":                     optionalBool("Whether media playback is enabled for the user."),
-		"enable_audio_playback_transcoding":         optionalBool("Whether audio playback transcoding is enabled."),
-		"enable_video_playback_transcoding":         optionalBool("Whether video playback transcoding is enabled."),
-		"enable_playback_remuxing":                  optionalBool("Whether playback remuxing is enabled."),
-		"force_remote_source_transcoding":           optionalBool("Whether remote source transcoding is forced."),
-		"enable_content_deletion":                   optionalBool("Whether content deletion is enabled."),
-		"enable_content_deletion_from_folders":      optionalStringList("Folders from which the user may delete content."),
-		"enable_content_downloading":                optionalBool("Whether content downloading is enabled."),
-		"enable_sync_transcoding":                   optionalBool("Whether sync transcoding is enabled."),
-		"enable_media_conversion":                   optionalBool("Whether media conversion is enabled."),
-		"enabled_devices":                           optionalStringList("Devices explicitly enabled for the user."),
-		"enable_all_devices":                        optionalBool("Whether all devices are enabled."),
-		"enabled_channels":                          optionalStringList("Channels explicitly enabled for the user."),
-		"enable_all_channels":                       optionalBool("Whether all channels are enabled."),
-		"enabled_folders":                           optionalStringList("Folders explicitly enabled for the user."),
-		"login_attempts_before_lockout":             optionalInt("Number of failed login attempts before the account is locked."),
-		"max_active_sessions":                       optionalInt("Maximum number of simultaneous sessions."),
-		"enable_public_sharing":                     optionalBool("Whether public sharing is enabled."),
-		"blocked_media_folders":                     optionalStringList("Media folders that are blocked."),
-		"blocked_channels":                          optionalStringList("Channels that are blocked."),
-		"remote_client_bitrate_limit":               optionalInt("Remote client bitrate limit."),
-		"authentication_provider_id":                optionalString("Authentication provider ID.", ""),
-		"password_reset_provider_id":                optionalString("Password reset provider ID.", ""),
-		"sync_play_access":                          optionalString("SyncPlay access level.", ""),
+		"block_unrated_items":                  optionalStringList("Item types that are blocked when unrated."),
+		"enable_remote_control_of_other_users": optionalBool("Whether the user can remote-control other users' sessions."),
+		"enable_shared_device_control":         optionalBool("Whether shared device control is enabled for the user."),
+		"enable_remote_access":                 optionalBool("Whether remote access is enabled for the user."),
+		"enable_live_tv_management":            optionalBool("Whether the user can manage live TV."),
+		"enable_live_tv_access":                optionalBool("Whether the user can access live TV."),
+		"enable_media_playback":                optionalBool("Whether media playback is enabled for the user."),
+		"enable_audio_playback_transcoding":    optionalBool("Whether audio playback transcoding is enabled."),
+		"enable_video_playback_transcoding":    optionalBool("Whether video playback transcoding is enabled."),
+		"enable_playback_remuxing":             optionalBool("Whether playback remuxing is enabled."),
+		"force_remote_source_transcoding":      optionalBool("Whether remote source transcoding is forced."),
+		"enable_content_deletion":              optionalBool("Whether content deletion is enabled."),
+		"enable_content_deletion_from_folders": optionalStringList("Folders from which the user may delete content."),
+		"enable_content_downloading":           optionalBool("Whether content downloading is enabled."),
+		"enable_sync_transcoding":              optionalBool("Whether sync transcoding is enabled."),
+		"enable_media_conversion":              optionalBool("Whether media conversion is enabled."),
+		"enabled_devices":                      optionalStringList("Devices explicitly enabled for the user."),
+		"enable_all_devices":                   optionalBool("Whether all devices are enabled."),
+		"enabled_channels":                     optionalStringList("Channels explicitly enabled for the user."),
+		"enable_all_channels":                  optionalBool("Whether all channels are enabled."),
+		"enabled_folders":                      optionalStringList("Folders explicitly enabled for the user."),
+		"login_attempts_before_lockout":        optionalInt("Number of failed login attempts before the account is locked."),
+		"max_active_sessions":                  optionalInt("Maximum number of simultaneous sessions."),
+		"enable_public_sharing":                optionalBool("Whether public sharing is enabled."),
+		"blocked_media_folders":                optionalStringList("Media folders that are blocked."),
+		"blocked_channels":                     optionalStringList("Channels that are blocked."),
+		"remote_client_bitrate_limit":          optionalInt("Remote client bitrate limit."),
+		"authentication_provider_id":           optionalString("Authentication provider ID.", ""),
+		"password_reset_provider_id":           optionalString("Password reset provider ID.", ""),
+		"sync_play_access":                     optionalString("SyncPlay access level.", ""),
 	}
 }
 
@@ -382,7 +382,7 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 
-	data.Policy, _ = policyFromRaw(ctx, policyRaw, &resp.Diagnostics)
+	data.Policy = policyFromRaw(ctx, policyRaw, &resp.Diagnostics)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -442,7 +442,7 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		resp.Diagnostics.AddError("Failed to read user policy after update", err.Error())
 		return
 	}
-	data.Policy, _ = policyFromRaw(ctx, policyRaw, &resp.Diagnostics)
+	data.Policy = policyFromRaw(ctx, policyRaw, &resp.Diagnostics)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -596,10 +596,10 @@ func putAccessSchedules(ctx context.Context, m map[string]json.RawMessage, v typ
 	return diags
 }
 
-func policyFromRaw(ctx context.Context, raw string, diags *diag.Diagnostics) (*UserPolicyModel, diag.Diagnostics) {
+func policyFromRaw(ctx context.Context, raw string, diags *diag.Diagnostics) *UserPolicyModel {
 	m, err := parseJSONObject(raw)
 	if err != nil {
-		return nil, diag.Diagnostics{diag.NewErrorDiagnostic("Failed to parse policy JSON", err.Error())}
+		return nil
 	}
 
 	policy := &UserPolicyModel{}
@@ -644,10 +644,10 @@ func policyFromRaw(ctx context.Context, raw string, diags *diag.Diagnostics) (*U
 	policy.PasswordResetProviderID = getJSONString(m, "PasswordResetProviderId")
 	policy.SyncPlayAccess = getJSONString(m, "SyncPlayAccess")
 
-	return policy, nil
+	return policy
 }
 
-func getAccessSchedules(ctx context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
+func getAccessSchedules(_ context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
 	raw, ok := m["AccessSchedules"]
 	if !ok {
 		return types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{

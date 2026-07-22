@@ -9,9 +9,9 @@ resource "jellyfin_system_configuration" "example" {
   ]
 
   trickplay_options = {
-    interval         = 10000
+    interval          = 10000
     width_resolutions = [320, 480, 640]
-    tile_width       = 10
-    tile_height      = 10
+    tile_width        = 10
+    tile_height       = 10
   }
 }

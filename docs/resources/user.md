@@ -19,25 +19,27 @@ resource "jellyfin_user" "example" {
   is_administrator = false
 }
 
-# User with full policy control via policy_json
+# User with full typed policy control. Top-level IsAdministrator, IsDisabled,
+# and EnableAllFolders are managed outside the `policy` block; InvalidLoginAttemptCount
+# is server-managed and excluded.
 resource "jellyfin_user" "restricted" {
   name               = "restricted_user"
   password           = "secret456"
   is_administrator   = false
   enable_all_folders = false
 
-  policy_json = jsonencode({
-    EnableMediaPlayback            = true
-    EnableAudioPlaybackTranscoding = true
-    EnableVideoPlaybackTranscoding = false
-    EnableContentDeletion          = false
-    EnableRemoteAccess             = true
-    EnableLiveTvAccess             = false
-    LoginAttemptsBeforeLockout     = 3
-    MaxActiveSessions              = 2
-    SyncPlayAccess                 = "JoinGroups"
-    EnabledFolders                 = []
-  })
+  policy = {
+    enable_media_playback             = true
+    enable_audio_playback_transcoding = true
+    enable_video_playback_transcoding = false
+    enable_content_deletion           = false
+    enable_remote_access              = true
+    enable_live_tv_access             = false
+    login_attempts_before_lockout     = 3
+    max_active_sessions               = 2
+    sync_play_access                  = "JoinGroups"
+    enabled_folders                   = []
+  }
 }
 ```
 
@@ -54,11 +56,66 @@ resource "jellyfin_user" "restricted" {
 - `is_administrator` (Boolean) Whether the user is an administrator.
 - `is_disabled` (Boolean) Whether the user is disabled.
 - `password` (String, Sensitive) The user password.
-- `policy_json` (String) The full user policy as a JSON string. When provided, this will be merged with the existing policy. This allows configuring all policy fields including access schedules, parental controls, transcoding permissions, and more. Individual policy attributes like `is_administrator` take precedence over values in this JSON.
+- `policy` (Attributes) Typed user policy settings. Excludes `IsAdministrator`, `IsDisabled`, `EnableAllFolders` (managed at the top level) and `InvalidLoginAttemptCount` (server-managed). (see [below for nested schema](#nestedatt--policy))
 
 ### Read-Only
 
 - `id` (String) The unique user identifier.
+
+<a id="nestedatt--policy"></a>
+### Nested Schema for `policy`
+
+Optional:
+
+- `access_schedules` (Attributes List) Access schedules restricting when the user can use the server. (see [below for nested schema](#nestedatt--policy--access_schedules))
+- `allowed_tags` (List of String) Tags that are explicitly allowed for the user.
+- `authentication_provider_id` (String) Authentication provider ID.
+- `block_unrated_items` (List of String) Item types that are blocked when unrated.
+- `blocked_channels` (List of String) Channels that are blocked.
+- `blocked_media_folders` (List of String) Media folders that are blocked.
+- `blocked_tags` (List of String) Tags that are blocked for the user.
+- `enable_all_channels` (Boolean) Whether all channels are enabled.
+- `enable_all_devices` (Boolean) Whether all devices are enabled.
+- `enable_audio_playback_transcoding` (Boolean) Whether audio playback transcoding is enabled.
+- `enable_collection_management` (Boolean) Whether the user can manage collections.
+- `enable_content_deletion` (Boolean) Whether content deletion is enabled.
+- `enable_content_deletion_from_folders` (List of String) Folders from which the user may delete content.
+- `enable_content_downloading` (Boolean) Whether content downloading is enabled.
+- `enable_live_tv_access` (Boolean) Whether the user can access live TV.
+- `enable_live_tv_management` (Boolean) Whether the user can manage live TV.
+- `enable_lyric_management` (Boolean) Whether the user can manage lyrics.
+- `enable_media_conversion` (Boolean) Whether media conversion is enabled.
+- `enable_media_playback` (Boolean) Whether media playback is enabled for the user.
+- `enable_playback_remuxing` (Boolean) Whether playback remuxing is enabled.
+- `enable_public_sharing` (Boolean) Whether public sharing is enabled.
+- `enable_remote_access` (Boolean) Whether remote access is enabled for the user.
+- `enable_remote_control_of_other_users` (Boolean) Whether the user can remote-control other users' sessions.
+- `enable_shared_device_control` (Boolean) Whether shared device control is enabled for the user.
+- `enable_subtitle_management` (Boolean) Whether the user can manage subtitles.
+- `enable_sync_transcoding` (Boolean) Whether sync transcoding is enabled.
+- `enable_user_preference_access` (Boolean) Whether the user can access their own preferences.
+- `enable_video_playback_transcoding` (Boolean) Whether video playback transcoding is enabled.
+- `enabled_channels` (List of String) Channels explicitly enabled for the user.
+- `enabled_devices` (List of String) Devices explicitly enabled for the user.
+- `enabled_folders` (List of String) Folders explicitly enabled for the user.
+- `force_remote_source_transcoding` (Boolean) Whether remote source transcoding is forced.
+- `is_hidden` (Boolean) Whether the user is hidden from login screens.
+- `login_attempts_before_lockout` (Number) Number of failed login attempts before the account is locked.
+- `max_active_sessions` (Number) Maximum number of simultaneous sessions.
+- `max_parental_rating` (Number) Maximum parental rating allowed for the user.
+- `max_parental_sub_rating` (Number) Maximum parental sub-rating allowed for the user.
+- `password_reset_provider_id` (String) Password reset provider ID.
+- `remote_client_bitrate_limit` (Number) Remote client bitrate limit.
+- `sync_play_access` (String) SyncPlay access level.
+
+<a id="nestedatt--policy--access_schedules"></a>
+### Nested Schema for `policy.access_schedules`
+
+Optional:
+
+- `day_of_week` (String) Day of week for the schedule.
+- `end_hour` (Number) End hour of the schedule (0-24).
+- `start_hour` (Number) Start hour of the schedule (0-24).
 
 ## Import
 

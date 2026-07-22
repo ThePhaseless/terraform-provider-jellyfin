@@ -14,15 +14,15 @@ resource "jellyfin_user" "restricted" {
   enable_all_folders = false
 
   policy = {
-    enable_media_playback            = true
+    enable_media_playback             = true
     enable_audio_playback_transcoding = true
     enable_video_playback_transcoding = false
-    enable_content_deletion          = false
-    enable_remote_access             = true
-    enable_live_tv_access            = false
+    enable_content_deletion           = false
+    enable_remote_access              = true
+    enable_live_tv_access             = false
     login_attempts_before_lockout     = 3
-    max_active_sessions              = 2
-    sync_play_access                 = "JoinGroups"
-    enabled_folders                  = []
+    max_active_sessions               = 2
+    sync_play_access                  = "JoinGroups"
+    enabled_folders                   = []
   }
 }

@@ -3,63 +3,119 @@
 page_title: "jellyfin_encoding_configuration Resource - jellyfin"
 subcategory: ""
 description: |-
-  Manages the Jellyfin encoding/transcoding configuration. The configuration is passed as a JSON string for full flexibility over all encoding options.
+  Manages the Jellyfin encoding configuration.
 ---
 
 # jellyfin_encoding_configuration (Resource)
 
-Manages the Jellyfin encoding/transcoding configuration. The configuration is passed as a JSON string for full flexibility over all encoding options.
+Manages the Jellyfin encoding configuration.
 
 ## Example Usage
 
 ```terraform
 resource "jellyfin_encoding_configuration" "example" {
-  configuration_json = jsonencode({
-    EncodingThreadCount                = -1
-    TranscodingTempPath                = "/config/transcodes"
-    EnableFallbackFont                 = false
-    EnableAudioVbr                     = false
-    DownMixAudioBoost                  = 2
-    DownMixStereoAlgorithm             = "None"
-    MaxMuxingQueueSize                 = 2048
-    EnableThrottling                   = false
-    ThrottleDelaySeconds               = 180
-    EnableSegmentDeletion              = false
-    SegmentKeepSeconds                 = 720
-    HardwareAccelerationType           = ""
-    EnableHardwareEncoding             = true
-    AllowHevcEncoding                  = false
-    AllowAv1Encoding                   = false
-    EnableTonemapping                  = false
-    EnableVppTonemapping               = false
-    EnableVideoToolboxTonemapping      = false
-    TonemappingAlgorithm               = "bt2390"
-    TonemappingMode                    = "auto"
-    TonemappingRange                   = "auto"
-    TonemappingDesat                   = 0
-    TonemappingPeak                    = 100
-    TonemappingParam                   = 0
-    H264Crf                            = 23
-    H265Crf                            = 28
-    DeinterlaceMethod                  = "yadif"
-    EnableDecodingColorDepth10Hevc     = true
-    EnableDecodingColorDepth10Vp9      = true
-    EnableDecodingColorDepth10HevcRext = false
-    EnableDecodingColorDepth12HevcRext = false
-    EnableEnhancedNvdecDecoder         = true
-    PreferSystemNativeHwDecoder        = true
-    EnableIntelLowPowerH264HwEncoder   = false
-    EnableIntelLowPowerHevcHwEncoder   = false
-  })
+  encoding_thread_count                                             = 0
+  transcoding_temp_path                                             = ""
+  fallback_font_path                                                = ""
+  enable_fallback_font                                              = false
+  enable_audio_vbr                                                  = false
+  down_mix_audio_boost                                              = 0
+  down_mix_stereo_algorithm                                         = ""
+  max_muxing_queue_size                                             = 0
+  enable_throttling                                                 = false
+  throttle_delay_seconds                                            = 0
+  enable_segment_deletion                                           = false
+  segment_keep_seconds                                              = 0
+  hardware_acceleration_type                                        = ""
+  encoder_app_path                                                  = ""
+  encoder_app_path_display                                          = ""
+  vaapi_device                                                      = ""
+  qsv_device                                                        = ""
+  enable_tonemapping                                                = false
+  enable_vpp_tonemapping                                            = false
+  enable_video_toolbox_tonemapping                                  = false
+  tonemapping_algorithm                                             = ""
+  tonemapping_mode                                                  = ""
+  tonemapping_range                                                 = ""
+  tonemapping_desat                                                 = 0
+  tonemapping_peak                                                  = 0
+  tonemapping_param                                                 = 0
+  vpp_tonemapping_brightness                                        = 0
+  vpp_tonemapping_contrast                                          = 0
+  h264_crf                                                          = 0
+  h265_crf                                                          = 0
+  encoder_preset                                                    = ""
+  deinterlace_double_rate                                           = false
+  deinterlace_method                                                = ""
+  enable_decoding_color_depth10_hevc                                = false
+  enable_decoding_color_depth10_vp9                                 = false
+  enable_decoding_color_depth10_hevc_rext                           = false
+  enable_decoding_color_depth12_hevc_rext                           = false
+  enable_enhanced_nvdec_decoder                                     = false
+  prefer_system_native_hw_decoder                                   = false
+  enable_intel_low_power_h264_hw_encoder                            = false
+  enable_intel_low_power_hevc_hw_encoder                            = false
+  enable_hardware_encoding                                          = false
+  allow_hevc_encoding                                               = false
+  allow_av1_encoding                                                = false
+  enable_subtitle_extraction                                        = false
+  hardware_decoding_codecs                                          = []
+  allow_on_demand_metadata_based_keyframe_extraction_for_extensions = []
 }
 ```
 
 <!-- schema generated by tfplugindocs -->
 ## Schema
 
-### Required
+### Optional
 
-- `configuration_json` (String) The encoding configuration as a JSON string.
+- `allow_av1_encoding` (Boolean) Whether AV1 encoding is allowed.
+- `allow_hevc_encoding` (Boolean) Whether HEVC encoding is allowed.
+- `allow_on_demand_metadata_based_keyframe_extraction_for_extensions` (List of String) Extensions allowing on-demand metadata-based keyframe extraction.
+- `deinterlace_double_rate` (Boolean) Whether deinterlace double rate is enabled.
+- `deinterlace_method` (String) Deinterlace method.
+- `down_mix_audio_boost` (Number) Down-mix audio boost.
+- `down_mix_stereo_algorithm` (String) Down-mix stereo algorithm.
+- `enable_audio_vbr` (Boolean) Whether audio VBR is enabled.
+- `enable_decoding_color_depth10_hevc` (Boolean) Whether 10-bit HEVC decoding is enabled.
+- `enable_decoding_color_depth10_hevc_rext` (Boolean) Whether 10-bit HEVC RExt decoding is enabled.
+- `enable_decoding_color_depth10_vp9` (Boolean) Whether 10-bit VP9 decoding is enabled.
+- `enable_decoding_color_depth12_hevc_rext` (Boolean) Whether 12-bit HEVC RExt decoding is enabled.
+- `enable_enhanced_nvdec_decoder` (Boolean) Whether enhanced NVDEC decoder is enabled.
+- `enable_fallback_font` (Boolean) Whether fallback font is enabled.
+- `enable_hardware_encoding` (Boolean) Whether hardware encoding is enabled.
+- `enable_intel_low_power_h264_hw_encoder` (Boolean) Whether Intel low-power H264 hardware encoder is enabled.
+- `enable_intel_low_power_hevc_hw_encoder` (Boolean) Whether Intel low-power HEVC hardware encoder is enabled.
+- `enable_segment_deletion` (Boolean) Whether segment deletion is enabled.
+- `enable_subtitle_extraction` (Boolean) Whether subtitle extraction is enabled.
+- `enable_throttling` (Boolean) Whether throttling is enabled.
+- `enable_tonemapping` (Boolean) Whether tonemapping is enabled.
+- `enable_video_toolbox_tonemapping` (Boolean) Whether VideoToolbox tonemapping is enabled.
+- `enable_vpp_tonemapping` (Boolean) Whether VPP tonemapping is enabled.
+- `encoder_app_path` (String) Encoder application path.
+- `encoder_app_path_display` (String) Encoder application display path.
+- `encoder_preset` (String) Encoder preset.
+- `encoding_thread_count` (Number) Encoding thread count.
+- `fallback_font_path` (String) Fallback font path.
+- `h264_crf` (Number) H264 CRF.
+- `h265_crf` (Number) H265 CRF.
+- `hardware_acceleration_type` (String) Hardware acceleration type.
+- `hardware_decoding_codecs` (List of String) Hardware decoding codecs.
+- `max_muxing_queue_size` (Number) Max muxing queue size.
+- `prefer_system_native_hw_decoder` (Boolean) Whether to prefer system native hardware decoder.
+- `qsv_device` (String) QSV device.
+- `segment_keep_seconds` (Number) Segment keep time in seconds.
+- `throttle_delay_seconds` (Number) Throttle delay in seconds.
+- `tonemapping_algorithm` (String) Tonemapping algorithm.
+- `tonemapping_desat` (Number) Tonemapping desaturation.
+- `tonemapping_mode` (String) Tonemapping mode.
+- `tonemapping_param` (Number) Tonemapping parameter.
+- `tonemapping_peak` (Number) Tonemapping peak.
+- `tonemapping_range` (String) Tonemapping range.
+- `transcoding_temp_path` (String) Transcoding temporary path.
+- `vaapi_device` (String) VAAPI device.
+- `vpp_tonemapping_brightness` (Number) VPP tonemapping brightness.
+- `vpp_tonemapping_contrast` (Number) VPP tonemapping contrast.
 
 ### Read-Only
 
