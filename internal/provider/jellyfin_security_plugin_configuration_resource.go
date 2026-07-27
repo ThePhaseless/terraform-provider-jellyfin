@@ -121,7 +121,7 @@ type JellyfinSecurityPluginConfigurationResourceModel struct {
 
 // OidcProviderModel describes an OIDC provider configuration.
 type OidcProviderModel struct {
-	Id                       types.String `tfsdk:"id"`
+	ID                       types.String `tfsdk:"id"`
 	DisplayName              types.String `tfsdk:"display_name"`
 	Preset                   types.String `tfsdk:"preset"`
 	DiscoveryURL             types.String `tfsdk:"discovery_url"`
@@ -746,7 +746,7 @@ func overlayJellyfinSecurity(ctx context.Context, m map[string]json.RawMessage, 
 			entry := map[string]json.RawMessage{}
 			overlayOidcProvider(ctx, entry, &p)
 			// Preserve CreatedAt from existing entry if present
-			if id := p.Id; !id.IsNull() {
+			if id := p.ID; !id.IsNull() {
 				if ca, ok := existingCreatedAt[id.ValueString()]; ok {
 					b, _ := json.Marshal(ca)
 					entry["CreatedAt"] = b
@@ -766,7 +766,7 @@ func overlayJellyfinSecurity(ctx context.Context, m map[string]json.RawMessage, 
 
 // overlayOidcProvider overlays a single OIDC provider onto the entry map.
 func overlayOidcProvider(ctx context.Context, m map[string]json.RawMessage, p *OidcProviderModel) {
-	putJSONString(m, "Id", p.Id)
+	putJSONString(m, "Id", p.ID)
 	putJSONString(m, "DisplayName", p.DisplayName)
 	putJSONString(m, "Preset", p.Preset)
 	putJSONString(m, "DiscoveryUrl", p.DiscoveryURL)
