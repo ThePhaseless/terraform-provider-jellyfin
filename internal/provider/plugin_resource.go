@@ -71,13 +71,12 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"version": schema.StringAttribute{
-				Description:         "The plugin version to install.",
-				MarkdownDescription: "The plugin version to install.",
-				Required:            true,
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
+				Description:         "The plugin version to install. Omit to install the latest available version from the repository.",
+				MarkdownDescription: "The plugin version to install. Omit to install the latest available version from the repository.",
+				Optional:            true,
+				Computed:            true,
 				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
@@ -129,6 +128,22 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 		)
 		return
 	}
+	// Resolve version: "supported" (or unset for known plugins) uses the
+	// hardcoded supported version; "latest" resolves the newest from the
+	// repository manifest; any other value is used as-is.
+	resolvedVersion, err := r.resolvePluginVersion(ctx, data.Name.ValueString(), data.Version)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to resolve plugin version", err.Error())
+		return
+	}
+	if resolvedVersion == "" {
+		resp.Diagnostics.AddError(
+			"Plugin not found in available packages",
+			fmt.Sprintf("No package named %q found in configured repositories. Register the plugin repository first.", data.Name.ValueString()),
+		)
+		return
+	}
+	data.Version = types.StringValue(resolvedVersion)
 
 	// Check if the plugin is already installed. Jellyfin returns 404 when
 	// POSTing an install for a plugin that is already present, so we detect
@@ -296,4 +311,83 @@ func (r *PluginResource) resolveRepositoryURL(ctx context.Context, name, version
 	}
 
 	return ""
+}
+// resolvePluginVersion resolves the version for a plugin install.
+//
+// - "supported" or unset for a known plugin → hardcoded supported version
+// - "latest" → newest version from the repository manifest, with a warning
+//   if newer than the supported version (when one exists)
+// - Any other value (e.g. "2.5.20.0") → used as-is
+// - Unset for unknown plugins → resolves latest from the repository
+func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, version types.String) (string, error) {
+	supported := supportedVersionForPlugin(name)
+
+	switch {
+	case version.IsNull() || version.IsUnknown() || version.ValueString() == "":
+		// Unset: use supported for known plugins, latest for others.
+		if supported != "" {
+			return supported, nil
+		}
+		return r.resolveLatestVersion(ctx, name)
+
+	case version.ValueString() == "supported":
+		if supported == "" {
+			return "", fmt.Errorf("version %q is not available for plugin %q — no supported version is defined", "supported", name)
+		}
+		return supported, nil
+
+	case version.ValueString() == "latest":
+		latest, err := r.resolveLatestVersion(ctx, name)
+		if err != nil {
+			return "", err
+		}
+		if supported != "" && latest != "" {
+			if c := compareDottedVersions(latest, supported); c > 0 {
+				resp := "" // placeholder — warning is logged below
+				_ = resp
+				tflog.Warn(ctx, "Plugin version newer than supported", map[string]interface{}{
+					"plugin":           name,
+					"latest":           latest,
+					"supported":        supported,
+					"warning":          fmt.Sprintf("Installing %s v%s which is newer than the tested/supported v%s. The typed Terraform resource may not cover all properties in this version.", name, latest, supported),
+				})
+			}
+		}
+		return latest, nil
+
+	default:
+		return version.ValueString(), nil
+	}
+}
+
+// resolveLatestVersion fetches the latest version for a plugin from the
+// configured repository manifests via the /Packages endpoint.
+func (r *PluginResource) resolveLatestVersion(ctx context.Context, name string) (string, error) {
+	pkgs, err := r.client.GetAvailablePackages(ctx)
+	if err != nil {
+		return "", fmt.Errorf("listing available packages: %w", err)
+	}
+
+	for _, pkg := range pkgs {
+		if pkg.Name == name {
+			if len(pkg.Versions) == 0 {
+				return "", fmt.Errorf("plugin %q has no available versions", name)
+			}
+			// Manifests list newest version first.
+			return pkg.Versions[0].Version, nil
+		}
+	}
+
+	return "", nil
+}
+
+// supportedVersionForPlugin returns the hardcoded supported version for a
+// plugin by name, or "" if no supported version is tracked.
+func supportedVersionForPlugin(name string) string {
+	switch name {
+	case "Jellyfin Security":
+		return supportedSecurityPluginVersion()
+	default:
+		return ""
+	}
 }

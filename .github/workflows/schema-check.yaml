@@ -1,0 +1,81 @@
+name: Schema Change Check
+
+on:
+  pull_request:
+    paths:
+      - 'internal/provider/supported_security_plugin_version.env'
+
+permissions:
+  contents: read
+
+jobs:
+  schema-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Extract old and new plugin versions
+        id: versions
+        run: |
+          OLD_VERSION=$(git show origin/${{ github.base_ref }}:internal/provider/supported_security_plugin_version.env | grep -oP '(?<=SECURITY_PLUGIN_VERSION=).+')
+          NEW_VERSION=$(grep -oP '(?<=SECURITY_PLUGIN_VERSION=).+' internal/provider/supported_security_plugin_version.env)
+          echo "old=${OLD_VERSION}" >> $GITHUB_OUTPUT
+          echo "new=${NEW_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Fetch PluginConfiguration.cs at both versions
+        run: |
+          curl -sSL "https://raw.githubusercontent.com/ZL154/JellyfinSecurity/v${{ steps.versions.outputs.old }}/src/Jellyfin.Plugin.TwoFactorAuth/Configuration/PluginConfiguration.cs" -o /tmp/old_config.cs
+          curl -sSL "https://raw.githubusercontent.com/ZL154/JellyfinSecurity/v${{ steps.versions.outputs.new }}/src/Jellyfin.Plugin.TwoFactorAuth/Configuration/PluginConfiguration.cs" -o /tmp/new_config.cs
+          curl -sSL "https://raw.githubusercontent.com/ZL154/JellyfinSecurity/v${{ steps.versions.outputs.old }}/src/Jellyfin.Plugin.TwoFactorAuth/Models/OidcProvider.cs" -o /tmp/old_oidc.cs
+          curl -sSL "https://raw.githubusercontent.com/ZL154/JellyfinSecurity/v${{ steps.versions.outputs.new }}/src/Jellyfin.Plugin.TwoFactorAuth/Models/OidcProvider.cs" -o /tmp/new_oidc.cs
+
+      - name: Compare property signatures
+        id: diff
+        run: |
+          # Extract public property signatures (type + name) from each file
+          extract_props() {
+            grep -oP 'public\s+(?:virtual\s+)?(?:\w+(?:<[^>]+>)?(?:\[\])?)\s+\w+\s*\{\s*get;\s*set;' "$1" | \
+              sed 's/public\s*//; s/\s*{\s*get;\s*set;.*//' | sort
+          }
+          extract_props /tmp/old_config.cs > /tmp/old_config_props.txt
+          extract_props /tmp/new_config.cs > /tmp/new_config_props.txt
+          extract_props /tmp/old_oidc.cs > /tmp/old_oidc_props.txt
+          extract_props /tmp/new_oidc.cs > /tmp/new_oidc_props.txt
+
+          CONFIG_DIFF=$(diff /tmp/old_config_props.txt /tmp/new_config_props.txt || true)
+          OIDC_DIFF=$(diff /tmp/old_oidc_props.txt /tmp/new_oidc_props.txt || true)
+
+          if [ -n "$CONFIG_DIFF" ] || [ -n "$OIDC_DIFF" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "::error::JellyfinSecurity plugin schema changed between ${{ steps.versions.outputs.old }} and ${{ steps.versions.outputs.new }}"
+            echo "::error::The typed Terraform resource must be updated before this version can be merged."
+            echo ""
+            echo "PluginConfiguration.cs changes:"
+            echo '```diff'
+            echo "$CONFIG_DIFF"
+            echo '```'
+            echo ""
+            echo "OidcProvider.cs changes:"
+            echo '```diff'
+            echo "$OIDC_DIFF"
+            echo '```'
+            exit 1
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No schema changes detected."
+          fi
+
+      - name: Comment on PR if schema changed
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '⚠️ **JellyfinSecurity plugin schema changed** in this version bump. The typed Terraform resource in `internal/provider/jellyfin_security_plugin_configuration_resource.go` must be updated to match before merging. See the workflow output for the property diff.'
+            })

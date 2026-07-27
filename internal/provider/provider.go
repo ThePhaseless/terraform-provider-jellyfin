@@ -253,7 +253,7 @@ func (p *JellyfinProvider) Resources(_ context.Context) []func() resource.Resour
 		NewPluginRepositoryResource,
 		NewPluginResource,
 		NewPluginConfigurationResource,
-		NewSSOPluginConfigurationResource,
+		NewJellyfinSecurityPluginConfigurationResource,
 		NewSystemConfigurationResource,
 		NewEncodingConfigurationResource,
 		NewNetworkingConfigurationResource,

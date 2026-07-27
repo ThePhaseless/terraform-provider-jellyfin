@@ -174,6 +174,17 @@ func getJSONBool(m map[string]json.RawMessage, key string) types.Bool {
 	return types.BoolValue(b)
 }
 
+// getJSONBoolDefaultFalse reads a bool value from the JSON object map.
+// Returns false (not null) when the key is missing or the JSON value is null.
+// Use for plugin fields where the server may omit a property but the typed
+// schema defaults to false.
+func getJSONBoolDefaultFalse(m map[string]json.RawMessage, key string) types.Bool {
+	v := getJSONBool(m, key)
+	if v.IsNull() {
+		return types.BoolValue(false)
+	}
+	return v
+}
 // getJSONInt64 reads an int64 value from the JSON object map.
 // Returns null when the key is missing or the JSON value is null.
 func getJSONInt64(m map[string]json.RawMessage, key string) types.Int64 {

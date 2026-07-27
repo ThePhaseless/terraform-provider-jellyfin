@@ -1,0 +1,37 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^internal/provider/supported_security_plugin_version\\.env$/"],
+      "matchStrings": ["SECURITY_PLUGIN_VERSION=(?<currentValue>.+?)\\s"],
+      "depNameTemplate": "ZL154/JellyfinSecurity",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver-coerced"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^internal/provider/supported_jellyfin_version\\.env$/"],
+      "matchStrings": ["JELLYFIN_VERSION=(?<currentValue>.+?)\\s"],
+      "depNameTemplate": "jellyfin/jellyfin",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$",
+      "versioningTemplate": "semver-coerced"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": ["ZL154/JellyfinSecurity"],
+      "commitMessagePrefix": "chore:",
+      "commitMessageTopic": "JellyfinSecurity plugin version",
+      "automerge": false
+    },
+    {
+      "matchPackageNames": ["jellyfin/jellyfin"],
+      "commitMessagePrefix": "chore:",
+      "commitMessageTopic": "Jellyfin server version",
+      "automerge": false
+    }
+  ]
+}

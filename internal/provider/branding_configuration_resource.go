@@ -177,7 +177,7 @@ func (r *BrandingConfigurationResource) read(ctx context.Context, data *Branding
 
 func overlayBrandingConfiguration(_ context.Context, m map[string]json.RawMessage, data *BrandingConfigurationResourceModel) {
 	putJSONString(m, "LoginDisclaimer", data.LoginDisclaimer)
-	putJSONString(m, "CustomCSS", data.CustomCSS)
+	putJSONString(m, "CustomCss", data.CustomCSS)
 	putJSONBool(m, "SplashscreenEnabled", data.SplashscreenEnabled)
 	putJSONString(m, "SplashscreenLocation", data.SplashscreenLocation)
 }
@@ -189,7 +189,7 @@ func flattenBrandingConfiguration(_ context.Context, raw string, data *BrandingC
 		return
 	}
 	data.LoginDisclaimer = getJSONString(m, "LoginDisclaimer")
-	data.CustomCSS = getJSONString(m, "CustomCSS")
+	data.CustomCSS = getJSONString(m, "CustomCss")
 	data.SplashscreenEnabled = getJSONBool(m, "SplashscreenEnabled")
 	data.SplashscreenLocation = getJSONString(m, "SplashscreenLocation")
 }

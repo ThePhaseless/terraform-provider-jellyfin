@@ -13,8 +13,8 @@ import (
 //go:embed supported_jellyfin_version.env
 var supportedJellyfinVersionEnv string
 
-//go:embed supported_sso_plugin_version.env
-var supportedSSOPluginVersionEnv string
+//go:embed supported_security_plugin_version.env
+var supportedSecurityPluginVersionEnv string
 
 // supportedJellyfinVersion returns the tested Jellyfin server version from the
 // embedded .env file. It trims whitespace and strips the JELLYFIN_VERSION= prefix.
@@ -22,10 +22,11 @@ func supportedJellyfinVersion() string {
 	return parseVersionEnv(supportedJellyfinVersionEnv, "JELLYFIN_VERSION")
 }
 
-// supportedSSOPluginVersion returns the tested SSO-Auth plugin version from the
-// embedded .env file. It trims whitespace and strips the SSO_PLUGIN_VERSION= prefix.
-func supportedSSOPluginVersion() string {
-	return parseVersionEnv(supportedSSOPluginVersionEnv, "SSO_PLUGIN_VERSION")
+// supportedSecurityPluginVersion returns the tested JellyfinSecurity plugin
+// version from the embedded .env file. It trims whitespace and strips the
+// SECURITY_PLUGIN_VERSION= prefix.
+func supportedSecurityPluginVersion() string {
+	return parseVersionEnv(supportedSecurityPluginVersionEnv, "SECURITY_PLUGIN_VERSION")
 }
 
 func parseVersionEnv(content, key string) string {

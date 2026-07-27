@@ -221,15 +221,15 @@ func (r *NetworkingConfigurationResource) read(ctx context.Context, data *Networ
 
 func overlayNetworkingConfiguration(ctx context.Context, m map[string]json.RawMessage, data *NetworkingConfigurationResourceModel) diag.Diagnostics {
 	var diags diag.Diagnostics
-	putJSONString(m, "BaseURL", data.BaseURL)
-	putJSONBool(m, "EnableHTTPS", data.EnableHTTPS)
-	putJSONBool(m, "RequireHTTPS", data.RequireHTTPS)
+	putJSONString(m, "BaseUrl", data.BaseURL)
+	putJSONBool(m, "EnableHttps", data.EnableHTTPS)
+	putJSONBool(m, "RequireHttps", data.RequireHTTPS)
 	putJSONString(m, "CertificatePath", data.CertificatePath)
 	putJSONString(m, "CertificatePassword", data.CertificatePassword)
-	putJSONInt64(m, "InternalHTTPPort", data.InternalHTTPPort)
-	putJSONInt64(m, "InternalHTTPSPort", data.InternalHTTPSPort)
-	putJSONInt64(m, "PublicHTTPPort", data.PublicHTTPPort)
-	putJSONInt64(m, "PublicHTTPSPort", data.PublicHTTPSPort)
+	putJSONInt64(m, "InternalHttpPort", data.InternalHTTPPort)
+	putJSONInt64(m, "InternalHttpsPort", data.InternalHTTPSPort)
+	putJSONInt64(m, "PublicHttpPort", data.PublicHTTPPort)
+	putJSONInt64(m, "PublicHttpsPort", data.PublicHTTPSPort)
 	putJSONBool(m, "AutoDiscovery", data.AutoDiscovery)
 	putJSONBool(m, "EnableUPnP", data.EnableUpnp)
 	putJSONBool(m, "EnableIPv4", data.EnableIpv4)
@@ -248,8 +248,8 @@ func overlayNetworkingConfiguration(ctx context.Context, m map[string]json.RawMe
 	if d := putJSONStringList(ctx, m, "VirtualInterfaceNames", data.VirtualInterfaceNames); d.HasError() {
 		return d
 	}
-	putJSONBool(m, "EnablePublishedServerURIByRequest", data.EnablePublishedServerURIByRequest)
-	if d := putJSONStringList(ctx, m, "PublishedServerURIBySubnet", data.PublishedServerURIBySubnet); d.HasError() {
+	putJSONBool(m, "EnablePublishedServerUriByRequest", data.EnablePublishedServerURIByRequest)
+	if d := putJSONStringList(ctx, m, "PublishedServerUriBySubnet", data.PublishedServerURIBySubnet); d.HasError() {
 		return d
 	}
 	if d := putJSONStringList(ctx, m, "RemoteIPFilter", data.RemoteIPFilter); d.HasError() {
@@ -265,15 +265,15 @@ func flattenNetworkingConfiguration(ctx context.Context, raw string, data *Netwo
 		diags.AddError("Failed to parse networking configuration", err.Error())
 		return
 	}
-	data.BaseURL = getJSONString(m, "BaseURL")
-	data.EnableHTTPS = getJSONBool(m, "EnableHTTPS")
-	data.RequireHTTPS = getJSONBool(m, "RequireHTTPS")
+	data.BaseURL = getJSONString(m, "BaseUrl")
+	data.EnableHTTPS = getJSONBool(m, "EnableHttps")
+	data.RequireHTTPS = getJSONBool(m, "RequireHttps")
 	data.CertificatePath = getJSONString(m, "CertificatePath")
 	data.CertificatePassword = getJSONString(m, "CertificatePassword")
-	data.InternalHTTPPort = getJSONInt64(m, "InternalHTTPPort")
-	data.InternalHTTPSPort = getJSONInt64(m, "InternalHTTPSPort")
-	data.PublicHTTPPort = getJSONInt64(m, "PublicHTTPPort")
-	data.PublicHTTPSPort = getJSONInt64(m, "PublicHTTPSPort")
+	data.InternalHTTPPort = getJSONInt64(m, "InternalHttpPort")
+	data.InternalHTTPSPort = getJSONInt64(m, "InternalHttpsPort")
+	data.PublicHTTPPort = getJSONInt64(m, "PublicHttpPort")
+	data.PublicHTTPSPort = getJSONInt64(m, "PublicHttpsPort")
 	data.AutoDiscovery = getJSONBool(m, "AutoDiscovery")
 	data.EnableUpnp = getJSONBool(m, "EnableUPnP")
 	data.EnableIpv4 = getJSONBool(m, "EnableIPv4")
@@ -284,8 +284,8 @@ func flattenNetworkingConfiguration(ctx context.Context, raw string, data *Netwo
 	data.KnownProxies, _ = getJSONStringList(ctx, m, "KnownProxies")
 	data.IgnoreVirtualInterfaces = getJSONBool(m, "IgnoreVirtualInterfaces")
 	data.VirtualInterfaceNames, _ = getJSONStringList(ctx, m, "VirtualInterfaceNames")
-	data.EnablePublishedServerURIByRequest = getJSONBool(m, "EnablePublishedServerURIByRequest")
-	data.PublishedServerURIBySubnet, _ = getJSONStringList(ctx, m, "PublishedServerURIBySubnet")
+	data.EnablePublishedServerURIByRequest = getJSONBool(m, "EnablePublishedServerUriByRequest")
+	data.PublishedServerURIBySubnet, _ = getJSONStringList(ctx, m, "PublishedServerUriBySubnet")
 	data.RemoteIPFilter, _ = getJSONStringList(ctx, m, "RemoteIPFilter")
 	data.IsRemoteIPFilterBlacklist = getJSONBool(m, "IsRemoteIPFilterBlacklist")
 }

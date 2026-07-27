@@ -14,8 +14,8 @@ func TestSupportedVersionParsers(t *testing.T) {
 	if got := supportedJellyfinVersion(); got == "" {
 		t.Errorf("supportedJellyfinVersion() returned empty string")
 	}
-	if got := supportedSSOPluginVersion(); got == "" {
-		t.Errorf("supportedSSOPluginVersion() returned empty string")
+	if got := supportedSecurityPluginVersion(); got == "" {
+		t.Errorf("supportedSecurityPluginVersion() returned empty string")
 	}
 }
 

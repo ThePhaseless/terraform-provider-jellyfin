@@ -26,11 +26,11 @@ resource "jellyfin_plugin" "example" {
 ### Required
 
 - `name` (String) The plugin package name. Used as the import key (e.g. `terraform import jellyfin_plugin.x "SSO-Auth"`).
-- `version` (String) The plugin version to install.
 
 ### Optional
 
 - `repository_url` (String) The repository URL from which to install the plugin. Required when creating the resource and resolved automatically on import when the exact package version is still available.
+- `version` (String) The plugin version to install. Omit to install the latest available version from the repository.
 
 ### Read-Only
 
