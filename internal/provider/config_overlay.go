@@ -185,6 +185,7 @@ func getJSONBoolDefaultFalse(m map[string]json.RawMessage, key string) types.Boo
 	}
 	return v
 }
+
 // getJSONInt64 reads an int64 value from the JSON object map.
 // Returns null when the key is missing or the JSON value is null.
 func getJSONInt64(m map[string]json.RawMessage, key string) types.Int64 {

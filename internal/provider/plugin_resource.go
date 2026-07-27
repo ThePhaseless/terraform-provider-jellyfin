@@ -312,13 +312,14 @@ func (r *PluginResource) resolveRepositoryURL(ctx context.Context, name, version
 
 	return ""
 }
+
 // resolvePluginVersion resolves the version for a plugin install.
 //
-// - "supported" or unset for a known plugin → hardcoded supported version
-// - "latest" → newest version from the repository manifest, with a warning
-//   if newer than the supported version (when one exists)
-// - Any other value (e.g. "2.5.20.0") → used as-is
-// - Unset for unknown plugins → resolves latest from the repository
+//   - "supported" or unset for a known plugin → hardcoded supported version
+//   - "latest" → newest version from the repository manifest, with a warning
+//     if newer than the supported version (when one exists)
+//   - Any other value (e.g. "2.5.20.0") → used as-is
+//   - Unset for unknown plugins → resolves latest from the repository.
 func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, version types.String) (string, error) {
 	supported := supportedVersionForPlugin(name)
 
@@ -346,10 +347,10 @@ func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, 
 				resp := "" // placeholder — warning is logged below
 				_ = resp
 				tflog.Warn(ctx, "Plugin version newer than supported", map[string]interface{}{
-					"plugin":           name,
-					"latest":           latest,
-					"supported":        supported,
-					"warning":          fmt.Sprintf("Installing %s v%s which is newer than the tested/supported v%s. The typed Terraform resource may not cover all properties in this version.", name, latest, supported),
+					"plugin":    name,
+					"latest":    latest,
+					"supported": supported,
+					"warning":   fmt.Sprintf("Installing %s v%s which is newer than the tested/supported v%s. The typed Terraform resource may not cover all properties in this version.", name, latest, supported),
 				})
 			}
 		}

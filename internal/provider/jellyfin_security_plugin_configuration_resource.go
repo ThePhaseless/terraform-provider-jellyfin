@@ -31,6 +31,7 @@ var (
 	_ resource.Resource                = &JellyfinSecurityPluginConfigurationResource{}
 	_ resource.ResourceWithImportState = &JellyfinSecurityPluginConfigurationResource{}
 )
+
 // JellyfinSecurityPluginConfigurationResource defines the resource implementation.
 type JellyfinSecurityPluginConfigurationResource struct {
 	client *client.Client
@@ -38,134 +39,135 @@ type JellyfinSecurityPluginConfigurationResource struct {
 
 // JellyfinSecurityPluginConfigurationResourceModel describes the resource data model.
 type JellyfinSecurityPluginConfigurationResourceModel struct {
-	ID                                  types.String `tfsdk:"id"`
-	PluginID                            types.String `tfsdk:"plugin_id"`
-	Enabled                             types.Bool   `tfsdk:"enabled"`
+	ID                                 types.String `tfsdk:"id"`
+	PluginID                           types.String `tfsdk:"plugin_id"`
+	Enabled                            types.Bool   `tfsdk:"enabled"`
 	BlockEmptyPasswordLogin            types.Bool   `tfsdk:"block_empty_password_login"`
-	RequireChallengeIpMatch            types.Bool   `tfsdk:"require_challenge_ip_match"`
+	RequireChallengeIPMatch            types.Bool   `tfsdk:"require_challenge_ip_match"`
 	RegisteredDeviceMaxAgeDays         types.Int64  `tfsdk:"registered_device_max_age_days"`
-	BareDeviceIdBypassEnabled          types.Bool   `tfsdk:"bare_device_id_bypass_enabled"`
-	RequireTwoFactorToDisable         types.Bool   `tfsdk:"require_two_factor_to_disable"`
-	SelfServiceStepUpMode             types.String `tfsdk:"self_service_step_up_mode"`
-	StepUpLevel                       types.String `tfsdk:"step_up_level"`
-	StepUpWindowSeconds               types.Int64  `tfsdk:"step_up_window_seconds"`
-	AllowIndefiniteTrust              types.Bool   `tfsdk:"allow_indefinite_trust"`
-	HideBuiltinTwoFactorButton       types.Bool   `tfsdk:"hide_builtin_two_factor_button"`
-	HideBuiltinPasskeyButton          types.Bool   `tfsdk:"hide_builtin_passkey_button"`
-	EnforcementScope                  types.String `tfsdk:"enforcement_scope"`
-	LanBypassEnabled                 types.Bool   `tfsdk:"lan_bypass_enabled"`
-	LanBypassCidrs                   types.List   `tfsdk:"lan_bypass_cidrs"`
-	TrustForwardedFor                 types.Bool   `tfsdk:"trust_forwarded_for"`
-	TrustedProxyCidrs                 types.List   `tfsdk:"trusted_proxy_cidrs"`
-	EmailOtpEnabled                   types.Bool   `tfsdk:"email_otp_enabled"`
-	HibpEnabled                       types.Bool   `tfsdk:"hibp_enabled"`
-	EmailOtpTtlSeconds                types.Int64  `tfsdk:"email_otp_ttl_seconds"`
-	ChallengeTokenTtlSeconds          types.Int64  `tfsdk:"challenge_token_ttl_seconds"`
-	PairingCodeTtlSeconds             types.Int64  `tfsdk:"pairing_code_ttl_seconds"`
-	MaxFailedAttempts                 types.Int64  `tfsdk:"max_failed_attempts"`
-	LockoutDurationMinutes            types.Int64  `tfsdk:"lockout_duration_minutes"`
-	ExemptAdministratorsFromLockout  types.Bool   `tfsdk:"exempt_administrators_from_lockout"`
-	DisablePasswordLogin              types.Bool   `tfsdk:"disable_password_login"`
-	AllowAdminPasswordLogin           types.Bool   `tfsdk:"allow_admin_password_login"`
-	AllowPasswordLoginOnLan           types.Bool   `tfsdk:"allow_password_login_on_lan"`
-	PasswordLoginExemptCidrs          types.List   `tfsdk:"password_login_exempt_cidrs"`
-	EnablePasswordRecovery            types.Bool   `tfsdk:"enable_password_recovery"`
-	HideBuiltinForgotPassword         types.Bool   `tfsdk:"hide_builtin_forgot_password"`
-	LoginLinksBelowQuickConnect      types.Bool   `tfsdk:"login_links_below_quick_connect"`
-	AuditLogMaxEntries               types.Int64  `tfsdk:"audit_log_max_entries"`
-	NtfyUrl                           types.String `tfsdk:"ntfy_url"`
-	NtfyTopic                         types.String `tfsdk:"ntfy_topic"`
-	GotifyUrl                         types.String `tfsdk:"gotify_url"`
-	GotifyAppToken                    types.String `tfsdk:"gotify_app_token"`
-	AllowPrivateNotificationTargets   types.Bool   `tfsdk:"allow_private_notification_targets"`
-	NotifyEmailAddresses              types.List   `tfsdk:"notify_email_addresses"`
-	SmtpHost                          types.String `tfsdk:"smtp_host"`
-	SmtpPort                          types.Int64  `tfsdk:"smtp_port"`
-	SmtpUseSsl                        types.Bool   `tfsdk:"smtp_use_ssl"`
-	SmtpUsername                      types.String `tfsdk:"smtp_username"`
-	SmtpPassword                      types.String `tfsdk:"smtp_password"`
-	SmtpFromAddress                   types.String `tfsdk:"smtp_from_address"`
-	SmtpFromName                      types.String `tfsdk:"smtp_from_name"`
-	UserEmails                        types.List   `tfsdk:"user_emails"`
-	TotpIssuerName                    types.String `tfsdk:"totp_issuer_name"`
-	DefaultLanguage                   types.String `tfsdk:"default_language"`
-	PreVerifyWindowSeconds            types.Int64  `tfsdk:"pre_verify_window_seconds"`
-	TrustCookieTtlDays                types.Int64  `tfsdk:"trust_cookie_ttl_days"`
-	NatHairpinSelfIpBypass            types.Bool   `tfsdk:"nat_hairpin_self_ip_bypass"`
-	DefaultMaxConcurrentSessions      types.Int64  `tfsdk:"default_max_concurrent_sessions"`
-	EnrollmentDeadline                types.String `tfsdk:"enrollment_deadline"`
-	WebhookUrl                        types.String `tfsdk:"webhook_url"`
-	WebhookSecret                     types.String `tfsdk:"webhook_secret"`
-	GeoIpAsnDbPath                    types.String `tfsdk:"geo_ip_asn_db_path"`
-	GeoIpCountryDbPath                types.String `tfsdk:"geo_ip_country_db_path"`
-	WebauthnRpId                      types.String `tfsdk:"webauthn_rp_id"`
-	WebauthnOrigins                   types.List   `tfsdk:"webauthn_origins"`
-	BypassForExternalAuthProviders    types.Bool   `tfsdk:"bypass_for_external_auth_providers"`
-	OidcProviders                     types.List   `tfsdk:"oidc_providers"`
-	GeoIpCityDbPath                   types.String `tfsdk:"geo_ip_city_db_path"`
-	IpBanEnabled                      types.Bool   `tfsdk:"ip_ban_enabled"`
-	IpBanFailureThreshold             types.Int64  `tfsdk:"ip_ban_failure_threshold"`
-	IpBanFailureWindowMinutes         types.Int64  `tfsdk:"ip_ban_failure_window_minutes"`
-	IpBanDurationHours                types.Int64  `tfsdk:"ip_ban_duration_hours"`
-	IpBanExemptCidrs                  types.List   `tfsdk:"ip_ban_exempt_cidrs"`
-	ImpossibleTravelEnabled           types.Bool   `tfsdk:"impossible_travel_enabled"`
-	ImpossibleTravelMaxKmh            types.Int64  `tfsdk:"impossible_travel_max_kmh"`
-	WebhookEd25519PrivateKey          types.String `tfsdk:"webhook_ed25519_private_key"`
-	OnboardingPasswordMinLength       types.Int64  `tfsdk:"onboarding_password_min_length"`
-	OnboardingPasswordRequireUppercase types.Bool  `tfsdk:"onboarding_password_require_uppercase"`
-	OnboardingPasswordRequireLowercase types.Bool  `tfsdk:"onboarding_password_require_lowercase"`
-	OnboardingPasswordRequireDigit    types.Bool   `tfsdk:"onboarding_password_require_digit"`
-	OnboardingPasswordRequireSymbol   types.Bool   `tfsdk:"onboarding_password_require_symbol"`
+	BareDeviceIDBypassEnabled          types.Bool   `tfsdk:"bare_device_id_bypass_enabled"`
+	RequireTwoFactorToDisable          types.Bool   `tfsdk:"require_two_factor_to_disable"`
+	SelfServiceStepUpMode              types.String `tfsdk:"self_service_step_up_mode"`
+	StepUpLevel                        types.String `tfsdk:"step_up_level"`
+	StepUpWindowSeconds                types.Int64  `tfsdk:"step_up_window_seconds"`
+	AllowIndefiniteTrust               types.Bool   `tfsdk:"allow_indefinite_trust"`
+	HideBuiltinTwoFactorButton         types.Bool   `tfsdk:"hide_builtin_two_factor_button"`
+	HideBuiltinPasskeyButton           types.Bool   `tfsdk:"hide_builtin_passkey_button"`
+	EnforcementScope                   types.String `tfsdk:"enforcement_scope"`
+	LanBypassEnabled                   types.Bool   `tfsdk:"lan_bypass_enabled"`
+	LanBypassCidrs                     types.List   `tfsdk:"lan_bypass_cidrs"`
+	TrustForwardedFor                  types.Bool   `tfsdk:"trust_forwarded_for"`
+	TrustedProxyCidrs                  types.List   `tfsdk:"trusted_proxy_cidrs"`
+	EmailOtpEnabled                    types.Bool   `tfsdk:"email_otp_enabled"`
+	HibpEnabled                        types.Bool   `tfsdk:"hibp_enabled"`
+	EmailOTPTTLSeconds                 types.Int64  `tfsdk:"email_otp_ttl_seconds"`
+	ChallengeTokenTTLSeconds           types.Int64  `tfsdk:"challenge_token_ttl_seconds"`
+	PairingCodeTTLSeconds              types.Int64  `tfsdk:"pairing_code_ttl_seconds"`
+	MaxFailedAttempts                  types.Int64  `tfsdk:"max_failed_attempts"`
+	LockoutDurationMinutes             types.Int64  `tfsdk:"lockout_duration_minutes"`
+	ExemptAdministratorsFromLockout    types.Bool   `tfsdk:"exempt_administrators_from_lockout"`
+	DisablePasswordLogin               types.Bool   `tfsdk:"disable_password_login"`
+	AllowAdminPasswordLogin            types.Bool   `tfsdk:"allow_admin_password_login"`
+	AllowPasswordLoginOnLan            types.Bool   `tfsdk:"allow_password_login_on_lan"`
+	PasswordLoginExemptCidrs           types.List   `tfsdk:"password_login_exempt_cidrs"`
+	EnablePasswordRecovery             types.Bool   `tfsdk:"enable_password_recovery"`
+	HideBuiltinForgotPassword          types.Bool   `tfsdk:"hide_builtin_forgot_password"`
+	LoginLinksBelowQuickConnect        types.Bool   `tfsdk:"login_links_below_quick_connect"`
+	AuditLogMaxEntries                 types.Int64  `tfsdk:"audit_log_max_entries"`
+	NtfyURL                            types.String `tfsdk:"ntfy_url"`
+	NtfyTopic                          types.String `tfsdk:"ntfy_topic"`
+	GotifyURL                          types.String `tfsdk:"gotify_url"`
+	GotifyAppToken                     types.String `tfsdk:"gotify_app_token"`
+	AllowPrivateNotificationTargets    types.Bool   `tfsdk:"allow_private_notification_targets"`
+	NotifyEmailAddresses               types.List   `tfsdk:"notify_email_addresses"`
+	SMTPHost                           types.String `tfsdk:"smtp_host"`
+	SMTPPort                           types.Int64  `tfsdk:"smtp_port"`
+	SMTPUseSsl                         types.Bool   `tfsdk:"smtp_use_ssl"`
+	SMTPUsername                       types.String `tfsdk:"smtp_username"`
+	SMTPPassword                       types.String `tfsdk:"smtp_password"`
+	SMTPFromAddress                    types.String `tfsdk:"smtp_from_address"`
+	SMTPFromName                       types.String `tfsdk:"smtp_from_name"`
+	UserEmails                         types.List   `tfsdk:"user_emails"`
+	TotpIssuerName                     types.String `tfsdk:"totp_issuer_name"`
+	DefaultLanguage                    types.String `tfsdk:"default_language"`
+	PreVerifyWindowSeconds             types.Int64  `tfsdk:"pre_verify_window_seconds"`
+	TrustCookieTTLDays                 types.Int64  `tfsdk:"trust_cookie_ttl_days"`
+	NatHairpinSelfIPBypass             types.Bool   `tfsdk:"nat_hairpin_self_ip_bypass"`
+	DefaultMaxConcurrentSessions       types.Int64  `tfsdk:"default_max_concurrent_sessions"`
+	EnrollmentDeadline                 types.String `tfsdk:"enrollment_deadline"`
+	WebhookURL                         types.String `tfsdk:"webhook_url"`
+	WebhookSecret                      types.String `tfsdk:"webhook_secret"`
+	GeoIPAsnDbPath                     types.String `tfsdk:"geo_ip_asn_db_path"`
+	GeoIPCountryDbPath                 types.String `tfsdk:"geo_ip_country_db_path"`
+	WebauthnRpID                       types.String `tfsdk:"webauthn_rp_id"`
+	WebauthnOrigins                    types.List   `tfsdk:"webauthn_origins"`
+	BypassForExternalAuthProviders     types.Bool   `tfsdk:"bypass_for_external_auth_providers"`
+	OidcProviders                      types.List   `tfsdk:"oidc_providers"`
+	GeoIPCityDbPath                    types.String `tfsdk:"geo_ip_city_db_path"`
+	IPBanEnabled                       types.Bool   `tfsdk:"ip_ban_enabled"`
+	IPBanFailureThreshold              types.Int64  `tfsdk:"ip_ban_failure_threshold"`
+	IPBanFailureWindowMinutes          types.Int64  `tfsdk:"ip_ban_failure_window_minutes"`
+	IPBanDurationHours                 types.Int64  `tfsdk:"ip_ban_duration_hours"`
+	IPBanExemptCidrs                   types.List   `tfsdk:"ip_ban_exempt_cidrs"`
+	ImpossibleTravelEnabled            types.Bool   `tfsdk:"impossible_travel_enabled"`
+	ImpossibleTravelMaxKmh             types.Int64  `tfsdk:"impossible_travel_max_kmh"`
+	WebhookEd25519PrivateKey           types.String `tfsdk:"webhook_ed25519_private_key"`
+	OnboardingPasswordMinLength        types.Int64  `tfsdk:"onboarding_password_min_length"`
+	OnboardingPasswordRequireUppercase types.Bool   `tfsdk:"onboarding_password_require_uppercase"`
+	OnboardingPasswordRequireLowercase types.Bool   `tfsdk:"onboarding_password_require_lowercase"`
+	OnboardingPasswordRequireDigit     types.Bool   `tfsdk:"onboarding_password_require_digit"`
+	OnboardingPasswordRequireSymbol    types.Bool   `tfsdk:"onboarding_password_require_symbol"`
 }
 
 // OidcProviderModel describes an OIDC provider configuration.
 type OidcProviderModel struct {
-	Id                        types.String `tfsdk:"id"`
-	DisplayName               types.String `tfsdk:"display_name"`
-	Preset                    types.String `tfsdk:"preset"`
-	DiscoveryUrl              types.String `tfsdk:"discovery_url"`
-	ClientId                  types.String `tfsdk:"client_id"`
-	ClientSecret              types.String `tfsdk:"client_secret"`
-	Scopes                    types.List   `tfsdk:"scopes"`
-	AcrValues                 types.List   `tfsdk:"acr_values"`
-	UsernameClaim             types.String `tfsdk:"username_claim"`
-	AllowedGroups             types.List   `tfsdk:"allowed_groups"`
-	AdminGroups               types.List   `tfsdk:"admin_groups"`
-	AllowAdminGroupElevation  types.Bool   `tfsdk:"allow_admin_group_elevation"`
-	TemplateUserId            types.String `tfsdk:"template_user_id"`
-	AutoCreateUsers           types.Bool   `tfsdk:"auto_create_users"`
-	RequireIdpMfa             types.Bool   `tfsdk:"require_idp_mfa"`
-	BypassPluginTwoFa         types.Bool   `tfsdk:"bypass_plugin_two_fa"`
-	Enabled                   types.Bool   `tfsdk:"enabled"`
-	ShowLoginButton           types.Bool   `tfsdk:"show_login_button"`
-	ForceHttps                types.Bool   `tfsdk:"force_https"`
-	AllowPrivateNetworks      types.Bool   `tfsdk:"allow_private_networks"`
-	AdditionalAllowedCidrs    types.List   `tfsdk:"additional_allowed_cidrs"`
-	SyncProfilePicture        types.Bool   `tfsdk:"sync_profile_picture"`
-	PictureClaim              types.String `tfsdk:"picture_claim"`
-	PromptSelectAccount       types.Bool   `tfsdk:"prompt_select_account"`
-	OmitPromptLogin           types.Bool   `tfsdk:"omit_prompt_login"`
-	ApplyRoleLibraryAccess    types.Bool   `tfsdk:"apply_role_library_access"`
-	RoleLibraryMappings       types.List   `tfsdk:"role_library_mappings"`
-	EmailClaim                types.String `tfsdk:"email_claim"`
-	SyncEmailFromClaim        types.Bool   `tfsdk:"sync_email_from_claim"`
-	ButtonText                types.String `tfsdk:"button_text"`
-	ButtonIconUrl             types.String `tfsdk:"button_icon_url"`
-	ForcePasswordSetup        types.Bool   `tfsdk:"force_password_setup"`
-	CreatedAt                 types.String `tfsdk:"created_at"`
+	Id                       types.String `tfsdk:"id"`
+	DisplayName              types.String `tfsdk:"display_name"`
+	Preset                   types.String `tfsdk:"preset"`
+	DiscoveryURL             types.String `tfsdk:"discovery_url"`
+	ClientID                 types.String `tfsdk:"client_id"`
+	ClientSecret             types.String `tfsdk:"client_secret"`
+	Scopes                   types.List   `tfsdk:"scopes"`
+	AcrValues                types.List   `tfsdk:"acr_values"`
+	UsernameClaim            types.String `tfsdk:"username_claim"`
+	AllowedGroups            types.List   `tfsdk:"allowed_groups"`
+	AdminGroups              types.List   `tfsdk:"admin_groups"`
+	AllowAdminGroupElevation types.Bool   `tfsdk:"allow_admin_group_elevation"`
+	TemplateUserID           types.String `tfsdk:"template_user_id"`
+	AutoCreateUsers          types.Bool   `tfsdk:"auto_create_users"`
+	RequireIdpMfa            types.Bool   `tfsdk:"require_idp_mfa"`
+	BypassPluginTwoFa        types.Bool   `tfsdk:"bypass_plugin_two_fa"`
+	Enabled                  types.Bool   `tfsdk:"enabled"`
+	ShowLoginButton          types.Bool   `tfsdk:"show_login_button"`
+	ForceHTTPS               types.Bool   `tfsdk:"force_https"`
+	AllowPrivateNetworks     types.Bool   `tfsdk:"allow_private_networks"`
+	AdditionalAllowedCidrs   types.List   `tfsdk:"additional_allowed_cidrs"`
+	SyncProfilePicture       types.Bool   `tfsdk:"sync_profile_picture"`
+	PictureClaim             types.String `tfsdk:"picture_claim"`
+	PromptSelectAccount      types.Bool   `tfsdk:"prompt_select_account"`
+	OmitPromptLogin          types.Bool   `tfsdk:"omit_prompt_login"`
+	ApplyRoleLibraryAccess   types.Bool   `tfsdk:"apply_role_library_access"`
+	RoleLibraryMappings      types.List   `tfsdk:"role_library_mappings"`
+	EmailClaim               types.String `tfsdk:"email_claim"`
+	SyncEmailFromClaim       types.Bool   `tfsdk:"sync_email_from_claim"`
+	ButtonText               types.String `tfsdk:"button_text"`
+	ButtonIconURL            types.String `tfsdk:"button_icon_url"`
+	ForcePasswordSetup       types.Bool   `tfsdk:"force_password_setup"`
+	CreatedAt                types.String `tfsdk:"created_at"`
 }
 
 // RoleLibraryMappingModel describes a role-to-library mapping entry.
 type RoleLibraryMappingModel struct {
 	Role       types.String `tfsdk:"role"`
-	LibraryIds types.List   `tfsdk:"library_ids"`
+	LibraryIDs types.List   `tfsdk:"library_ids"`
 }
 
 // UserEmailEntryModel describes a user-email mapping entry.
 type UserEmailEntryModel struct {
-	UserId types.String `tfsdk:"user_id"`
+	UserID types.String `tfsdk:"user_id"`
 	Email  types.String `tfsdk:"email"`
 }
+
 // NewJellyfinSecurityPluginConfigurationResource creates a new JellyfinSecurity plugin configuration resource.
 func NewJellyfinSecurityPluginConfigurationResource() resource.Resource {
 	return &JellyfinSecurityPluginConfigurationResource{}
@@ -253,31 +255,31 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"enabled":                              optionalBool("Whether the plugin is enabled."),
-			"block_empty_password_login":          optionalBool("Block login for users with empty passwords."),
-			"require_challenge_ip_match":          optionalBool("Require challenge token IP to match request IP."),
-			"registered_device_max_age_days":      optionalInt("Max age in days for registered devices."),
-			"bare_device_id_bypass_enabled":       optionalBool("Enable bypass for bare device IDs."),
-			"require_two_factor_to_disable":       optionalBool("Require 2FA to disable the plugin."),
-			"self_service_step_up_mode":           optionalString("Self-service step-up mode: Off, UserChoice, or Forced."),
-			"step_up_level":                       optionalString("Step-up level: Off, Destructive, AllConfigChanges, or Everything."),
-			"step_up_window_seconds":              optionalInt("Step-up authentication window in seconds."),
-			"allow_indefinite_trust":              optionalBool("Allow indefinite trust for devices."),
+			"enabled":                            optionalBool("Whether the plugin is enabled."),
+			"block_empty_password_login":         optionalBool("Block login for users with empty passwords."),
+			"require_challenge_ip_match":         optionalBool("Require challenge token IP to match request IP."),
+			"registered_device_max_age_days":     optionalInt("Max age in days for registered devices."),
+			"bare_device_id_bypass_enabled":      optionalBool("Enable bypass for bare device IDs."),
+			"require_two_factor_to_disable":      optionalBool("Require 2FA to disable the plugin."),
+			"self_service_step_up_mode":          optionalString("Self-service step-up mode: Off, UserChoice, or Forced."),
+			"step_up_level":                      optionalString("Step-up level: Off, Destructive, AllConfigChanges, or Everything."),
+			"step_up_window_seconds":             optionalInt("Step-up authentication window in seconds."),
+			"allow_indefinite_trust":             optionalBool("Allow indefinite trust for devices."),
 			"hide_builtin_two_factor_button":     optionalBool("Hide the built-in 2FA login button."),
-			"hide_builtin_passkey_button":         optionalBool("Hide the built-in passkey login button."),
-			"enforcement_scope":                   optionalString("2FA enforcement scope: Optional, Admins, or All."),
-			"lan_bypass_enabled":                  optionalBool("Enable LAN bypass for 2FA."),
-			"lan_bypass_cidrs":                    optionalStringList("CIDR ranges that bypass 2FA on LAN."),
+			"hide_builtin_passkey_button":        optionalBool("Hide the built-in passkey login button."),
+			"enforcement_scope":                  optionalString("2FA enforcement scope: Optional, Admins, or All."),
+			"lan_bypass_enabled":                 optionalBool("Enable LAN bypass for 2FA."),
+			"lan_bypass_cidrs":                   optionalStringList("CIDR ranges that bypass 2FA on LAN."),
 			"trust_forwarded_for":                optionalBool("Trust X-Forwarded-For header."),
-			"trusted_proxy_cidrs":                 optionalStringList("Trusted proxy CIDR ranges."),
-			"email_otp_enabled":                   optionalBool("Enable email OTP."),
-			"hibp_enabled":                         optionalBool("Enable Have I Been Pwned password check."),
-			"email_otp_ttl_seconds":               optionalInt("Email OTP time-to-live in seconds."),
-			"challenge_token_ttl_seconds":         optionalInt("Challenge token time-to-live in seconds."),
-			"pairing_code_ttl_seconds":            optionalInt("Pairing code time-to-live in seconds."),
-			"max_failed_attempts":                 optionalInt("Max failed auth attempts before lockout."),
-			"lockout_duration_minutes":            optionalInt("Lockout duration in minutes."),
-			"exempt_administrators_from_lockout":  optionalBool("Exempt administrators from lockout."),
+			"trusted_proxy_cidrs":                optionalStringList("Trusted proxy CIDR ranges."),
+			"email_otp_enabled":                  optionalBool("Enable email OTP."),
+			"hibp_enabled":                       optionalBool("Enable Have I Been Pwned password check."),
+			"email_otp_ttl_seconds":              optionalInt("Email OTP time-to-live in seconds."),
+			"challenge_token_ttl_seconds":        optionalInt("Challenge token time-to-live in seconds."),
+			"pairing_code_ttl_seconds":           optionalInt("Pairing code time-to-live in seconds."),
+			"max_failed_attempts":                optionalInt("Max failed auth attempts before lockout."),
+			"lockout_duration_minutes":           optionalInt("Lockout duration in minutes."),
+			"exempt_administrators_from_lockout": optionalBool("Exempt administrators from lockout."),
 			"disable_password_login":             optionalBool("Disable password login entirely."),
 			"allow_admin_password_login":         optionalBool("Allow password login for administrators."),
 			"allow_password_login_on_lan":        optionalBool("Allow password login on LAN."),
@@ -285,20 +287,20 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 			"enable_password_recovery":           optionalBool("Enable password recovery."),
 			"hide_builtin_forgot_password":       optionalBool("Hide the built-in forgot password link."),
 			"login_links_below_quick_connect":    optionalBool("Show login links below Quick Connect."),
-			"audit_log_max_entries":               optionalInt("Max audit log entries."),
-			"ntfy_url":                            optionalString("ntfy notification URL."),
-			"ntfy_topic":                          optionalString("ntfy notification topic."),
-			"gotify_url":                          optionalString("Gotify notification URL."),
-			"gotify_app_token":                    sensitiveString("Gotify app token."),
-			"allow_private_notification_targets":  optionalBool("Allow private network notification targets."),
-			"notify_email_addresses":              optionalStringList("Email addresses to notify."),
-			"smtp_host":                           optionalString("SMTP server host."),
-			"smtp_port":                           optionalInt("SMTP server port."),
-			"smtp_use_ssl":                        optionalBool("Use SSL for SMTP."),
-			"smtp_username":                       optionalString("SMTP username."),
-			"smtp_password":                       sensitiveString("SMTP password."),
-			"smtp_from_address":                   optionalString("SMTP from address."),
-			"smtp_from_name":                      optionalString("SMTP from name."),
+			"audit_log_max_entries":              optionalInt("Max audit log entries."),
+			"ntfy_url":                           optionalString("ntfy notification URL."),
+			"ntfy_topic":                         optionalString("ntfy notification topic."),
+			"gotify_url":                         optionalString("Gotify notification URL."),
+			"gotify_app_token":                   sensitiveString("Gotify app token."),
+			"allow_private_notification_targets": optionalBool("Allow private network notification targets."),
+			"notify_email_addresses":             optionalStringList("Email addresses to notify."),
+			"smtp_host":                          optionalString("SMTP server host."),
+			"smtp_port":                          optionalInt("SMTP server port."),
+			"smtp_use_ssl":                       optionalBool("Use SSL for SMTP."),
+			"smtp_username":                      optionalString("SMTP username."),
+			"smtp_password":                      sensitiveString("SMTP password."),
+			"smtp_from_address":                  optionalString("SMTP from address."),
+			"smtp_from_name":                     optionalString("SMTP from name."),
 			"user_emails": schema.ListNestedAttribute{
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
@@ -314,12 +316,12 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 					listplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"totp_issuer_name":                    optionalString("TOTP issuer name."),
-			"default_language":                    optionalString("Default language code."),
+			"totp_issuer_name":                   optionalString("TOTP issuer name."),
+			"default_language":                   optionalString("Default language code."),
 			"pre_verify_window_seconds":          optionalInt("Pre-verify window in seconds."),
 			"trust_cookie_ttl_days":              optionalInt("Trust cookie TTL in days."),
 			"nat_hairpin_self_ip_bypass":         optionalBool("Enable NAT hairpin self-IP bypass."),
-			"default_max_concurrent_sessions":     optionalInt("Default max concurrent sessions per user (0 = unlimited)."),
+			"default_max_concurrent_sessions":    optionalInt("Default max concurrent sessions per user (0 = unlimited)."),
 			"enrollment_deadline":                optionalString("2FA enrollment deadline (ISO-8601 or null)."),
 			"webhook_url":                        optionalString("Webhook notification URL."),
 			"webhook_secret":                     sensitiveString("Webhook signing secret."),
@@ -340,20 +342,20 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 					listplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"geo_ip_city_db_path":                optionalString("Path to GeoIP city database."),
-			"ip_ban_enabled":                     optionalBool("Enable IP banning."),
-			"ip_ban_failure_threshold":           optionalInt("IP ban failure threshold."),
-			"ip_ban_failure_window_minutes":      optionalInt("IP ban failure window in minutes."),
-			"ip_ban_duration_hours":              optionalInt("IP ban duration in hours."),
-			"ip_ban_exempt_cidrs":                optionalStringList("CIDR ranges exempt from IP banning."),
-			"impossible_travel_enabled":          optionalBool("Enable impossible travel detection."),
-			"impossible_travel_max_kmh":           optionalInt("Impossible travel max speed in km/h."),
-			"webhook_ed25519_private_key":        sensitiveString("Webhook Ed25519 private key."),
-			"onboarding_password_min_length":     optionalInt("Onboarding password minimum length."),
+			"geo_ip_city_db_path":                   optionalString("Path to GeoIP city database."),
+			"ip_ban_enabled":                        optionalBool("Enable IP banning."),
+			"ip_ban_failure_threshold":              optionalInt("IP ban failure threshold."),
+			"ip_ban_failure_window_minutes":         optionalInt("IP ban failure window in minutes."),
+			"ip_ban_duration_hours":                 optionalInt("IP ban duration in hours."),
+			"ip_ban_exempt_cidrs":                   optionalStringList("CIDR ranges exempt from IP banning."),
+			"impossible_travel_enabled":             optionalBool("Enable impossible travel detection."),
+			"impossible_travel_max_kmh":             optionalInt("Impossible travel max speed in km/h."),
+			"webhook_ed25519_private_key":           sensitiveString("Webhook Ed25519 private key."),
+			"onboarding_password_min_length":        optionalInt("Onboarding password minimum length."),
 			"onboarding_password_require_uppercase": optionalBool("Require uppercase in onboarding passwords."),
 			"onboarding_password_require_lowercase": optionalBool("Require lowercase in onboarding passwords."),
-			"onboarding_password_require_digit":    optionalBool("Require digit in onboarding passwords."),
-			"onboarding_password_require_symbol":   optionalBool("Require symbol in onboarding passwords."),
+			"onboarding_password_require_digit":     optionalBool("Require digit in onboarding passwords."),
+			"onboarding_password_require_symbol":    optionalBool("Require symbol in onboarding passwords."),
 		},
 	}
 }
@@ -407,7 +409,7 @@ func oidcProviderAttributes(
 				listplanmodifier.UseStateForUnknown(),
 			},
 		},
-		"email_claim":          optionalString("JWT claim for email."),
+		"email_claim":           optionalString("JWT claim for email."),
 		"sync_email_from_claim": optionalBool("Sync email from claim."),
 		"button_text":           optionalString("Login button text."),
 		"button_icon_url":       optionalString("Login button icon URL."),
@@ -610,9 +612,9 @@ func overlayJellyfinSecurity(ctx context.Context, m map[string]json.RawMessage, 
 	// Root scalar fields
 	putJSONBool(m, "Enabled", data.Enabled)
 	putJSONBool(m, "BlockEmptyPasswordLogin", data.BlockEmptyPasswordLogin)
-	putJSONBool(m, "RequireChallengeIpMatch", data.RequireChallengeIpMatch)
+	putJSONBool(m, "RequireChallengeIpMatch", data.RequireChallengeIPMatch)
 	putJSONInt64(m, "RegisteredDeviceMaxAgeDays", data.RegisteredDeviceMaxAgeDays)
-	putJSONBool(m, "BareDeviceIdBypassEnabled", data.BareDeviceIdBypassEnabled)
+	putJSONBool(m, "BareDeviceIdBypassEnabled", data.BareDeviceIDBypassEnabled)
 	putJSONBool(m, "RequireTwoFactorToDisable", data.RequireTwoFactorToDisable)
 	putJSONString(m, "SelfServiceStepUpMode", data.SelfServiceStepUpMode)
 	putJSONString(m, "StepUpLevel", data.StepUpLevel)
@@ -625,9 +627,9 @@ func overlayJellyfinSecurity(ctx context.Context, m map[string]json.RawMessage, 
 	putJSONBool(m, "TrustForwardedFor", data.TrustForwardedFor)
 	putJSONBool(m, "EmailOtpEnabled", data.EmailOtpEnabled)
 	putJSONBool(m, "HibpEnabled", data.HibpEnabled)
-	putJSONInt64(m, "EmailOtpTtlSeconds", data.EmailOtpTtlSeconds)
-	putJSONInt64(m, "ChallengeTokenTtlSeconds", data.ChallengeTokenTtlSeconds)
-	putJSONInt64(m, "PairingCodeTtlSeconds", data.PairingCodeTtlSeconds)
+	putJSONInt64(m, "EmailOtpTtlSeconds", data.EmailOTPTTLSeconds)
+	putJSONInt64(m, "ChallengeTokenTtlSeconds", data.ChallengeTokenTTLSeconds)
+	putJSONInt64(m, "PairingCodeTtlSeconds", data.PairingCodeTTLSeconds)
 	putJSONInt64(m, "MaxFailedAttempts", data.MaxFailedAttempts)
 	putJSONInt64(m, "LockoutDurationMinutes", data.LockoutDurationMinutes)
 	putJSONBool(m, "ExemptAdministratorsFromLockout", data.ExemptAdministratorsFromLockout)
@@ -638,36 +640,36 @@ func overlayJellyfinSecurity(ctx context.Context, m map[string]json.RawMessage, 
 	putJSONBool(m, "HideBuiltInForgotPassword", data.HideBuiltinForgotPassword)
 	putJSONBool(m, "LoginLinksBelowQuickConnect", data.LoginLinksBelowQuickConnect)
 	putJSONInt64(m, "AuditLogMaxEntries", data.AuditLogMaxEntries)
-	putJSONString(m, "NtfyUrl", data.NtfyUrl)
+	putJSONString(m, "NtfyUrl", data.NtfyURL)
 	putJSONString(m, "NtfyTopic", data.NtfyTopic)
-	putJSONString(m, "GotifyUrl", data.GotifyUrl)
+	putJSONString(m, "GotifyUrl", data.GotifyURL)
 	putJSONString(m, "GotifyAppToken", data.GotifyAppToken)
 	putJSONBool(m, "AllowPrivateNotificationTargets", data.AllowPrivateNotificationTargets)
-	putJSONString(m, "SmtpHost", data.SmtpHost)
-	putJSONInt64(m, "SmtpPort", data.SmtpPort)
-	putJSONBool(m, "SmtpUseSsl", data.SmtpUseSsl)
-	putJSONString(m, "SmtpUsername", data.SmtpUsername)
-	putJSONString(m, "SmtpPassword", data.SmtpPassword)
-	putJSONString(m, "SmtpFromAddress", data.SmtpFromAddress)
-	putJSONString(m, "SmtpFromName", data.SmtpFromName)
+	putJSONString(m, "SmtpHost", data.SMTPHost)
+	putJSONInt64(m, "SmtpPort", data.SMTPPort)
+	putJSONBool(m, "SmtpUseSsl", data.SMTPUseSsl)
+	putJSONString(m, "SmtpUsername", data.SMTPUsername)
+	putJSONString(m, "SmtpPassword", data.SMTPPassword)
+	putJSONString(m, "SmtpFromAddress", data.SMTPFromAddress)
+	putJSONString(m, "SmtpFromName", data.SMTPFromName)
 	putJSONString(m, "TotpIssuerName", data.TotpIssuerName)
 	putJSONString(m, "DefaultLanguage", data.DefaultLanguage)
 	putJSONInt64(m, "PreVerifyWindowSeconds", data.PreVerifyWindowSeconds)
-	putJSONInt64(m, "TrustCookieTtlDays", data.TrustCookieTtlDays)
-	putJSONBool(m, "NatHairpinSelfIpBypass", data.NatHairpinSelfIpBypass)
+	putJSONInt64(m, "TrustCookieTtlDays", data.TrustCookieTTLDays)
+	putJSONBool(m, "NatHairpinSelfIpBypass", data.NatHairpinSelfIPBypass)
 	putJSONInt64(m, "DefaultMaxConcurrentSessions", data.DefaultMaxConcurrentSessions)
 	putJSONString(m, "EnrollmentDeadline", data.EnrollmentDeadline)
-	putJSONString(m, "WebhookUrl", data.WebhookUrl)
+	putJSONString(m, "WebhookUrl", data.WebhookURL)
 	putJSONString(m, "WebhookSecret", data.WebhookSecret)
-	putJSONString(m, "GeoIpAsnDbPath", data.GeoIpAsnDbPath)
-	putJSONString(m, "GeoIpCountryDbPath", data.GeoIpCountryDbPath)
-	putJSONString(m, "WebAuthnRpId", data.WebauthnRpId)
+	putJSONString(m, "GeoIpAsnDbPath", data.GeoIPAsnDbPath)
+	putJSONString(m, "GeoIpCountryDbPath", data.GeoIPCountryDbPath)
+	putJSONString(m, "WebAuthnRpId", data.WebauthnRpID)
 	putJSONBool(m, "BypassForExternalAuthProviders", data.BypassForExternalAuthProviders)
-	putJSONString(m, "GeoIpCityDbPath", data.GeoIpCityDbPath)
-	putJSONBool(m, "IpBanEnabled", data.IpBanEnabled)
-	putJSONInt64(m, "IpBanFailureThreshold", data.IpBanFailureThreshold)
-	putJSONInt64(m, "IpBanFailureWindowMinutes", data.IpBanFailureWindowMinutes)
-	putJSONInt64(m, "IpBanDurationHours", data.IpBanDurationHours)
+	putJSONString(m, "GeoIpCityDbPath", data.GeoIPCityDbPath)
+	putJSONBool(m, "IpBanEnabled", data.IPBanEnabled)
+	putJSONInt64(m, "IpBanFailureThreshold", data.IPBanFailureThreshold)
+	putJSONInt64(m, "IpBanFailureWindowMinutes", data.IPBanFailureWindowMinutes)
+	putJSONInt64(m, "IpBanDurationHours", data.IPBanDurationHours)
 	putJSONBool(m, "ImpossibleTravelEnabled", data.ImpossibleTravelEnabled)
 	putJSONInt64(m, "ImpossibleTravelMaxKmh", data.ImpossibleTravelMaxKmh)
 	putJSONString(m, "WebhookEd25519PrivateKey", data.WebhookEd25519PrivateKey)
@@ -693,7 +695,7 @@ func overlayJellyfinSecurity(ctx context.Context, m map[string]json.RawMessage, 
 	if d := putJSONStringList(ctx, m, "WebAuthnOrigins", data.WebauthnOrigins); d.HasError() {
 		return append(diags, d...)
 	}
-	if d := putJSONStringList(ctx, m, "IpBanExemptCidrs", data.IpBanExemptCidrs); d.HasError() {
+	if d := putJSONStringList(ctx, m, "IpBanExemptCidrs", data.IPBanExemptCidrs); d.HasError() {
 		return append(diags, d...)
 	}
 
@@ -706,7 +708,7 @@ func overlayJellyfinSecurity(ctx context.Context, m map[string]json.RawMessage, 
 		objs := make([]map[string]json.RawMessage, len(entries))
 		for i, e := range entries {
 			entry := map[string]json.RawMessage{}
-			putJSONString(entry, "UserId", e.UserId)
+			putJSONString(entry, "UserId", e.UserID)
 			putJSONString(entry, "Email", e.Email)
 			objs[i] = entry
 		}
@@ -767,8 +769,8 @@ func overlayOidcProvider(ctx context.Context, m map[string]json.RawMessage, p *O
 	putJSONString(m, "Id", p.Id)
 	putJSONString(m, "DisplayName", p.DisplayName)
 	putJSONString(m, "Preset", p.Preset)
-	putJSONString(m, "DiscoveryUrl", p.DiscoveryUrl)
-	putJSONString(m, "ClientId", p.ClientId)
+	putJSONString(m, "DiscoveryUrl", p.DiscoveryURL)
+	putJSONString(m, "ClientId", p.ClientID)
 	putJSONString(m, "ClientSecret", p.ClientSecret)
 	putDelimitedString(ctx, m, "Scopes", p.Scopes, " ")
 	putDelimitedString(ctx, m, "AcrValues", p.AcrValues, " ")
@@ -776,13 +778,13 @@ func overlayOidcProvider(ctx context.Context, m map[string]json.RawMessage, p *O
 	putDelimitedString(ctx, m, "AllowedGroups", p.AllowedGroups, ",")
 	putDelimitedString(ctx, m, "AdminGroups", p.AdminGroups, ",")
 	putJSONBool(m, "AllowAdminGroupElevation", p.AllowAdminGroupElevation)
-	putJSONString(m, "TemplateUserId", p.TemplateUserId)
+	putJSONString(m, "TemplateUserId", p.TemplateUserID)
 	putJSONBool(m, "AutoCreateUsers", p.AutoCreateUsers)
 	putJSONBool(m, "RequireIdpMfa", p.RequireIdpMfa)
 	putJSONBool(m, "BypassPluginTwoFa", p.BypassPluginTwoFa)
 	putJSONBool(m, "Enabled", p.Enabled)
 	putJSONBool(m, "ShowLoginButton", p.ShowLoginButton)
-	putJSONBool(m, "ForceHttps", p.ForceHttps)
+	putJSONBool(m, "ForceHttps", p.ForceHTTPS)
 	putJSONBool(m, "AllowPrivateNetworks", p.AllowPrivateNetworks)
 	putDelimitedString(ctx, m, "AdditionalAllowedCidrs", p.AdditionalAllowedCidrs, ",")
 	putJSONBool(m, "SyncProfilePicture", p.SyncProfilePicture)
@@ -793,7 +795,7 @@ func overlayOidcProvider(ctx context.Context, m map[string]json.RawMessage, p *O
 	putJSONString(m, "EmailClaim", p.EmailClaim)
 	putJSONBool(m, "SyncEmailFromClaim", p.SyncEmailFromClaim)
 	putJSONString(m, "ButtonText", p.ButtonText)
-	putJSONString(m, "ButtonIconUrl", p.ButtonIconUrl)
+	putJSONString(m, "ButtonIconUrl", p.ButtonIconURL)
 	putJSONBool(m, "ForcePasswordSetup", p.ForcePasswordSetup)
 
 	// RoleLibraryMappings — nested list
@@ -806,7 +808,7 @@ func overlayOidcProvider(ctx context.Context, m map[string]json.RawMessage, p *O
 		for i, rlm := range mappings {
 			entry := map[string]json.RawMessage{}
 			putJSONString(entry, "Role", rlm.Role)
-			putDelimitedString(ctx, entry, "LibraryIds", rlm.LibraryIds, ",")
+			putDelimitedString(ctx, entry, "LibraryIds", rlm.LibraryIDs, ",")
 			objs[i] = entry
 		}
 		b, _ := json.Marshal(objs)
@@ -863,9 +865,9 @@ func flattenJellyfinSecurity(ctx context.Context, raw string, data *JellyfinSecu
 	// Root scalar fields
 	data.Enabled = getJSONBool(m, "Enabled")
 	data.BlockEmptyPasswordLogin = getJSONBool(m, "BlockEmptyPasswordLogin")
-	data.RequireChallengeIpMatch = getJSONBool(m, "RequireChallengeIpMatch")
+	data.RequireChallengeIPMatch = getJSONBool(m, "RequireChallengeIpMatch")
 	data.RegisteredDeviceMaxAgeDays = getJSONInt64(m, "RegisteredDeviceMaxAgeDays")
-	data.BareDeviceIdBypassEnabled = getJSONBool(m, "BareDeviceIdBypassEnabled")
+	data.BareDeviceIDBypassEnabled = getJSONBool(m, "BareDeviceIdBypassEnabled")
 	data.RequireTwoFactorToDisable = getJSONBool(m, "RequireTwoFactorToDisable")
 	data.SelfServiceStepUpMode = getJSONString(m, "SelfServiceStepUpMode")
 	data.StepUpLevel = getJSONString(m, "StepUpLevel")
@@ -878,9 +880,9 @@ func flattenJellyfinSecurity(ctx context.Context, raw string, data *JellyfinSecu
 	data.TrustForwardedFor = getJSONBool(m, "TrustForwardedFor")
 	data.EmailOtpEnabled = getJSONBool(m, "EmailOtpEnabled")
 	data.HibpEnabled = getJSONBool(m, "HibpEnabled")
-	data.EmailOtpTtlSeconds = getJSONInt64(m, "EmailOtpTtlSeconds")
-	data.ChallengeTokenTtlSeconds = getJSONInt64(m, "ChallengeTokenTtlSeconds")
-	data.PairingCodeTtlSeconds = getJSONInt64(m, "PairingCodeTtlSeconds")
+	data.EmailOTPTTLSeconds = getJSONInt64(m, "EmailOtpTtlSeconds")
+	data.ChallengeTokenTTLSeconds = getJSONInt64(m, "ChallengeTokenTtlSeconds")
+	data.PairingCodeTTLSeconds = getJSONInt64(m, "PairingCodeTtlSeconds")
 	data.MaxFailedAttempts = getJSONInt64(m, "MaxFailedAttempts")
 	data.LockoutDurationMinutes = getJSONInt64(m, "LockoutDurationMinutes")
 	data.ExemptAdministratorsFromLockout = getJSONBool(m, "ExemptAdministratorsFromLockout")
@@ -891,36 +893,36 @@ func flattenJellyfinSecurity(ctx context.Context, raw string, data *JellyfinSecu
 	data.HideBuiltinForgotPassword = getJSONBool(m, "HideBuiltInForgotPassword")
 	data.LoginLinksBelowQuickConnect = getJSONBool(m, "LoginLinksBelowQuickConnect")
 	data.AuditLogMaxEntries = getJSONInt64(m, "AuditLogMaxEntries")
-	data.NtfyUrl = getJSONString(m, "NtfyUrl")
+	data.NtfyURL = getJSONString(m, "NtfyUrl")
 	data.NtfyTopic = getJSONString(m, "NtfyTopic")
-	data.GotifyUrl = getJSONString(m, "GotifyUrl")
+	data.GotifyURL = getJSONString(m, "GotifyUrl")
 	data.GotifyAppToken = getJSONString(m, "GotifyAppToken")
 	data.AllowPrivateNotificationTargets = getJSONBool(m, "AllowPrivateNotificationTargets")
-	data.SmtpHost = getJSONString(m, "SmtpHost")
-	data.SmtpPort = getJSONInt64(m, "SmtpPort")
-	data.SmtpUseSsl = getJSONBool(m, "SmtpUseSsl")
-	data.SmtpUsername = getJSONString(m, "SmtpUsername")
-	data.SmtpPassword = getJSONString(m, "SmtpPassword")
-	data.SmtpFromAddress = getJSONString(m, "SmtpFromAddress")
-	data.SmtpFromName = getJSONString(m, "SmtpFromName")
+	data.SMTPHost = getJSONString(m, "SmtpHost")
+	data.SMTPPort = getJSONInt64(m, "SmtpPort")
+	data.SMTPUseSsl = getJSONBool(m, "SmtpUseSsl")
+	data.SMTPUsername = getJSONString(m, "SmtpUsername")
+	data.SMTPPassword = getJSONString(m, "SmtpPassword")
+	data.SMTPFromAddress = getJSONString(m, "SmtpFromAddress")
+	data.SMTPFromName = getJSONString(m, "SmtpFromName")
 	data.TotpIssuerName = getJSONString(m, "TotpIssuerName")
 	data.DefaultLanguage = getJSONString(m, "DefaultLanguage")
 	data.PreVerifyWindowSeconds = getJSONInt64(m, "PreVerifyWindowSeconds")
-	data.TrustCookieTtlDays = getJSONInt64(m, "TrustCookieTtlDays")
-	data.NatHairpinSelfIpBypass = getJSONBool(m, "NatHairpinSelfIpBypass")
+	data.TrustCookieTTLDays = getJSONInt64(m, "TrustCookieTtlDays")
+	data.NatHairpinSelfIPBypass = getJSONBool(m, "NatHairpinSelfIpBypass")
 	data.DefaultMaxConcurrentSessions = getJSONInt64(m, "DefaultMaxConcurrentSessions")
 	data.EnrollmentDeadline = getJSONString(m, "EnrollmentDeadline")
-	data.WebhookUrl = getJSONString(m, "WebhookUrl")
+	data.WebhookURL = getJSONString(m, "WebhookUrl")
 	data.WebhookSecret = getJSONString(m, "WebhookSecret")
-	data.GeoIpAsnDbPath = getJSONString(m, "GeoIpAsnDbPath")
-	data.GeoIpCountryDbPath = getJSONString(m, "GeoIpCountryDbPath")
-	data.WebauthnRpId = getJSONString(m, "WebAuthnRpId")
+	data.GeoIPAsnDbPath = getJSONString(m, "GeoIpAsnDbPath")
+	data.GeoIPCountryDbPath = getJSONString(m, "GeoIpCountryDbPath")
+	data.WebauthnRpID = getJSONString(m, "WebAuthnRpId")
 	data.BypassForExternalAuthProviders = getJSONBool(m, "BypassForExternalAuthProviders")
-	data.GeoIpCityDbPath = getJSONString(m, "GeoIpCityDbPath")
-	data.IpBanEnabled = getJSONBool(m, "IpBanEnabled")
-	data.IpBanFailureThreshold = getJSONInt64(m, "IpBanFailureThreshold")
-	data.IpBanFailureWindowMinutes = getJSONInt64(m, "IpBanFailureWindowMinutes")
-	data.IpBanDurationHours = getJSONInt64(m, "IpBanDurationHours")
+	data.GeoIPCityDbPath = getJSONString(m, "GeoIpCityDbPath")
+	data.IPBanEnabled = getJSONBool(m, "IpBanEnabled")
+	data.IPBanFailureThreshold = getJSONInt64(m, "IpBanFailureThreshold")
+	data.IPBanFailureWindowMinutes = getJSONInt64(m, "IpBanFailureWindowMinutes")
+	data.IPBanDurationHours = getJSONInt64(m, "IpBanDurationHours")
 	data.ImpossibleTravelEnabled = getJSONBool(m, "ImpossibleTravelEnabled")
 	data.ImpossibleTravelMaxKmh = getJSONInt64(m, "ImpossibleTravelMaxKmh")
 	data.WebhookEd25519PrivateKey = getJSONString(m, "WebhookEd25519PrivateKey")
@@ -942,7 +944,7 @@ func flattenJellyfinSecurity(ctx context.Context, raw string, data *JellyfinSecu
 	diags.Append(d...)
 	data.WebauthnOrigins, d = getJSONStringList(ctx, m, "WebAuthnOrigins")
 	diags.Append(d...)
-	data.IpBanExemptCidrs, d = getJSONStringList(ctx, m, "IpBanExemptCidrs")
+	data.IPBanExemptCidrs, d = getJSONStringList(ctx, m, "IpBanExemptCidrs")
 	diags.Append(d...)
 
 	// UserEmails
@@ -953,7 +955,7 @@ func flattenJellyfinSecurity(ctx context.Context, raw string, data *JellyfinSecu
 }
 
 // flattenUserEmails reads the UserEmails array from the server response.
-func flattenUserEmails(ctx context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
+func flattenUserEmails(_ context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
 	raw, ok := m["UserEmails"]
 	if !ok || isJSONNull(raw) {
 		return types.ListNull(types.ObjectType{AttrTypes: userEmailEntryObjectTypes()})
@@ -1037,11 +1039,11 @@ func flattenRoleLibraryMappings(ctx context.Context, m map[string]json.RawMessag
 	objType := types.ObjectType{AttrTypes: roleLibraryMappingObjectTypes()}
 	objects := make([]attr.Value, len(entries))
 	for i, entry := range entries {
-		libraryIds, d := getDelimitedStringList(ctx, entry, "LibraryIds", ",")
+		libraryIDs, d := getDelimitedStringList(ctx, entry, "LibraryIds", ",")
 		diags.Append(d...)
 		attrs := map[string]attr.Value{
 			"role":        getJSONString(entry, "Role"),
-			"library_ids": libraryIds,
+			"library_ids": libraryIDs,
 		}
 		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
 		if d.HasError() {
@@ -1107,7 +1109,7 @@ func oidcProviderObjectTypes() map[string]attr.Type {
 		"button_text":                 types.StringType,
 		"button_icon_url":             types.StringType,
 		"force_password_setup":        types.BoolType,
-		"created_at":                   types.StringType,
+		"created_at":                  types.StringType,
 	}
 }
 
