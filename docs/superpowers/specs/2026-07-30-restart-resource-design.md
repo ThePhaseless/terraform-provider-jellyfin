@@ -24,10 +24,10 @@ workflow succeeds in a single `terraform apply`.
     which only checks `GetInstalledPlugins` (the installed list, populated pre-restart) —
     so it **passes even when the plugin is not loaded**, then `apply` calls
     `GetPluginConfiguration` and fails (`jellyfin_security_plugin_configuration_resource.go:506-518`, `:550`).
-- Jellyfin only loads plugins on startup/restart. `[INFERENCE — Jellyfin runtime behavior.
-  The repo proves the provider writes that endpoint and only guards on the installed list.
-  Exact pre-restart failure mode (404 vs. default-config drift) to be confirmed by a smoke
-  test against the bundled docker-compose during implementation.]`
+- Jellyfin only loads plugins on startup/restart. **Verified** against Jellyfin 10.11.11
+  (see "Verification"): installing a plugin flips `HasPendingRestart` to `true`, and
+  `GET /Plugins/{id}/Configuration` returns **404** until the server restarts and loads the
+  plugin — so the configuration resources genuinely cannot run pre-restart.
 - No restart endpoint is called anywhere in the provider (grep for `/System/Restart`,
   `RestartServer`, `Restart(`, `Shutdown` → no matches). `HasPendingRestart` is parsed
   in `SystemInfo` (`internal/client/system.go:19`) but never surfaced — the
@@ -99,16 +99,21 @@ restart do not add the resource. Documented explicitly in the resource descripti
 Blocking is what makes the `plugin → restart → plugin_configuration` workflow work in one
 apply — a fire-and-forget restart would race the configuration resource that follows it.
 
-After `POST /System/Restart` the HTTP API becomes unavailable (connection refused / 503),
-then returns. Poll using the **existing** retry pattern from `getPublicSystemInfo`
-(`internal/provider/provider.go:209-231`, `startupStatusDelay = 1s`):
+After `POST /System/Restart` the server keeps answering briefly (still pending), then the
+HTTP API becomes unavailable mid-restart (connection refused / 503 / non-JSON), then returns
+with `HasPendingRestart == false`. **Verified on Jellyfin 10.11.11:** the whole cycle took
+~6s, and a bare `200` from `/System/Info/Public` would have falsely declared "ready" ~1s in
+(while still pending) — so `HasPendingRestart` is the readiness signal, not a bare `200`.
 
-1. Poll `GET /System/Info/Public` (no-auth, available earliest), retrying on connection
-   errors and 503, until it responds 200 — server is back up.
-2. Then `GET /System/Info` and confirm `HasPendingRestart == false` — restart fully
-   completed and plugins loaded. `[INFERENCE: HasPendingRestart clears after restart
-   completes; confirm in smoke test.]` If still pending once the API is up, keep polling
-   within the remaining `timeout` budget.
+Readiness check (poll loop reusing the **existing** `startupStatusDelay = 1s` pattern from
+`getPublicSystemInfo`, `internal/provider/provider.go:209-231`):
+
+1. `GET /System/Info` (authenticated; it carries `HasPendingRestart`). Treat any non-2xx,
+   connection error, or JSON-decode failure as "not ready" and keep polling — these are the
+   expected mid-restart states.
+2. Ready when the call returns 2xx **and** `HasPendingRestart == false`. (A 2xx response
+   with `HasPendingRestart == true` means the old instance is still shutting down — keep
+   polling within the remaining `timeout` budget.)
 
 Bounded by `timeout` (default 120s). On timeout: return a diagnostic error and do **not**
 set state, so the next apply re-fires Create. Acknowledged trade-off: a re-fire after a
@@ -150,6 +155,25 @@ changes → restart resource planned for replace → apply: Delete(no-op) + Crea
 `/System/Restart`, wait ready) → `jellyfin_security_plugin_configuration` (depends_on the
 restart) runs against a **loaded** plugin. One apply, end to end.
 
+## Verification (Jellyfin 10.11.11, containerized)
+
+Run against a fresh `jellyfin/jellyfin:10.11.11` container (host port 8097) with the
+`Bookshelf` plugin from the stable repository:
+
+- **Q1** `HasPendingRestart`: `False` before install → **`True`** immediately after
+  `POST /Packages/Installed/Bookshelf` (plugin appears in `/Plugins` in ~1s, but is not loaded).
+- **Q2** `GET /Plugins/{id}/Configuration` **pre-restart** → **HTTP 404**
+  `{"title":"Not Found","status":404}`. The plugin-served config endpoint is dead until load.
+- **Q3** `POST /System/Restart` → `204`; polling `GET /System/Info`: ~1s still `200` with
+  `HasPendingRestart=true` (old instance shutting down), then unreachable ~4s, then `200`
+  with **`HasPendingRestart=false`** at ~6s. Restart clears the pending flag.
+- **Q4** `GET /Plugins/{id}/Configuration` **post-restart** → **HTTP 200**
+  `{"ComicVineApiKey":""}`. Plugin loaded; the `plugin → restart → configuration` workflow
+  succeeds.
+
+Confirms: plugin install sets pending restart; the config endpoint 404s pre-restart and 200s
+post-restart; `HasPendingRestart` is the correct readiness signal (a bare `200` races).
+
 ## Files
 
 - New: `internal/provider/restart_resource.go`
@@ -168,13 +192,11 @@ restart) runs against a **loaded** plugin. One apply, end to end.
 - **Acceptance test** (`restart_resource_test.go`) exercising the full workflow against the
   bundled docker-compose Jellyfin: install plugin → restart → configure, following
   `plugin_resource_test.go` / `plugin_configuration_resource_test.go` patterns.
-- **Smoke test** (folded into the acc test or run manually): confirm the pre-restart
-  behavior of `/Plugins/{id}/Configuration` (the `[INFERENCE]` above) — i.e. that the
-  config resource genuinely needs the restart.
+- The pre-restart/post-restart behavior of `/Plugins/{id}/Configuration` and the
+  `HasPendingRestart` lifecycle were already verified manually against Jellyfin 10.11.11
+  (see "Verification"); the acceptance test should lock that behavior in as a regression.
 
 ## Open items for the implementation plan
 
-- Confirm the exact pre-restart failure mode of `/Plugins/{id}/Configuration` (smoke test).
 - Confirm the framework plan-modifier API for `RequiresReplace` on a map attribute and the
   default-value convention used by existing resources, against the `go.mod` framework version.
-- Confirm `HasPendingRestart` clears promptly after restart (smoke test).
