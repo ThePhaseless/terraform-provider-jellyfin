@@ -20,6 +20,7 @@ func TestAccSystemInfoDataSource(t *testing.T) {
 					resource.TestCheckResourceAttrSet("data.jellyfin_system_info.test", "id"),
 					resource.TestCheckResourceAttrSet("data.jellyfin_system_info.test", "version"),
 					resource.TestCheckResourceAttrSet("data.jellyfin_system_info.test", "server_name"),
+					resource.TestCheckResourceAttrSet("data.jellyfin_system_info.test", "pending_restart"),
 				),
 			},
 		},

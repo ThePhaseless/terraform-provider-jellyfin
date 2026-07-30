@@ -33,6 +33,7 @@ type SystemInfoDataSourceModel struct {
 	Version         types.String `tfsdk:"version"`
 	OperatingSystem types.String `tfsdk:"operating_system"`
 	LocalAddress    types.String `tfsdk:"local_address"`
+	PendingRestart  types.Bool   `tfsdk:"pending_restart"`
 }
 
 func (d *SystemInfoDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -69,6 +70,11 @@ func (d *SystemInfoDataSource) Schema(_ context.Context, _ datasource.SchemaRequ
 				MarkdownDescription: "The local network address of the server.",
 				Computed:            true,
 			},
+			"pending_restart": schema.BoolAttribute{
+				Description:         "Whether the Jellyfin server has a pending restart (e.g. after a plugin install). True until the server is restarted.",
+				MarkdownDescription: "Whether the Jellyfin server has a pending restart (e.g. after a plugin install). True until the server is restarted.",
+				Computed:            true,
+			},
 		},
 	}
 }
@@ -103,6 +109,7 @@ func (d *SystemInfoDataSource) Read(ctx context.Context, _ datasource.ReadReques
 		Version:         types.StringValue(info.Version),
 		OperatingSystem: types.StringValue(info.OperatingSystem),
 		LocalAddress:    types.StringValue(info.LocalAddress),
+		PendingRestart:  types.BoolValue(info.HasPendingRestart),
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
