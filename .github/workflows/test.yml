@@ -85,6 +85,16 @@ jobs:
         # Disable Go test caching because these tests depend on the Jellyfin container state from the prior step.
         run: go test -count=1 -v -timeout 5m -run 'TestAcc' ./cmd/jellyfin-import/
 
+      - name: Run restart acceptance test (isolated)
+        # Runs the disruptive jellyfin_restart test on its own, after the rest of
+        # the suite, so its server restart cannot disrupt other acceptance tests
+        # sharing this Jellyfin. The main "Run acceptance tests" step leaves
+        # JELLYFIN_RESTART_ACC unset, so TestAccRestartResource skips there.
+        env:
+          TF_ACC: "1"
+          JELLYFIN_RESTART_ACC: "1"
+        run: go test -count=1 -v -timeout 5m -run TestAccRestartResource ./internal/provider/
+
       - name: Stop Jellyfin
         if: always()
         run: docker compose --env-file internal/provider/supported_jellyfin_version.env down -v
