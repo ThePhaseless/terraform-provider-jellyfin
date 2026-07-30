@@ -28,5 +28,6 @@ output "server_version" {
 - `id` (String) The unique server identifier.
 - `local_address` (String) The local network address of the server.
 - `operating_system` (String) The server operating system.
+- `pending_restart` (Boolean) Whether the Jellyfin server has a pending restart (e.g. after a plugin install). True until the server is restarted.
 - `server_name` (String) The server name.
 - `version` (String) The Jellyfin server version.
