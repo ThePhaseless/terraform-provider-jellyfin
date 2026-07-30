@@ -262,6 +262,7 @@ func (p *JellyfinProvider) Resources(_ context.Context) []func() resource.Resour
 		NewLiveTVConfigurationResource,
 		NewMetadataConfigurationResource,
 		NewAPIKeyResource,
+		NewRestartResource,
 	}
 }
 
