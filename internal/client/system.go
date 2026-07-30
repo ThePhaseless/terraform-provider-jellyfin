@@ -97,6 +97,16 @@ func (c *Client) UpdateSystemConfiguration(ctx context.Context, config *SystemCo
 	return nil
 }
 
+// RestartServer restarts the Jellyfin server. The HTTP API becomes unavailable
+// while the server restarts; callers should poll GetSystemInfo until
+// HasPendingRestart is false before issuing further requests.
+func (c *Client) RestartServer(ctx context.Context) error {
+	if err := c.post(ctx, "/System/Restart", nil); err != nil {
+		return fmt.Errorf("restarting server: %w", err)
+	}
+	return nil
+}
+
 // EncodingOptions represents the encoding configuration.
 // RawJSON stores the complete JSON since the configuration is very complex.
 type EncodingOptions struct {

@@ -125,6 +125,25 @@ func TestUserAndAuthResponsesUseJellyfinIDCasing(t *testing.T) {
 	}
 }
 
+func TestRestartServerPostsSystemRestart(t *testing.T) {
+	t.Parallel()
+
+	var gotMethod, gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	if err := NewClient(server.URL, "test-key").RestartServer(context.Background()); err != nil {
+		t.Fatalf("RestartServer() error = %v", err)
+	}
+
+	if gotMethod != http.MethodPost || gotPath != "/System/Restart" {
+		t.Fatalf("expected POST /System/Restart, got %s %s", gotMethod, gotPath)
+	}
+}
+
 func writeJSON(t *testing.T, w http.ResponseWriter, v interface{}) {
 	t.Helper()
 
