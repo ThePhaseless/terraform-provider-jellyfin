@@ -154,24 +154,56 @@ func (r *RestartResource) Delete(_ context.Context, _ resource.DeleteRequest, _ 
 	// Nothing to undo on the server; just drop from state.
 }
 
-// waitForServerReady polls /System/Info until the server responds and
-// HasPendingRestart is false, indicating the restart completed and plugins are
-// loaded. Any HTTP/network/decode error (the expected mid-restart states) is
-// treated as "not ready" and retried. Reuses startupStatusDelay from provider.go.
+// waitForServerReady blocks until a restart already requested has completed,
+// or timeout elapses.
 func waitForServerReady(ctx context.Context, c *client.Client, timeout time.Duration) error {
+	return awaitRestart(ctx, c, timeout, startupStatusDelay)
+}
+
+// awaitRestart waits for the server to stop answering, then for it to answer
+// again with no restart pending.
+//
+// Watching only for a healthy response is not enough: Jellyfin keeps serving
+// for a moment after it accepts POST /System/Restart, so the first poll reads
+// the process that is about to exit and reports success before the restart has
+// begun. Callers that then write configuration would have it overwritten when
+// the server reloads from disk, so a server that never goes away is an error
+// rather than an early success. Any HTTP/network/decode error is an outage.
+func awaitRestart(ctx context.Context, c *client.Client, timeout, poll time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	for {
-		if time.Now().After(deadline) {
-			return fmt.Errorf("server did not report ready (HasPendingRestart=false) within %s", timeout)
+	downBy := time.Now().Add(timeout / 2)
+
+	var wentDown bool
+	for !wentDown && time.Now().Before(downBy) {
+		if _, err := c.GetSystemInfo(ctx); err != nil {
+			wentDown = true
+			break
 		}
+		if err := pause(ctx, poll); err != nil {
+			return err
+		}
+	}
+	if !wentDown {
+		return fmt.Errorf("server kept answering for %s after the restart request; it does not appear to have restarted", timeout/2)
+	}
+
+	for time.Now().Before(deadline) {
 		if info, err := c.GetSystemInfo(ctx); err == nil && !info.HasPendingRestart {
 			return nil
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(startupStatusDelay):
+		if err := pause(ctx, poll); err != nil {
+			return err
 		}
+	}
+	return fmt.Errorf("server did not report ready (HasPendingRestart=false) within %s", timeout)
+}
+
+func pause(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
 	}
 }
 

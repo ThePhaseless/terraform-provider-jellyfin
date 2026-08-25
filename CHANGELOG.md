@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-25
+
+### Fixed
+
+- `jellyfin_restart`: wait for the server to stop answering before waiting for it to come back. Jellyfin keeps serving for a moment after accepting `POST /System/Restart`, so the previous wait polled the outgoing process, saw `HasPendingRestart=false`, and reported the restart complete within seconds. A following resource then wrote configuration that the restart discarded, or failed outright because the plugin had not loaded yet.
+
 ## [0.3.1] - 2026-08-25
 
 ### Changed
