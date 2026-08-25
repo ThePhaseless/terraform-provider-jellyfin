@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-25
+
+### Changed
+
+- Declared support for Jellyfin 10.11.11 and JellyfinSecurity plugin 2.5.22 (versions tested in CI).
+
 ### Added
 
 - `jellyfin_security_plugin_configuration`: `ntfy_token`, `ntfy_username` and `ntfy_password` for authenticated ntfy topics, and `webhook_headers` for webhook receivers that authenticate by header (JellyfinSecurity 2.5.21).
