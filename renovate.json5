@@ -52,6 +52,14 @@
       "automerge": false
     },
     {
+      // A fork of hashicorp/copywrite, patched and pinned. Following its
+      // dependencies past what upstream pins only widens the diff it carries.
+      "description": "No major bumps inside the vendored copywrite fork.",
+      "matchFileNames": ["tools/copywrite-patched/**"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
       // Safe to automerge because schema-check.yaml fails the PR when the
       // plugin's public config properties changed across the bump.
       "matchPackageNames": ["JellyfinSecurity"],
