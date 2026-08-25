@@ -54,4 +54,6 @@ jobs:
   release:
     needs: tag
     uses: ./.github/workflows/release.yml
+    with:
+      ref: ${{ needs.tag.outputs.tag }}
     secrets: inherit

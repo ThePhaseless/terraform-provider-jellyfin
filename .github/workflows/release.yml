@@ -7,7 +7,13 @@ on:
   push:
     tags:
       - 'v*'
+  # A called workflow runs at the caller's ref, so a caller that has just
+  # created a tag has to name it here or goreleaser sees the pre-tag commit.
   workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: false
 
 jobs:
   goreleaser:
@@ -19,6 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref || github.ref }}
           # Allow goreleaser to access older tag information.
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
