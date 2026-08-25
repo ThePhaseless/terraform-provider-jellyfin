@@ -174,7 +174,7 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 
 		id, err := r.waitForPlugin(ctx, data.Name.ValueString(), data.Version.ValueString(), pluginInstallTimeout)
 		if err != nil {
-			resp.Diagnostics.AddError("Plugin installed but not found in installed list", err.Error())
+			resp.Diagnostics.AddError("Plugin install did not complete", err.Error())
 			return
 		}
 		pluginID = id
