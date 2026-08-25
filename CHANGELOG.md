@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `jellyfin_plugin`: wait for the requested *version* to appear, not just the plugin name. Jellyfin's install is asynchronous and returns well before the download lands, so a name-only match let create return while the previous version was still the only one on disk — and a `jellyfin_restart` sequenced after it would reload that older assembly. The same match now also decides whether an install is needed at all, so changing the pinned version no longer sees the old version and skips the install. Three- and four-segment versions compare equal, so `2.5.22` and `2.5.22.0` both work.
+
 ## [0.3.4] - 2026-08-25
 
 ### Changed

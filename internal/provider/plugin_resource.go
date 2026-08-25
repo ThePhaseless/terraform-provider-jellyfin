@@ -21,6 +21,13 @@ import (
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
+// pluginInstallTimeout bounds the wait for a Jellyfin install to land on disk;
+// the download runs asynchronously after the API call returns.
+const (
+	pluginInstallTimeout = 2 * time.Minute
+	pluginPollInterval   = 2 * time.Second
+)
+
 var (
 	_ resource.Resource                = &PluginResource{}
 	_ resource.ResourceWithImportState = &PluginResource{}
@@ -145,10 +152,10 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 	data.Version = types.StringValue(resolvedVersion)
 
-	// Check if the plugin is already installed. Jellyfin returns 404 when
-	// POSTing an install for a plugin that is already present, so we detect
-	// that case up front and treat it as idempotent rather than erroring.
-	pluginID, err := r.findInstalledPlugin(ctx, data.Name.ValueString())
+	// Jellyfin returns 404 when POSTing an install for a version that is
+	// already present, so detect that up front and treat it as idempotent
+	// rather than erroring.
+	pluginID, err := r.findInstalledPlugin(ctx, data.Name.ValueString(), data.Version.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to check installed plugins", err.Error())
 		return
@@ -165,8 +172,7 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 			}
 		}
 
-		// Wait for the plugin to appear in the installed list.
-		id, err := r.waitForPlugin(ctx, data.Name.ValueString(), 30*time.Second)
+		id, err := r.waitForPlugin(ctx, data.Name.ValueString(), data.Version.ValueString(), pluginInstallTimeout)
 		if err != nil {
 			resp.Diagnostics.AddError("Plugin installed but not found in installed list", err.Error())
 			return
@@ -239,20 +245,37 @@ func (r *PluginResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	}
 }
 
-func (r *PluginResource) waitForPlugin(ctx context.Context, name string, timeout time.Duration) (string, error) {
+// waitForPlugin blocks until name is installed at version and returns its id.
+//
+// Matching the version, not just the name, is what lets a caller restart the
+// server afterwards and be sure it loads the assembly this install put down:
+// Jellyfin's install is asynchronous and returns long before the download
+// lands, so a name-only match returns while the previous version is still the
+// only one on disk. Jellyfin registers the new version as soon as it is
+// written, with status "Restart" and the version it replaces "Superceded", so
+// this does not wait on a restart that has not happened yet.
+func (r *PluginResource) waitForPlugin(ctx context.Context, name, version string, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
+	var seen string
 	for time.Now().Before(deadline) {
 		plugins, err := r.client.GetInstalledPlugins(ctx)
 		if err != nil {
 			return "", err
 		}
 		for _, p := range plugins {
-			if p.Name == name {
+			if p.Name != name {
+				continue
+			}
+			if samePluginVersion(p.Version, version) {
 				return p.ID, nil
 			}
+			seen = p.Version
 		}
-		tflog.Debug(ctx, "Waiting for plugin to appear", map[string]interface{}{"plugin": name})
-		time.Sleep(2 * time.Second)
+		tflog.Debug(ctx, "Waiting for plugin to appear", map[string]interface{}{"plugin": name, "version": version, "seen": seen})
+		time.Sleep(pluginPollInterval)
+	}
+	if seen != "" {
+		return "", fmt.Errorf("plugin %q is installed at %s but %s did not appear within %s", name, seen, version, timeout)
 	}
 	return "", fmt.Errorf("plugin %q did not appear within %s", name, timeout)
 }
@@ -269,17 +292,28 @@ func (r *PluginResource) ImportState(ctx context.Context, req resource.ImportSta
 
 // findInstalledPlugin returns the plugin ID if a plugin with the given name is
 // already installed, or an empty string if it is not.
-func (r *PluginResource) findInstalledPlugin(ctx context.Context, name string) (string, error) {
+func (r *PluginResource) findInstalledPlugin(ctx context.Context, name, version string) (string, error) {
 	plugins, err := r.client.GetInstalledPlugins(ctx)
 	if err != nil {
 		return "", fmt.Errorf("listing installed plugins: %w", err)
 	}
 	for _, p := range plugins {
-		if p.Name == name {
+		if p.Name == name && samePluginVersion(p.Version, version) {
 			return p.ID, nil
 		}
 	}
 	return "", nil
+}
+
+// samePluginVersion reports whether two plugin versions denote the same
+// release. Jellyfin reports four-segment assembly versions (2.5.22.0) while a
+// configuration may carry the three-segment release (2.5.22), so the trailing
+// zero must not make them differ. An empty want matches anything.
+func samePluginVersion(got, want string) bool {
+	if want == "" {
+		return true
+	}
+	return compareDottedVersions(got, want) == 0
 }
 
 // resolveRepositoryURL attempts to find the repository URL for a plugin by
