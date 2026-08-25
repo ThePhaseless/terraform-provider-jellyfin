@@ -162,7 +162,7 @@ func waitForServerReady(ctx context.Context, c *client.Client, timeout time.Dura
 	deadline := time.Now().Add(timeout)
 	for {
 		if time.Now().After(deadline) {
-			return fmt.Errorf("Jellyfin server did not report ready (HasPendingRestart=false) within %s", timeout)
+			return fmt.Errorf("server did not report ready (HasPendingRestart=false) within %s", timeout)
 		}
 		if info, err := c.GetSystemInfo(ctx); err == nil && !info.HasPendingRestart {
 			return nil
