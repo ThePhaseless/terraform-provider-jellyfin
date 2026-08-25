@@ -63,8 +63,11 @@ Manages the JellyfinSecurity plugin configuration with typed attributes.
 - `max_failed_attempts` (Number) Max failed auth attempts before lockout.
 - `nat_hairpin_self_ip_bypass` (Boolean) Enable NAT hairpin self-IP bypass.
 - `notify_email_addresses` (List of String) Email addresses to notify.
+- `ntfy_password` (String, Sensitive) ntfy password for HTTP Basic auth.
+- `ntfy_token` (String, Sensitive) ntfy access token; takes precedence over ntfy_username/ntfy_password.
 - `ntfy_topic` (String) ntfy notification topic.
 - `ntfy_url` (String) ntfy notification URL.
+- `ntfy_username` (String) ntfy username for HTTP Basic auth; used only when ntfy_token is empty.
 - `oidc_providers` (Attributes List) List of OIDC provider configurations. (see [below for nested schema](#nestedatt--oidc_providers))
 - `onboarding_password_min_length` (Number) Onboarding password minimum length.
 - `onboarding_password_require_digit` (Boolean) Require digit in onboarding passwords.
@@ -95,6 +98,7 @@ Manages the JellyfinSecurity plugin configuration with typed attributes.
 - `webauthn_origins` (List of String) WebAuthn allowed origins.
 - `webauthn_rp_id` (String) WebAuthn relying party ID.
 - `webhook_ed25519_private_key` (String, Sensitive) Webhook Ed25519 private key.
+- `webhook_headers` (List of String) Extra webhook headers, one "Name: Value" entry each.
 - `webhook_secret` (String, Sensitive) Webhook signing secret.
 - `webhook_url` (String) Webhook notification URL.
 
@@ -133,6 +137,8 @@ Optional:
 - `prompt_select_account` (Boolean) Prompt for account selection.
 - `require_idp_mfa` (Boolean) Require IdP MFA.
 - `role_library_mappings` (Attributes List) Role-to-library access mappings. (see [below for nested schema](#nestedatt--oidc_providers--role_library_mappings))
+- `rp_initiated_logout_enabled` (Boolean) End the provider session on Jellyfin sign-out (OIDC RP-Initiated Logout).
+- `rp_initiated_logout_redirect_uri` (String) Absolute https post_logout_redirect_uri; must be registered at the IdP.
 - `scopes` (List of String) OIDC scopes (space-delimited on wire).
 - `show_login_button` (Boolean) Show login button for this provider.
 - `sync_email_from_claim` (Boolean) Sync email from claim.

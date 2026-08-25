@@ -76,6 +76,9 @@ type JellyfinSecurityPluginConfigurationResourceModel struct {
 	AuditLogMaxEntries                 types.Int64  `tfsdk:"audit_log_max_entries"`
 	NtfyURL                            types.String `tfsdk:"ntfy_url"`
 	NtfyTopic                          types.String `tfsdk:"ntfy_topic"`
+	NtfyToken                          types.String `tfsdk:"ntfy_token"`
+	NtfyUsername                       types.String `tfsdk:"ntfy_username"`
+	NtfyPassword                       types.String `tfsdk:"ntfy_password"`
 	GotifyURL                          types.String `tfsdk:"gotify_url"`
 	GotifyAppToken                     types.String `tfsdk:"gotify_app_token"`
 	AllowPrivateNotificationTargets    types.Bool   `tfsdk:"allow_private_notification_targets"`
@@ -97,6 +100,7 @@ type JellyfinSecurityPluginConfigurationResourceModel struct {
 	EnrollmentDeadline                 types.String `tfsdk:"enrollment_deadline"`
 	WebhookURL                         types.String `tfsdk:"webhook_url"`
 	WebhookSecret                      types.String `tfsdk:"webhook_secret"`
+	WebhookHeaders                     types.List   `tfsdk:"webhook_headers"`
 	GeoIPAsnDbPath                     types.String `tfsdk:"geo_ip_asn_db_path"`
 	GeoIPCountryDbPath                 types.String `tfsdk:"geo_ip_country_db_path"`
 	WebauthnRpID                       types.String `tfsdk:"webauthn_rp_id"`
@@ -121,39 +125,41 @@ type JellyfinSecurityPluginConfigurationResourceModel struct {
 
 // OidcProviderModel describes an OIDC provider configuration.
 type OidcProviderModel struct {
-	ID                       types.String `tfsdk:"id"`
-	DisplayName              types.String `tfsdk:"display_name"`
-	Preset                   types.String `tfsdk:"preset"`
-	DiscoveryURL             types.String `tfsdk:"discovery_url"`
-	ClientID                 types.String `tfsdk:"client_id"`
-	ClientSecret             types.String `tfsdk:"client_secret"`
-	Scopes                   types.List   `tfsdk:"scopes"`
-	AcrValues                types.List   `tfsdk:"acr_values"`
-	UsernameClaim            types.String `tfsdk:"username_claim"`
-	AllowedGroups            types.List   `tfsdk:"allowed_groups"`
-	AdminGroups              types.List   `tfsdk:"admin_groups"`
-	AllowAdminGroupElevation types.Bool   `tfsdk:"allow_admin_group_elevation"`
-	TemplateUserID           types.String `tfsdk:"template_user_id"`
-	AutoCreateUsers          types.Bool   `tfsdk:"auto_create_users"`
-	RequireIdpMfa            types.Bool   `tfsdk:"require_idp_mfa"`
-	BypassPluginTwoFa        types.Bool   `tfsdk:"bypass_plugin_two_fa"`
-	Enabled                  types.Bool   `tfsdk:"enabled"`
-	ShowLoginButton          types.Bool   `tfsdk:"show_login_button"`
-	ForceHTTPS               types.Bool   `tfsdk:"force_https"`
-	AllowPrivateNetworks     types.Bool   `tfsdk:"allow_private_networks"`
-	AdditionalAllowedCidrs   types.List   `tfsdk:"additional_allowed_cidrs"`
-	SyncProfilePicture       types.Bool   `tfsdk:"sync_profile_picture"`
-	PictureClaim             types.String `tfsdk:"picture_claim"`
-	PromptSelectAccount      types.Bool   `tfsdk:"prompt_select_account"`
-	OmitPromptLogin          types.Bool   `tfsdk:"omit_prompt_login"`
-	ApplyRoleLibraryAccess   types.Bool   `tfsdk:"apply_role_library_access"`
-	RoleLibraryMappings      types.List   `tfsdk:"role_library_mappings"`
-	EmailClaim               types.String `tfsdk:"email_claim"`
-	SyncEmailFromClaim       types.Bool   `tfsdk:"sync_email_from_claim"`
-	ButtonText               types.String `tfsdk:"button_text"`
-	ButtonIconURL            types.String `tfsdk:"button_icon_url"`
-	ForcePasswordSetup       types.Bool   `tfsdk:"force_password_setup"`
-	CreatedAt                types.String `tfsdk:"created_at"`
+	ID                           types.String `tfsdk:"id"`
+	DisplayName                  types.String `tfsdk:"display_name"`
+	Preset                       types.String `tfsdk:"preset"`
+	DiscoveryURL                 types.String `tfsdk:"discovery_url"`
+	ClientID                     types.String `tfsdk:"client_id"`
+	ClientSecret                 types.String `tfsdk:"client_secret"`
+	Scopes                       types.List   `tfsdk:"scopes"`
+	AcrValues                    types.List   `tfsdk:"acr_values"`
+	UsernameClaim                types.String `tfsdk:"username_claim"`
+	AllowedGroups                types.List   `tfsdk:"allowed_groups"`
+	AdminGroups                  types.List   `tfsdk:"admin_groups"`
+	AllowAdminGroupElevation     types.Bool   `tfsdk:"allow_admin_group_elevation"`
+	TemplateUserID               types.String `tfsdk:"template_user_id"`
+	AutoCreateUsers              types.Bool   `tfsdk:"auto_create_users"`
+	RequireIdpMfa                types.Bool   `tfsdk:"require_idp_mfa"`
+	BypassPluginTwoFa            types.Bool   `tfsdk:"bypass_plugin_two_fa"`
+	Enabled                      types.Bool   `tfsdk:"enabled"`
+	ShowLoginButton              types.Bool   `tfsdk:"show_login_button"`
+	ForceHTTPS                   types.Bool   `tfsdk:"force_https"`
+	AllowPrivateNetworks         types.Bool   `tfsdk:"allow_private_networks"`
+	AdditionalAllowedCidrs       types.List   `tfsdk:"additional_allowed_cidrs"`
+	SyncProfilePicture           types.Bool   `tfsdk:"sync_profile_picture"`
+	PictureClaim                 types.String `tfsdk:"picture_claim"`
+	PromptSelectAccount          types.Bool   `tfsdk:"prompt_select_account"`
+	OmitPromptLogin              types.Bool   `tfsdk:"omit_prompt_login"`
+	ApplyRoleLibraryAccess       types.Bool   `tfsdk:"apply_role_library_access"`
+	RoleLibraryMappings          types.List   `tfsdk:"role_library_mappings"`
+	EmailClaim                   types.String `tfsdk:"email_claim"`
+	SyncEmailFromClaim           types.Bool   `tfsdk:"sync_email_from_claim"`
+	ButtonText                   types.String `tfsdk:"button_text"`
+	ButtonIconURL                types.String `tfsdk:"button_icon_url"`
+	ForcePasswordSetup           types.Bool   `tfsdk:"force_password_setup"`
+	RpInitiatedLogoutEnabled     types.Bool   `tfsdk:"rp_initiated_logout_enabled"`
+	RpInitiatedLogoutRedirectURI types.String `tfsdk:"rp_initiated_logout_redirect_uri"`
+	CreatedAt                    types.String `tfsdk:"created_at"`
 }
 
 // RoleLibraryMappingModel describes a role-to-library mapping entry.
@@ -290,6 +296,9 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 			"audit_log_max_entries":              optionalInt("Max audit log entries."),
 			"ntfy_url":                           optionalString("ntfy notification URL."),
 			"ntfy_topic":                         optionalString("ntfy notification topic."),
+			"ntfy_token":                         sensitiveString("ntfy access token; takes precedence over ntfy_username/ntfy_password."),
+			"ntfy_username":                      optionalString("ntfy username for HTTP Basic auth; used only when ntfy_token is empty."),
+			"ntfy_password":                      sensitiveString("ntfy password for HTTP Basic auth."),
 			"gotify_url":                         optionalString("Gotify notification URL."),
 			"gotify_app_token":                   sensitiveString("Gotify app token."),
 			"allow_private_notification_targets": optionalBool("Allow private network notification targets."),
@@ -325,6 +334,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 			"enrollment_deadline":                optionalString("2FA enrollment deadline (ISO-8601 or null)."),
 			"webhook_url":                        optionalString("Webhook notification URL."),
 			"webhook_secret":                     sensitiveString("Webhook signing secret."),
+			"webhook_headers":                    optionalStringList("Extra webhook headers, one \"Name: Value\" entry each."),
 			"geo_ip_asn_db_path":                 optionalString("Path to GeoIP ASN database."),
 			"geo_ip_country_db_path":             optionalString("Path to GeoIP country database."),
 			"webauthn_rp_id":                     optionalString("WebAuthn relying party ID."),
@@ -409,11 +419,13 @@ func oidcProviderAttributes(
 				listplanmodifier.UseStateForUnknown(),
 			},
 		},
-		"email_claim":           optionalString("JWT claim for email."),
-		"sync_email_from_claim": optionalBool("Sync email from claim."),
-		"button_text":           optionalString("Login button text."),
-		"button_icon_url":       optionalString("Login button icon URL."),
-		"force_password_setup":  optionalBool("Force password setup on first login."),
+		"email_claim":                      optionalString("JWT claim for email."),
+		"sync_email_from_claim":            optionalBool("Sync email from claim."),
+		"button_text":                      optionalString("Login button text."),
+		"button_icon_url":                  optionalString("Login button icon URL."),
+		"force_password_setup":             optionalBool("Force password setup on first login."),
+		"rp_initiated_logout_enabled":      optionalBool("End the provider session on Jellyfin sign-out (OIDC RP-Initiated Logout)."),
+		"rp_initiated_logout_redirect_uri": optionalString("Absolute https post_logout_redirect_uri; must be registered at the IdP."),
 		"created_at": schema.StringAttribute{
 			Description:         "Creation timestamp (server-managed).",
 			MarkdownDescription: "Creation timestamp (server-managed).",
@@ -642,6 +654,9 @@ func overlayJellyfinSecurity(ctx context.Context, m map[string]json.RawMessage, 
 	putJSONInt64(m, "AuditLogMaxEntries", data.AuditLogMaxEntries)
 	putJSONString(m, "NtfyUrl", data.NtfyURL)
 	putJSONString(m, "NtfyTopic", data.NtfyTopic)
+	putJSONString(m, "NtfyToken", data.NtfyToken)
+	putJSONString(m, "NtfyUsername", data.NtfyUsername)
+	putJSONString(m, "NtfyPassword", data.NtfyPassword)
 	putJSONString(m, "GotifyUrl", data.GotifyURL)
 	putJSONString(m, "GotifyAppToken", data.GotifyAppToken)
 	putJSONBool(m, "AllowPrivateNotificationTargets", data.AllowPrivateNotificationTargets)
@@ -690,6 +705,9 @@ func overlayJellyfinSecurity(ctx context.Context, m map[string]json.RawMessage, 
 		return append(diags, d...)
 	}
 	if d := putJSONStringList(ctx, m, "NotifyEmailAddresses", data.NotifyEmailAddresses); d.HasError() {
+		return append(diags, d...)
+	}
+	if d := putJSONStringList(ctx, m, "WebhookHeaders", data.WebhookHeaders); d.HasError() {
 		return append(diags, d...)
 	}
 	if d := putJSONStringList(ctx, m, "WebAuthnOrigins", data.WebauthnOrigins); d.HasError() {
@@ -797,6 +815,8 @@ func overlayOidcProvider(ctx context.Context, m map[string]json.RawMessage, p *O
 	putJSONString(m, "ButtonText", p.ButtonText)
 	putJSONString(m, "ButtonIconUrl", p.ButtonIconURL)
 	putJSONBool(m, "ForcePasswordSetup", p.ForcePasswordSetup)
+	putJSONBool(m, "RpInitiatedLogoutEnabled", p.RpInitiatedLogoutEnabled)
+	putJSONString(m, "RpInitiatedLogoutRedirectUri", p.RpInitiatedLogoutRedirectURI)
 
 	// RoleLibraryMappings — nested list
 	if !p.RoleLibraryMappings.IsNull() && !p.RoleLibraryMappings.IsUnknown() {
@@ -895,6 +915,9 @@ func flattenJellyfinSecurity(ctx context.Context, raw string, data *JellyfinSecu
 	data.AuditLogMaxEntries = getJSONInt64(m, "AuditLogMaxEntries")
 	data.NtfyURL = getJSONString(m, "NtfyUrl")
 	data.NtfyTopic = getJSONString(m, "NtfyTopic")
+	data.NtfyToken = getJSONString(m, "NtfyToken")
+	data.NtfyUsername = getJSONString(m, "NtfyUsername")
+	data.NtfyPassword = getJSONString(m, "NtfyPassword")
 	data.GotifyURL = getJSONString(m, "GotifyUrl")
 	data.GotifyAppToken = getJSONString(m, "GotifyAppToken")
 	data.AllowPrivateNotificationTargets = getJSONBool(m, "AllowPrivateNotificationTargets")
@@ -941,6 +964,8 @@ func flattenJellyfinSecurity(ctx context.Context, raw string, data *JellyfinSecu
 	data.PasswordLoginExemptCidrs, d = getJSONStringList(ctx, m, "PasswordLoginExemptCidrs")
 	diags.Append(d...)
 	data.NotifyEmailAddresses, d = getJSONStringList(ctx, m, "NotifyEmailAddresses")
+	diags.Append(d...)
+	data.WebhookHeaders, d = getJSONStringList(ctx, m, "WebhookHeaders")
 	diags.Append(d...)
 	data.WebauthnOrigins, d = getJSONStringList(ctx, m, "WebAuthnOrigins")
 	diags.Append(d...)
@@ -1077,39 +1102,41 @@ func roleLibraryMappingObjectTypes() map[string]attr.Type {
 
 func oidcProviderObjectTypes() map[string]attr.Type {
 	return map[string]attr.Type{
-		"id":                          types.StringType,
-		"display_name":                types.StringType,
-		"preset":                      types.StringType,
-		"discovery_url":               types.StringType,
-		"client_id":                   types.StringType,
-		"client_secret":               types.StringType,
-		"scopes":                      types.ListType{ElemType: types.StringType},
-		"acr_values":                  types.ListType{ElemType: types.StringType},
-		"username_claim":              types.StringType,
-		"allowed_groups":              types.ListType{ElemType: types.StringType},
-		"admin_groups":                types.ListType{ElemType: types.StringType},
-		"allow_admin_group_elevation": types.BoolType,
-		"template_user_id":            types.StringType,
-		"auto_create_users":           types.BoolType,
-		"require_idp_mfa":             types.BoolType,
-		"bypass_plugin_two_fa":        types.BoolType,
-		"enabled":                     types.BoolType,
-		"show_login_button":           types.BoolType,
-		"force_https":                 types.BoolType,
-		"allow_private_networks":      types.BoolType,
-		"additional_allowed_cidrs":    types.ListType{ElemType: types.StringType},
-		"sync_profile_picture":        types.BoolType,
-		"picture_claim":               types.StringType,
-		"prompt_select_account":       types.BoolType,
-		"omit_prompt_login":           types.BoolType,
-		"apply_role_library_access":   types.BoolType,
-		"role_library_mappings":       types.ListType{ElemType: types.ObjectType{AttrTypes: roleLibraryMappingObjectTypes()}},
-		"email_claim":                 types.StringType,
-		"sync_email_from_claim":       types.BoolType,
-		"button_text":                 types.StringType,
-		"button_icon_url":             types.StringType,
-		"force_password_setup":        types.BoolType,
-		"created_at":                  types.StringType,
+		"id":                               types.StringType,
+		"display_name":                     types.StringType,
+		"preset":                           types.StringType,
+		"discovery_url":                    types.StringType,
+		"client_id":                        types.StringType,
+		"client_secret":                    types.StringType,
+		"scopes":                           types.ListType{ElemType: types.StringType},
+		"acr_values":                       types.ListType{ElemType: types.StringType},
+		"username_claim":                   types.StringType,
+		"allowed_groups":                   types.ListType{ElemType: types.StringType},
+		"admin_groups":                     types.ListType{ElemType: types.StringType},
+		"allow_admin_group_elevation":      types.BoolType,
+		"template_user_id":                 types.StringType,
+		"auto_create_users":                types.BoolType,
+		"require_idp_mfa":                  types.BoolType,
+		"bypass_plugin_two_fa":             types.BoolType,
+		"enabled":                          types.BoolType,
+		"show_login_button":                types.BoolType,
+		"force_https":                      types.BoolType,
+		"allow_private_networks":           types.BoolType,
+		"additional_allowed_cidrs":         types.ListType{ElemType: types.StringType},
+		"sync_profile_picture":             types.BoolType,
+		"picture_claim":                    types.StringType,
+		"prompt_select_account":            types.BoolType,
+		"omit_prompt_login":                types.BoolType,
+		"apply_role_library_access":        types.BoolType,
+		"role_library_mappings":            types.ListType{ElemType: types.ObjectType{AttrTypes: roleLibraryMappingObjectTypes()}},
+		"email_claim":                      types.StringType,
+		"sync_email_from_claim":            types.BoolType,
+		"button_text":                      types.StringType,
+		"button_icon_url":                  types.StringType,
+		"force_password_setup":             types.BoolType,
+		"rp_initiated_logout_enabled":      types.BoolType,
+		"rp_initiated_logout_redirect_uri": types.StringType,
+		"created_at":                       types.StringType,
 	}
 }
 
@@ -1165,6 +1192,8 @@ func oidcProviderAttrs(ctx context.Context, m map[string]json.RawMessage, diags 
 	attrs["button_text"] = getJSONString(m, "ButtonText")
 	attrs["button_icon_url"] = getJSONString(m, "ButtonIconUrl")
 	attrs["force_password_setup"] = getJSONBool(m, "ForcePasswordSetup")
+	attrs["rp_initiated_logout_enabled"] = getJSONBool(m, "RpInitiatedLogoutEnabled")
+	attrs["rp_initiated_logout_redirect_uri"] = getJSONString(m, "RpInitiatedLogoutRedirectUri")
 	attrs["created_at"] = getJSONString(m, "CreatedAt")
 	return attrs
 }

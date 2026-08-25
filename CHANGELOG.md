@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `jellyfin_security_plugin_configuration`: `ntfy_token`, `ntfy_username` and `ntfy_password` for authenticated ntfy topics, and `webhook_headers` for webhook receivers that authenticate by header (JellyfinSecurity 2.5.21).
+- `jellyfin_security_plugin_configuration`: `rp_initiated_logout_enabled` and `rp_initiated_logout_redirect_uri` on `oidc_providers`, ending the IdP session on Jellyfin sign-out.
+
+### Fixed
+
+- Renovate wrote the JellyfinSecurity version with its `v` tag prefix, which left `compareDottedVersions` unable to parse it and broke the release workflow's version extraction.
+- The plugin schema-change check fetched a non-existent `v{major}.{minor}.{patch}.0` tag and, because `curl` was not run with `--fail`, silently compared two empty property lists and passed every bump.
+
 ## [0.2.4] - 2026-07-27
 
 ### Changed
