@@ -8,6 +8,10 @@
   "platformAutomerge": false,
   "ignoreTests": false,
   "prConcurrentLimit": 20,
+  // tools/ consumes tools/copywrite-patched through a replace directive, so a
+  // bump to the replaced module leaves the parent's graph stale and
+  // `go generate` refuses to run.
+  "postUpdateOptions": ["gomodTidy"],
   // github-releases would yield the three-segment tag; Jellyfin resolves an
   // install against manifest.json, which carries four-segment assembly
   // versions. Read the manifest directly so the stored value is installable.
