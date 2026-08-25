@@ -14,6 +14,12 @@ on:
       ref:
         type: string
         required: false
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag to release'
+        type: string
+        required: false
 
 jobs:
   goreleaser:
