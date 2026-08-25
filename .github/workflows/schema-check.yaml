@@ -1,9 +1,8 @@
 name: Schema Change Check
 
+# A gate that stays pending on unrelated PRs can never be a required check.
 on:
   pull_request:
-    paths:
-      - 'internal/provider/supported_security_plugin_version.env'
 
 permissions:
   contents: read
@@ -24,16 +23,24 @@ jobs:
           NEW_VERSION=$(grep -oP '(?<=SECURITY_PLUGIN_VERSION=).+' internal/provider/supported_security_plugin_version.env)
           echo "old=${OLD_VERSION}" >> $GITHUB_OUTPUT
           echo "new=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          if [ "$OLD_VERSION" = "$NEW_VERSION" ]; then
+            echo "bumped=false" >> $GITHUB_OUTPUT
+            echo "Plugin version unchanged (${NEW_VERSION}); nothing to compare."
+          else
+            echo "bumped=true" >> $GITHUB_OUTPUT
+          fi
 
       - name: Fetch PluginConfiguration.cs at both versions
+        if: steps.versions.outputs.bumped == 'true'
         run: |
-          curl -sSL "https://raw.githubusercontent.com/ZL154/JellyfinSecurity/v${{ steps.versions.outputs.old }}/src/Jellyfin.Plugin.TwoFactorAuth/Configuration/PluginConfiguration.cs" -o /tmp/old_config.cs
-          curl -sSL "https://raw.githubusercontent.com/ZL154/JellyfinSecurity/v${{ steps.versions.outputs.new }}/src/Jellyfin.Plugin.TwoFactorAuth/Configuration/PluginConfiguration.cs" -o /tmp/new_config.cs
-          curl -sSL "https://raw.githubusercontent.com/ZL154/JellyfinSecurity/v${{ steps.versions.outputs.old }}/src/Jellyfin.Plugin.TwoFactorAuth/Models/OidcProvider.cs" -o /tmp/old_oidc.cs
-          curl -sSL "https://raw.githubusercontent.com/ZL154/JellyfinSecurity/v${{ steps.versions.outputs.new }}/src/Jellyfin.Plugin.TwoFactorAuth/Models/OidcProvider.cs" -o /tmp/new_oidc.cs
+          curl -sSL --fail "https://raw.githubusercontent.com/ZL154/JellyfinSecurity/v${{ steps.versions.outputs.old }}/src/Jellyfin.Plugin.TwoFactorAuth/Configuration/PluginConfiguration.cs" -o /tmp/old_config.cs
+          curl -sSL --fail "https://raw.githubusercontent.com/ZL154/JellyfinSecurity/v${{ steps.versions.outputs.new }}/src/Jellyfin.Plugin.TwoFactorAuth/Configuration/PluginConfiguration.cs" -o /tmp/new_config.cs
+          curl -sSL --fail "https://raw.githubusercontent.com/ZL154/JellyfinSecurity/v${{ steps.versions.outputs.old }}/src/Jellyfin.Plugin.TwoFactorAuth/Models/OidcProvider.cs" -o /tmp/old_oidc.cs
+          curl -sSL --fail "https://raw.githubusercontent.com/ZL154/JellyfinSecurity/v${{ steps.versions.outputs.new }}/src/Jellyfin.Plugin.TwoFactorAuth/Models/OidcProvider.cs" -o /tmp/new_oidc.cs
 
       - name: Compare property signatures
         id: diff
+        if: steps.versions.outputs.bumped == 'true'
         run: |
           # Extract public property signatures (type + name) from each file
           extract_props() {
