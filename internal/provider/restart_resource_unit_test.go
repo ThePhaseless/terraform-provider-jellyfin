@@ -48,32 +48,13 @@ func TestRandomIDIsUniqueAndHex(t *testing.T) {
 	}
 }
 
-func TestAwaitRestartRejectsServerThatNeverGoesDown(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(systemInfoHandler(func() (bool, bool) { return false, false }))
-	defer server.Close()
-
-	c := client.NewClient(server.URL, "k")
-	err := awaitRestart(context.Background(), c, 300*time.Millisecond, testPoll)
-	if err == nil {
-		t.Fatal("a server that keeps answering has not restarted; expected an error")
-	}
-}
-
-func TestAwaitRestartWaitsForDownThenReady(t *testing.T) {
+func TestAwaitRestartWaitsOutTheOutgoingHost(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
+	start := time.Now()
 	server := httptest.NewServer(systemInfoHandler(func() (bool, bool) {
-		switch n := calls.Add(1); {
-		case n <= 2:
-			return false, false // still serving the pre-restart process
-		case n <= 4:
-			return true, false // restarting
-		default:
-			return false, false
-		}
+		return calls.Add(1) <= 2, false // the restart takes the server away briefly
 	}))
 	defer server.Close()
 
@@ -81,24 +62,37 @@ func TestAwaitRestartWaitsForDownThenReady(t *testing.T) {
 	if err := awaitRestart(context.Background(), c, 5*time.Second, testPoll); err != nil {
 		t.Fatalf("awaitRestart() error = %v", err)
 	}
-	if got := calls.Load(); got < 5 {
-		t.Fatalf("expected the wait to span the outage, got %d polls", got)
+	if elapsed := time.Since(start); elapsed < restartSettleReads*testPoll {
+		t.Errorf("returned in %s, before the settle delay had elapsed", elapsed)
 	}
 }
 
-func TestAwaitRestartTimesOutWhileRestartStillPending(t *testing.T) {
+func TestAwaitRestartRequiresConsecutiveHealthyReads(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
 	server := httptest.NewServer(systemInfoHandler(func() (bool, bool) {
-		n := calls.Add(1)
-		return n <= 2, true
+		return calls.Add(1)%2 == 0, false // flapping: never healthy twice running
 	}))
 	defer server.Close()
 
 	c := client.NewClient(server.URL, "k")
-	if err := awaitRestart(context.Background(), c, 300*time.Millisecond, testPoll); err == nil {
-		t.Fatal("expected a timeout while HasPendingRestart stayed true")
+	if err := awaitRestart(context.Background(), c, 400*time.Millisecond, testPoll); err == nil {
+		t.Fatal("a server that never answers consecutively is not back; expected an error")
+	}
+}
+
+func TestAwaitRestartIgnoresPendingRestart(t *testing.T) {
+	t.Parallel()
+
+	// Background plugin auto-updates keep HasPendingRestart true; that must not
+	// stop a responsive server from counting as back.
+	server := httptest.NewServer(systemInfoHandler(func() (bool, bool) { return false, true }))
+	defer server.Close()
+
+	c := client.NewClient(server.URL, "k")
+	if err := awaitRestart(context.Background(), c, 5*time.Second, testPoll); err != nil {
+		t.Fatalf("awaitRestart() error = %v", err)
 	}
 }
 

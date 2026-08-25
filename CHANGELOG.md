@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-08-25
+
+### Fixed
+
+- `jellyfin_plugin`: the tracked JellyfinSecurity version is again the four-segment assembly version (`2.5.22.0`). Jellyfin resolves an install against `manifest.json`, which carries assembly versions, so the three-segment git tag introduced in 0.3.2 matched nothing and made an install a silent no-op — no error, no log line, no plugin.
+- `jellyfin_restart`: wait for the server to answer three times running after a settle delay, rather than requiring it to stop answering. Jellyfin restarts in-process rather than exiting, so it may never go away; and `HasPendingRestart` cannot gate the wait either, because background plugin auto-updates raise it again within seconds of a restart clearing it.
+
 ## [0.3.2] - 2026-08-25
 
 ### Fixed

@@ -41,6 +41,10 @@ type RestartResourceModel struct {
 	CompletedAt types.String `tfsdk:"completed_at"`
 }
 
+// restartSettleReads is how many consecutive healthy reads count as "back", and
+// how many poll intervals to wait before the first of them.
+const restartSettleReads = 3
+
 func (r *RestartResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_restart"
 }
@@ -160,42 +164,38 @@ func waitForServerReady(ctx context.Context, c *client.Client, timeout time.Dura
 	return awaitRestart(ctx, c, timeout, startupStatusDelay)
 }
 
-// awaitRestart waits for the server to stop answering, then for it to answer
-// again with no restart pending.
+// awaitRestart waits out a restart that has already been requested, returning
+// once the server has answered successfully restartSettleReads times in a row.
 //
-// Watching only for a healthy response is not enough: Jellyfin keeps serving
-// for a moment after it accepts POST /System/Restart, so the first poll reads
-// the process that is about to exit and reports success before the restart has
-// begun. Callers that then write configuration would have it overwritten when
-// the server reloads from disk, so a server that never goes away is an error
-// rather than an early success. Any HTTP/network/decode error is an outage.
+// Two things rule out the obvious signals. Jellyfin keeps serving for a moment
+// after it accepts POST /System/Restart, so polling immediately reads the host
+// that is about to go away; the settle delay covers that. And Jellyfin restarts
+// in-process here rather than exiting, so the server may never stop answering
+// at all, which is why an outage is not required. HasPendingRestart is no help
+// either: background plugin auto-updates raise it again seconds after a restart
+// clears it.
 func awaitRestart(ctx context.Context, c *client.Client, timeout, poll time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	downBy := time.Now().Add(timeout / 2)
 
-	var wentDown bool
-	for !wentDown && time.Now().Before(downBy) {
-		if _, err := c.GetSystemInfo(ctx); err != nil {
-			wentDown = true
-			break
-		}
-		if err := pause(ctx, poll); err != nil {
-			return err
-		}
-	}
-	if !wentDown {
-		return fmt.Errorf("server kept answering for %s after the restart request; it does not appear to have restarted", timeout/2)
+	if err := pause(ctx, restartSettleReads*poll); err != nil {
+		return err
 	}
 
+	var healthy int
 	for time.Now().Before(deadline) {
-		if info, err := c.GetSystemInfo(ctx); err == nil && !info.HasPendingRestart {
-			return nil
+		if _, err := c.GetSystemInfo(ctx); err == nil {
+			healthy++
+			if healthy >= restartSettleReads {
+				return nil
+			}
+		} else {
+			healthy = 0
 		}
 		if err := pause(ctx, poll); err != nil {
 			return err
 		}
 	}
-	return fmt.Errorf("server did not report ready (HasPendingRestart=false) within %s", timeout)
+	return fmt.Errorf("server did not answer %d consecutive times within %s of the restart", restartSettleReads, timeout)
 }
 
 func pause(ctx context.Context, d time.Duration) error {

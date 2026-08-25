@@ -8,17 +8,26 @@
   "platformAutomerge": false,
   "ignoreTests": false,
   "prConcurrentLimit": 20,
+  // github-releases would yield the three-segment tag; Jellyfin resolves an
+  // install against manifest.json, which carries four-segment assembly
+  // versions. Read the manifest directly so the stored value is installable.
+  "customDatasources": {
+    "jellyfin-security-manifest": {
+      "defaultRegistryUrlTemplate": "https://raw.githubusercontent.com/ZL154/JellyfinSecurity/main/manifest.json",
+      "format": "json",
+      "transformTemplates": [
+        "{\"releases\": [$[0].versions.{\"version\": version}]}"
+      ]
+    }
+  },
   "customManagers": [
     {
       "customType": "regex",
       "managerFilePatterns": ["/^internal/provider/supported_security_plugin_version\\.env$/"],
       "matchStrings": ["SECURITY_PLUGIN_VERSION=(?<currentValue>.+?)\\s"],
-      "depNameTemplate": "ZL154/JellyfinSecurity",
-      "datasourceTemplate": "github-releases",
-      // schema-check.yaml builds the tag as v${version}; the stored value must
-      // not carry the v itself.
-      "extractVersionTemplate": "^v(?<version>.+)$",
-      "versioningTemplate": "semver-coerced"
+      "depNameTemplate": "JellyfinSecurity",
+      "datasourceTemplate": "custom.jellyfin-security-manifest",
+      "versioningTemplate": "loose"
     },
     {
       "customType": "regex",
@@ -44,7 +53,7 @@
     {
       // Safe to automerge because schema-check.yaml fails the PR when the
       // plugin's public config properties changed across the bump.
-      "matchPackageNames": ["ZL154/JellyfinSecurity"],
+      "matchPackageNames": ["JellyfinSecurity"],
       "commitMessagePrefix": "chore:",
       "commitMessageTopic": "JellyfinSecurity plugin version",
       "automerge": true
