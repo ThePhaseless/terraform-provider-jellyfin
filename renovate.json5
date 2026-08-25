@@ -1,6 +1,13 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
+  // Renovate merges the PR itself: the repo has allow_auto_merge off and no
+  // branch protection, so GitHub's auto-merge button does not exist.
+  "automergeType": "pr",
+  "automergeStrategy": "squash",
+  "platformAutomerge": false,
+  "ignoreTests": false,
+  "prConcurrentLimit": 20,
   "customManagers": [
     {
       "customType": "regex",
@@ -8,6 +15,9 @@
       "matchStrings": ["SECURITY_PLUGIN_VERSION=(?<currentValue>.+?)\\s"],
       "depNameTemplate": "ZL154/JellyfinSecurity",
       "datasourceTemplate": "github-releases",
+      // schema-check.yaml builds the tag as v${version}; the stored value must
+      // not carry the v itself.
+      "extractVersionTemplate": "^v(?<version>.+)$",
       "versioningTemplate": "semver-coerced"
     },
     {
@@ -22,16 +32,29 @@
   ],
   "packageRules": [
     {
-      "matchPackageNames": ["ZL154/JellyfinSecurity"],
-      "commitMessagePrefix": "chore:",
-      "commitMessageTopic": "JellyfinSecurity plugin version",
+      "description": "Stay current on its own; CI is the gate.",
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
+      "automerge": true
+    },
+    {
+      "description": "Majors are breaking by definition.",
+      "matchUpdateTypes": ["major"],
       "automerge": false
     },
     {
+      // Safe to automerge because schema-check.yaml fails the PR when the
+      // plugin's public config properties changed across the bump.
+      "matchPackageNames": ["ZL154/JellyfinSecurity"],
+      "commitMessagePrefix": "chore:",
+      "commitMessageTopic": "JellyfinSecurity plugin version",
+      "automerge": true
+    },
+    {
+      // Gated by the acceptance suite, which boots this Jellyfin version.
       "matchPackageNames": ["jellyfin/jellyfin"],
       "commitMessagePrefix": "chore:",
       "commitMessageTopic": "Jellyfin server version",
-      "automerge": false
+      "automerge": true
     }
   ]
 }
