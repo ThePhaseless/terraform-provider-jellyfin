@@ -47,7 +47,7 @@ require (
 )
 
 require (
-	github.com/cli/go-gh/v2 v2.13.0
+	github.com/cli/go-gh/v2 v2.16.0
 	github.com/samber/lo v1.53.0
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
