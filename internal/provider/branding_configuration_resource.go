@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
@@ -122,8 +123,10 @@ func (r *BrandingConfigurationResource) Delete(_ context.Context, _ resource.Del
 
 func (r *BrandingConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Singleton resource — the import ID is not used. Read will populate all fields.
-	data := BrandingConfigurationResourceModel{ID: types.StringValue("branding")}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	// Set only the id: the framework types every other attribute from the
+	// schema, and the Read that follows an import fills them. Writing a
+	// zero-valued model here left list attributes without an element type.
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("branding"))...)
 }
 
 func (r *BrandingConfigurationResource) apply(ctx context.Context, data *BrandingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
