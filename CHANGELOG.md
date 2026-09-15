@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-09-15
+
+### Changed
+
+- Declared support for Jellyfin 12.1 and JellyfinSecurity plugin 2.5.22.0 (versions tested in CI).
+
 ## [0.3.6] - 2026-09-08
 
 ### Changed
