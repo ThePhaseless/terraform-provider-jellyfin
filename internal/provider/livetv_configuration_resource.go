@@ -10,6 +10,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
@@ -397,8 +398,10 @@ func (r *LiveTVConfigurationResource) Delete(_ context.Context, _ resource.Delet
 }
 
 func (r *LiveTVConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	data := LiveTVConfigurationResourceModel{ID: types.StringValue("livetv")}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	// Set only the id: the framework types every other attribute from the
+	// schema, and the Read that follows an import fills them. Writing a
+	// zero-valued model here left list attributes without an element type.
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("livetv"))...)
 }
 
 func (r *LiveTVConfigurationResource) apply(ctx context.Context, data *LiveTVConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
