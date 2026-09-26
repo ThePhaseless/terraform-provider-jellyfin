@@ -5,13 +5,13 @@ resource "jellyfin_encoding_configuration" "example" {
   enable_fallback_font                                              = false
   enable_audio_vbr                                                  = false
   down_mix_audio_boost                                              = 0
-  down_mix_stereo_algorithm                                         = ""
+  down_mix_stereo_algorithm                                         = "None"
   max_muxing_queue_size                                             = 0
   enable_throttling                                                 = false
   throttle_delay_seconds                                            = 0
   enable_segment_deletion                                           = false
   segment_keep_seconds                                              = 0
-  hardware_acceleration_type                                        = ""
+  hardware_acceleration_type                                        = "none"
   encoder_app_path                                                  = ""
   encoder_app_path_display                                          = ""
   vaapi_device                                                      = ""
@@ -19,9 +19,9 @@ resource "jellyfin_encoding_configuration" "example" {
   enable_tonemapping                                                = false
   enable_vpp_tonemapping                                            = false
   enable_video_toolbox_tonemapping                                  = false
-  tonemapping_algorithm                                             = ""
-  tonemapping_mode                                                  = ""
-  tonemapping_range                                                 = ""
+  tonemapping_algorithm                                             = "bt2390"
+  tonemapping_mode                                                  = "auto"
+  tonemapping_range                                                 = "auto"
   tonemapping_desat                                                 = 0
   tonemapping_peak                                                  = 0
   tonemapping_param                                                 = 0
@@ -29,9 +29,9 @@ resource "jellyfin_encoding_configuration" "example" {
   vpp_tonemapping_contrast                                          = 0
   h264_crf                                                          = 0
   h265_crf                                                          = 0
-  encoder_preset                                                    = ""
+  encoder_preset                                                    = "auto"
   deinterlace_double_rate                                           = false
-  deinterlace_method                                                = ""
+  deinterlace_method                                                = "yadif"
   enable_decoding_color_depth10_hevc                                = false
   enable_decoding_color_depth10_vp9                                 = false
   enable_decoding_color_depth10_hevc_rext                           = false
@@ -46,4 +46,8 @@ resource "jellyfin_encoding_configuration" "example" {
   enable_subtitle_extraction                                        = false
   hardware_decoding_codecs                                          = []
   allow_on_demand_metadata_based_keyframe_extraction_for_extensions = []
+
+  # Requires Jellyfin 12.0 or later; remove both on older servers.
+  subtitle_extraction_timeout_minutes = 30
+  hls_audio_seek_strategy             = "TrimCopiedAudio"
 }

@@ -44,7 +44,7 @@ resource "jellyfin_encoding_configuration" "test" {
   vpp_tonemapping_contrast = 1
   h264_crf = 23
   h265_crf = 28
-  encoder_preset = ""
+  encoder_preset = "auto"
   deinterlace_double_rate = false
   deinterlace_method = "yadif"
   enable_decoding_color_depth10_hevc = true
@@ -59,8 +59,10 @@ resource "jellyfin_encoding_configuration" "test" {
   allow_hevc_encoding = false
   allow_av1_encoding = false
   enable_subtitle_extraction = true
+  subtitle_extraction_timeout_minutes = 45
   hardware_decoding_codecs = ["h264", "vc1"]
   allow_on_demand_metadata_based_keyframe_extraction_for_extensions = ["mkv"]
+  hls_audio_seek_strategy = "TranscodeAudio"
   transcoding_temp_path = ""
   fallback_font_path = ""
   encoder_app_path = ""
@@ -94,7 +96,7 @@ resource "jellyfin_encoding_configuration" "test" {
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "vpp_tonemapping_contrast", "1"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "h264_crf", "23"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "h265_crf", "28"),
-					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "encoder_preset", ""),
+					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "encoder_preset", "auto"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "deinterlace_double_rate", "false"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "deinterlace_method", "yadif"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "enable_decoding_color_depth10_hevc", "true"),
@@ -109,8 +111,10 @@ resource "jellyfin_encoding_configuration" "test" {
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "allow_hevc_encoding", "false"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "allow_av1_encoding", "false"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "enable_subtitle_extraction", "true"),
+					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "subtitle_extraction_timeout_minutes", "45"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "hardware_decoding_codecs.#", "2"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "allow_on_demand_metadata_based_keyframe_extraction_for_extensions.#", "1"),
+					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "hls_audio_seek_strategy", "TranscodeAudio"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "transcoding_temp_path", ""),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "fallback_font_path", ""),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "encoder_app_path", ""),
@@ -154,7 +158,7 @@ resource "jellyfin_encoding_configuration" "test" {
   vpp_tonemapping_contrast = 1
   h264_crf = 23
   h265_crf = 28
-  encoder_preset = ""
+  encoder_preset = "auto"
   deinterlace_double_rate = false
   deinterlace_method = "yadif"
   enable_decoding_color_depth10_hevc = true
@@ -169,8 +173,10 @@ resource "jellyfin_encoding_configuration" "test" {
   allow_hevc_encoding = false
   allow_av1_encoding = false
   enable_subtitle_extraction = true
+  subtitle_extraction_timeout_minutes = 30
   hardware_decoding_codecs = ["h264", "vc1"]
   allow_on_demand_metadata_based_keyframe_extraction_for_extensions = ["mkv"]
+  hls_audio_seek_strategy = "TrimCopiedAudio"
   transcoding_temp_path = ""
   fallback_font_path = ""
   encoder_app_path = ""
@@ -204,7 +210,7 @@ resource "jellyfin_encoding_configuration" "test" {
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "vpp_tonemapping_contrast", "1"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "h264_crf", "23"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "h265_crf", "28"),
-					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "encoder_preset", ""),
+					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "encoder_preset", "auto"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "deinterlace_double_rate", "false"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "deinterlace_method", "yadif"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "enable_decoding_color_depth10_hevc", "true"),
@@ -219,8 +225,10 @@ resource "jellyfin_encoding_configuration" "test" {
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "allow_hevc_encoding", "false"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "allow_av1_encoding", "false"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "enable_subtitle_extraction", "true"),
+					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "subtitle_extraction_timeout_minutes", "30"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "hardware_decoding_codecs.#", "2"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "allow_on_demand_metadata_based_keyframe_extraction_for_extensions.#", "1"),
+					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "hls_audio_seek_strategy", "TrimCopiedAudio"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "transcoding_temp_path", ""),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "fallback_font_path", ""),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "encoder_app_path", ""),
