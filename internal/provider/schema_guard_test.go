@@ -6,15 +6,18 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"go/types"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,16 +48,9 @@ var unexpandedSchemas = map[string]bool{
 	"SessionInfoDto": true,
 }
 
-var clientRequestHelpers = map[string]string{
-	"get":           http.MethodGet,
-	"getRaw":        http.MethodGet,
-	"post":          http.MethodPost,
-	"postRaw":       http.MethodPost,
-	"postAndDecode": http.MethodPost,
-	"delete":        http.MethodDelete,
-}
-
-var formatVerb = regexp.MustCompile(`%[a-zA-Z]`)
+// formatVerb matches a whole fmt verb, with any flags, argument index, width
+// and precision, so "%[1]s" and "%5d" each become one runtime value.
+var formatVerb = regexp.MustCompile(`%[-+# 0]*(?:\[\d+\])?(?:\*|\d+)?(?:\.(?:\[\d+\])?(?:\*|\d+)?)?(?:\[\d+\])?[a-zA-Z%]`)
 
 type apiCall struct {
 	method string
@@ -264,15 +260,57 @@ func schemaClosure(schemas map[string]json.RawMessage, roots map[string]bool) ([
 			return nil, fmt.Errorf("parsing schema %s: %w", name, err)
 		}
 		refs := map[string]bool{}
-		sig, err := typeSignature(s, refs)
+		lines, err := schemaLines(name, s, refs)
 		if err != nil {
 			return nil, fmt.Errorf("signature for %s: %w", name, err)
 		}
-		out = append(out, fmt.Sprintf("schema %s: %s", name, sig))
+		out = append(out, lines...)
 
 		for ref := range refs {
 			queue = append(queue, ref)
 		}
+	}
+	return out, nil
+}
+
+// schemaLines puts each property of an object schema on a line of its own, so
+// a changed field is one short line in the golden diff rather than an edit
+// inside a line of several kilobytes.
+func schemaLines(name string, s map[string]json.RawMessage, refs map[string]bool) ([]string, error) {
+	rawProps, ok := s["properties"]
+	if !ok || jsonString(s, "type") != "object" {
+		sig, err := typeSignature(s, refs)
+		if err != nil {
+			return nil, err
+		}
+		return []string{fmt.Sprintf("schema %s: %s", name, sig)}, nil
+	}
+
+	var props map[string]json.RawMessage
+	if err := json.Unmarshal(rawProps, &props); err != nil {
+		return nil, err
+	}
+	var out []string
+	for prop, raw := range props {
+		var p map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
+		sig, err := typeSignature(p, refs)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, fmt.Sprintf("schema %s.%s: %s", name, prop, sig))
+	}
+
+	rest := maps.Clone(s)
+	delete(rest, "properties")
+	sig, err := typeSignature(rest, refs)
+	if err != nil {
+		return nil, err
+	}
+	if len(props) == 0 || sig != "{object}" {
+		out = append(out, fmt.Sprintf("schema %s: %s", name, sig))
 	}
 	return out, nil
 }
@@ -402,7 +440,7 @@ func clientAPICalls(dir string) ([]apiCall, error) {
 	}
 
 	fset := token.NewFileSet()
-	var calls []apiCall
+	var files []*ast.File
 	for _, name := range names {
 		if strings.HasSuffix(name, "_test.go") {
 			continue
@@ -411,11 +449,12 @@ func clientAPICalls(dir string) ([]apiCall, error) {
 		if err != nil {
 			return nil, err
 		}
-		fileCalls, err := fileAPICalls(fset, f)
-		if err != nil {
-			return nil, err
-		}
-		calls = append(calls, fileCalls...)
+		files = append(files, f)
+	}
+
+	calls, err := packageAPICalls(fset, files)
+	if err != nil {
+		return nil, err
 	}
 	if len(calls) == 0 {
 		return nil, fmt.Errorf("no API calls found in %s", dir)
@@ -423,148 +462,356 @@ func clientAPICalls(dir string) ([]apiCall, error) {
 	return calls, nil
 }
 
-func fileAPICalls(fset *token.FileSet, f *ast.File) ([]apiCall, error) {
-	var calls []apiCall
-	var firstErr error
-	for _, decl := range f.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Body == nil {
-			continue
+// packageAPICalls finds request helpers instead of listing them: a function
+// that passes a parameter on as a request path becomes a request site for its
+// callers, repeated until none turns up, so a new wrapper cannot hide the
+// endpoints requested through it.
+func packageAPICalls(fset *token.FileSet, files []*ast.File) ([]apiCall, error) {
+	var funcs []*ast.FuncDecl
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Body != nil {
+				funcs = append(funcs, fn)
+			}
 		}
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			if firstErr != nil {
-				return false
+	}
+
+	sites := map[string][]requestSite{}
+	for {
+		var calls []apiCall
+		reached := map[string]bool{}
+		changed := false
+		for _, fn := range funcs {
+			fnCalls, fnSites, err := requestsIn(fset, fn, sites, reached)
+			if err != nil {
+				return nil, err
 			}
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			method, pathExpr := requestCall(call)
-			if method == "" {
-				return true
-			}
-			path, forwarded, err := pathPattern(fn, pathExpr)
-			if err == nil && !forwarded {
-				path, _, _ = strings.Cut(path, "?")
-				if !strings.HasPrefix(path, "/") {
-					err = fmt.Errorf("request path %q does not start with /", path)
+			calls = append(calls, fnCalls...)
+			key := siteKey(fn)
+			for _, site := range fnSites {
+				if !slices.Contains(sites[key], site) {
+					sites[key] = append(sites[key], site)
+					changed = true
 				}
 			}
-			if err != nil {
-				firstErr = fmt.Errorf("%s: %w", fset.Position(pathExpr.Pos()), err)
-				return false
+		}
+		if changed {
+			continue
+		}
+
+		for _, fn := range funcs {
+			if key := siteKey(fn); len(sites[key]) > 0 && !reached[key] {
+				return nil, fmt.Errorf("%s: %s passes a parameter on as a request path, but nothing in its package calls it, so the guard cannot see the endpoints it requests", fset.Position(fn.Pos()), fn.Name.Name)
 			}
-			if !forwarded {
-				calls = append(calls, apiCall{method: method, path: path})
-			}
-			return true
-		})
+		}
+		return calls, nil
 	}
-	return calls, firstErr
 }
 
-// requestCall recognizes the client's request helpers and requests built with
-// an explicit http.Method* constant. A method passed in as a variable belongs to
-// the shared plumbing, whose callers are recorded instead.
-func requestCall(call *ast.CallExpr) (string, ast.Expr) {
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return "", nil
+// requestSite describes a function that sends a request: the method is fixed
+// or read from argument methodArg, and the path is read from argument pathArg.
+type requestSite struct {
+	method    string
+	methodArg int
+	pathArg   int
+}
+
+// netHTTPRequestSites are where a request enters net/http, as a package
+// function or as a method of the client's *http.Client.
+var netHTTPRequestSites = map[string]requestSite{
+	"NewRequest":            {methodArg: 0, pathArg: 1},
+	"NewRequestWithContext": {methodArg: 1, pathArg: 2},
+	"Get":                   {method: http.MethodGet, pathArg: 0},
+	"Head":                  {method: http.MethodHead, pathArg: 0},
+	"Post":                  {method: http.MethodPost, pathArg: 0},
+	"PostForm":              {method: http.MethodPost, pathArg: 0},
+}
+
+// siteKey names a function the way a call spells it, so the client's delete
+// method stays apart from the builtin delete.
+func siteKey(fn *ast.FuncDecl) string {
+	if fn.Recv != nil {
+		return "." + fn.Name.Name
 	}
-	if method, ok := clientRequestHelpers[sel.Sel.Name]; ok && len(call.Args) >= 2 {
-		return method, call.Args[1]
-	}
-	if (sel.Sel.Name == "doRequest" || sel.Sel.Name == "NewRequestWithContext") && len(call.Args) >= 3 {
-		m, ok := call.Args[1].(*ast.SelectorExpr)
-		if ok && isIdent(m.X, "http") && strings.HasPrefix(m.Sel.Name, "Method") {
-			return strings.ToUpper(strings.TrimPrefix(m.Sel.Name, "Method")), call.Args[2]
+	return fn.Name.Name
+}
+
+func callSites(call *ast.CallExpr, sites map[string][]requestSite) (string, []requestSite) {
+	switch fun := call.Fun.(type) {
+	case *ast.SelectorExpr:
+		if isNetHTTP(fun.X) {
+			if site, ok := netHTTPRequestSites[fun.Sel.Name]; ok {
+				return "", []requestSite{site}
+			}
+			return "", nil
 		}
+		return "." + fun.Sel.Name, sites["."+fun.Sel.Name]
+	case *ast.Ident:
+		return fun.Name, sites[fun.Name]
 	}
 	return "", nil
 }
 
-// pathPattern evaluates a request path expression with "{}" standing in for
-// every runtime value. forwarded reports a path that is a parameter of fn,
-// i.e. plumbing whose callers carry the real path.
-func pathPattern(fn *ast.FuncDecl, expr ast.Expr) (pattern string, forwarded bool, err error) {
+func isNetHTTP(expr ast.Expr) bool {
+	if isIdent(expr, "http") {
+		return true
+	}
+	sel, ok := expr.(*ast.SelectorExpr)
+	return ok && (sel.Sel.Name == "HTTPClient" || sel.Sel.Name == "DefaultClient")
+}
+
+// requestsIn resolves the requests fn sends through known sites. A request
+// whose path is one of fn's parameters makes fn a site for its callers.
+func requestsIn(fset *token.FileSet, fn *ast.FuncDecl, sites map[string][]requestSite, reached map[string]bool) ([]apiCall, []requestSite, error) {
+	var calls []apiCall
+	var fnSites []requestSite
+	var firstErr error
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if firstErr != nil {
+			return false
+		}
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		key, callee := callSites(call, sites)
+		if len(callee) > 0 {
+			reached[key] = true
+		}
+		for _, site := range callee {
+			siteCalls, forwarded, err := resolveRequest(fn, call, site)
+			if err != nil {
+				firstErr = fmt.Errorf("%s: %w", fset.Position(call.Pos()), err)
+				return false
+			}
+			calls = append(calls, siteCalls...)
+			fnSites = append(fnSites, forwarded...)
+		}
+		return true
+	})
+	return calls, fnSites, firstErr
+}
+
+func resolveRequest(fn *ast.FuncDecl, call *ast.CallExpr, site requestSite) ([]apiCall, []requestSite, error) {
+	if len(call.Args) <= max(site.methodArg, site.pathArg) {
+		return nil, nil, fmt.Errorf("request call %s has too few arguments", types.ExprString(call))
+	}
+
+	method, methodParam := site.method, -1
+	if method == "" {
+		arg := call.Args[site.methodArg]
+		if m, ok := arg.(*ast.SelectorExpr); ok && isIdent(m.X, "http") && strings.HasPrefix(m.Sel.Name, "Method") {
+			method = strings.ToUpper(strings.TrimPrefix(m.Sel.Name, "Method"))
+		} else if id, ok := arg.(*ast.Ident); ok && paramIndex(fn, id.Name) >= 0 {
+			methodParam = paramIndex(fn, id.Name)
+		} else {
+			return nil, nil, fmt.Errorf("cannot resolve request method %s", types.ExprString(arg))
+		}
+	}
+
+	pathExpr := call.Args[site.pathArg]
+	values, err := (&pathResolver{fn: fn, visiting: map[string]bool{}}).values(pathExpr)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var calls []apiCall
+	var forwarded []requestSite
+	for _, v := range values {
+		if v.param != "" {
+			forwarded = append(forwarded, requestSite{method: method, methodArg: methodParam, pathArg: paramIndex(fn, v.param)})
+			continue
+		}
+		if methodParam >= 0 {
+			return nil, nil, fmt.Errorf("request method comes from a parameter but path %s does not", types.ExprString(pathExpr))
+		}
+		path, _, _ := strings.Cut(v.pattern, "?")
+		if !strings.HasPrefix(path, "/") {
+			return nil, nil, fmt.Errorf("request path %q does not start with /", path)
+		}
+		calls = append(calls, apiCall{method: method, path: path})
+	}
+	return calls, forwarded, nil
+}
+
+// pathValue is one value a request path expression can take: a pattern with
+// "{}" for every runtime value or, when param is set, that parameter of the
+// function passed on unchanged.
+type pathValue struct {
+	pattern string
+	param   string
+}
+
+var errPathCycle = errors.New("request path is built from its own value")
+
+type pathResolver struct {
+	fn       *ast.FuncDecl
+	visiting map[string]bool
+}
+
+func (r *pathResolver) values(expr ast.Expr) ([]pathValue, error) {
 	switch e := expr.(type) {
 	case *ast.BasicLit:
 		if e.Kind == token.STRING {
 			s, err := strconv.Unquote(e.Value)
-			return s, false, err
+			return []pathValue{{pattern: s}}, err
 		}
+	case *ast.ParenExpr:
+		return r.values(e.X)
 	case *ast.Ident:
-		if isParam(fn, e.Name) {
-			return "", true, nil
-		}
-		if rhs := localAssignment(fn, e.Name); rhs != nil {
-			return pathPattern(fn, rhs)
-		}
+		return r.identValues(e.Name)
 	case *ast.CallExpr:
 		if sel, ok := e.Fun.(*ast.SelectorExpr); ok && isIdent(sel.X, "fmt") && sel.Sel.Name == "Sprintf" && len(e.Args) > 0 {
 			if lit, ok := e.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
 				s, err := strconv.Unquote(lit.Value)
-				return formatVerb.ReplaceAllString(s, "{}"), false, err
+				return []pathValue{{pattern: formatPattern(s)}}, err
 			}
 		}
 	case *ast.BinaryExpr:
 		if e.Op == token.ADD {
-			left, leftForwarded := concatOperand(fn, e.X)
-			right, rightForwarded := concatOperand(fn, e.Y)
-			if (leftForwarded && right == "") || (rightForwarded && left == "") {
-				return "", true, nil
+			left, err := r.operand(e.X)
+			if err != nil {
+				return nil, err
 			}
-			if leftForwarded {
-				left = "{}"
+			right, err := r.operand(e.Y)
+			if err != nil {
+				return nil, err
 			}
-			if rightForwarded {
-				right = "{}"
-			}
-			return left + right, false, nil
-		}
-	}
-	return "", false, fmt.Errorf("cannot resolve request path %s", types.ExprString(expr))
-}
-
-func concatOperand(fn *ast.FuncDecl, expr ast.Expr) (string, bool) {
-	if sel, ok := expr.(*ast.SelectorExpr); ok && sel.Sel.Name == "BaseURL" {
-		return "", false
-	}
-	s, forwarded, err := pathPattern(fn, expr)
-	if err != nil {
-		return "{}", false
-	}
-	return s, forwarded
-}
-
-func isParam(fn *ast.FuncDecl, name string) bool {
-	for _, field := range fn.Type.Params.List {
-		for _, n := range field.Names {
-			if n.Name == name {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func localAssignment(fn *ast.FuncDecl, name string) ast.Expr {
-	var rhs ast.Expr
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
-		if rhs != nil {
-			return false
-		}
-		if assign, ok := n.(*ast.AssignStmt); ok && len(assign.Lhs) == len(assign.Rhs) {
-			for i, lhs := range assign.Lhs {
-				if isIdent(lhs, name) {
-					rhs = assign.Rhs[i]
-					return false
+			var out []pathValue
+			for _, lv := range left {
+				for _, rv := range right {
+					out = append(out, concatPathValues(lv, rv))
 				}
 			}
+			return out, nil
 		}
-		return true
+	}
+	return nil, fmt.Errorf("cannot resolve request path %s", types.ExprString(expr))
+}
+
+// identValues follows every assignment to name, since a path variable can be
+// reassigned on some branch; a parameter also stands for itself.
+func (r *pathResolver) identValues(name string) ([]pathValue, error) {
+	if r.visiting[name] {
+		return nil, fmt.Errorf("%w: %s", errPathCycle, name)
+	}
+	r.visiting[name] = true
+	defer delete(r.visiting, name)
+
+	var values []pathValue
+	if paramIndex(r.fn, name) >= 0 {
+		values = append(values, pathValue{param: name})
+	}
+
+	var exprs []ast.Expr
+	var err error
+	ast.Inspect(r.fn.Body, func(n ast.Node) bool {
+		switch s := n.(type) {
+		case *ast.AssignStmt:
+			for i, lhs := range s.Lhs {
+				if !isIdent(lhs, name) {
+					continue
+				}
+				if (s.Tok != token.ASSIGN && s.Tok != token.DEFINE) || len(s.Lhs) != len(s.Rhs) {
+					err = fmt.Errorf("cannot resolve request path %s: unsupported assignment %s", name, s.Tok)
+					return false
+				}
+				exprs = append(exprs, s.Rhs[i])
+			}
+		case *ast.ValueSpec:
+			for i, id := range s.Names {
+				if id.Name != name || len(s.Values) == 0 {
+					continue
+				}
+				if len(s.Values) != len(s.Names) {
+					err = fmt.Errorf("cannot resolve request path %s: unsupported declaration", name)
+					return false
+				}
+				exprs = append(exprs, s.Values[i])
+			}
+		case *ast.RangeStmt:
+			if isIdent(s.Key, name) || isIdent(s.Value, name) {
+				err = fmt.Errorf("cannot resolve request path %s: it is a range variable", name)
+				return false
+			}
+		}
+		return err == nil
 	})
-	return rhs
+	if err != nil {
+		return nil, err
+	}
+
+	for _, expr := range exprs {
+		v, err := r.values(expr)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, v...)
+	}
+	if len(values) == 0 {
+		return nil, fmt.Errorf("cannot resolve request path %s", name)
+	}
+	return values, nil
+}
+
+// operand resolves one side of a path concatenation. The base URL adds nothing
+// to the path, and anything else unresolvable is a runtime value; a cycle is
+// not, since only a path variable is built from its own value.
+func (r *pathResolver) operand(expr ast.Expr) ([]pathValue, error) {
+	if sel, ok := expr.(*ast.SelectorExpr); ok && sel.Sel.Name == "BaseURL" {
+		return []pathValue{{}}, nil
+	}
+	values, err := r.values(expr)
+	if err == nil {
+		return values, nil
+	}
+	if errors.Is(err, errPathCycle) {
+		return nil, err
+	}
+	return []pathValue{{pattern: "{}"}}, nil
+}
+
+func concatPathValues(left, right pathValue) pathValue {
+	if left.param != "" && right == (pathValue{}) {
+		return left
+	}
+	if right.param != "" && left == (pathValue{}) {
+		return right
+	}
+	return pathValue{pattern: left.text() + right.text()}
+}
+
+func (v pathValue) text() string {
+	if v.param != "" {
+		return "{}"
+	}
+	return v.pattern
+}
+
+func formatPattern(format string) string {
+	return formatVerb.ReplaceAllStringFunc(format, func(verb string) string {
+		if verb == "%%" {
+			return "%"
+		}
+		return "{}"
+	})
+}
+
+func paramIndex(fn *ast.FuncDecl, name string) int {
+	i := 0
+	for _, field := range fn.Type.Params.List {
+		if len(field.Names) == 0 {
+			i++
+			continue
+		}
+		for _, id := range field.Names {
+			if id.Name == name {
+				return i
+			}
+			i++
+		}
+	}
+	return -1
 }
 
 func isIdent(expr ast.Expr, name string) bool {
@@ -671,8 +918,10 @@ func checkSchemaGolden(t *testing.T, goldenPath string, actual []string) {
 func schemaGuardRegenerateHelp(testName, goldenPath string) string {
 	return fmt.Sprintf(`The golden changes when the served API changes or when internal/client starts
 or stops calling an endpoint. Regenerate it from the repository root against a
-fresh server of the supported Jellyfin version:
+fresh server of the supported Jellyfin version (down -v drops the volumes a
+previous run left behind):
 
+  docker compose --env-file internal/provider/supported_jellyfin_version.env down -v
   docker compose --env-file internal/provider/supported_jellyfin_version.env up -d
   eval "$(./scripts/setup_jellyfin.sh | grep '^export ')"
   SCHEMA_GUARD_UPDATE=1 TF_ACC=1 go test -count=1 -run '^%[1]s$' ./internal/provider/
@@ -681,9 +930,9 @@ A maintainer must review the resulting diff before it is committed:
 
   git diff internal/provider/%[2]s
 
-Every line is an endpoint the provider calls or a schema it sends or reads, so
-a change can break a resource even though this test passes again. Fix the
-affected resources in the same change.
+Every line is an endpoint the provider calls or a schema, or one field of a
+schema, that it sends or reads, so a change can break a resource even though
+this test passes again. Fix the affected resources in the same change.
 `, testName, goldenPath)
 }
 
@@ -758,7 +1007,9 @@ func TestUnitReduceOpenAPISpec(t *testing.T) {
       "ProblemDetails": {"type": "object"},
       "SessionInfoDto": {"type": "object", "properties": {"NowPlayingItem": {"$ref": "#/components/schemas/BaseItemDto"}}},
       "Unused": {"type": "object"},
+      "UserConfiguration": {"type": "object"},
       "UserDto": {"type": "object", "properties": {
+        "Configuration": {"$ref": "#/components/schemas/UserConfiguration"},
         "Id": {"type": "string", "format": "uuid"},
         "Policy": {"$ref": "#/components/schemas/UserPolicy"},
         "Self": {"$ref": "#/components/schemas/UserDto"}
@@ -766,7 +1017,7 @@ func TestUnitReduceOpenAPISpec(t *testing.T) {
       "UserPolicy": {"type": "object", "properties": {
         "BlockedTags": {"type": "array", "items": {"type": "string"}},
         "Limits": {"type": "object", "additionalProperties": {"type": "integer", "format": "int32"}}
-      }}
+      }, "additionalProperties": {"type": "string"}}
     }
   }
 }`
@@ -793,13 +1044,21 @@ func TestUnitReduceOpenAPISpec(t *testing.T) {
 		"op POST /System/Configuration/Branding | body=#BrandingOptionsDto",
 		"op POST /System/Configuration/{key} | params=key:path:required=true | body=any",
 		"op POST /Users/AuthenticateByName | resp=#AuthenticationResult",
-		"schema AuthenticationResult: {object,AccessToken=string,SessionInfo=#SessionInfoDto,User=#UserDto}",
-		"schema BrandingOptionsDto: {object,CustomCss=string}",
-		"schema EncodingOptions: {object,HardwareAccelerationType=#HardwareAccelerationType}",
+		"schema AuthenticationResult.AccessToken: string",
+		"schema AuthenticationResult.SessionInfo: #SessionInfoDto",
+		"schema AuthenticationResult.User: #UserDto",
+		"schema BrandingOptionsDto.CustomCss: string",
+		"schema EncodingOptions.HardwareAccelerationType: #HardwareAccelerationType",
 		"schema HardwareAccelerationType: string enum(none|vaapi)",
 		"schema NetworkConfiguration: <missing>",
-		"schema UserDto: {object,Id=string:uuid,Policy=#UserPolicy,Self=#UserDto}",
-		"schema UserPolicy: {object,BlockedTags=[]string,Limits={object,map=integer:int32}}",
+		"schema UserConfiguration: {object}",
+		"schema UserDto.Configuration: #UserConfiguration",
+		"schema UserDto.Id: string:uuid",
+		"schema UserDto.Policy: #UserPolicy",
+		"schema UserDto.Self: #UserDto",
+		"schema UserPolicy.BlockedTags: []string",
+		"schema UserPolicy.Limits: {object,map=integer:int32}",
+		"schema UserPolicy: {object,map=string}",
 		"undocumented POST /Users/{}",
 	}
 
@@ -817,66 +1076,182 @@ func TestUnitReduceOpenAPISpecRejectsUnmappedNamedConfiguration(t *testing.T) {
 	}
 }
 
-func TestUnitFileAPICalls(t *testing.T) {
-	src := `package client
+const testClientHelpersSource = `package client
 
 func (c *Client) doRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
-	return http.NewRequestWithContext(ctx, method, c.BaseURL+path, body)
+	url := c.BaseURL + path
+	return http.NewRequestWithContext(ctx, method, url, body)
 }
 
 func (c *Client) get(ctx context.Context, path string, decode func(io.Reader) error) error {
-	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	_, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	return err
 }
 
-func (c *Client) Calls(ctx context.Context, id string) {
+func (c *Client) getRaw(ctx context.Context, path string) (string, error) {
+	_, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	return "", err
+}
+
+func (c *Client) postRaw(ctx context.Context, path string, rawJSON string) error {
+	_, err := c.doRequest(ctx, http.MethodPost, path, strings.NewReader(rawJSON))
+	return err
+}
+
+func (c *Client) delete(ctx context.Context, path string) error {
+	_, err := c.doRequest(ctx, http.MethodDelete, path, nil)
+	return err
+}
+`
+
+func parseTestClient(t *testing.T, sources ...string) (*token.FileSet, []*ast.File) {
+	t.Helper()
+	fset := token.NewFileSet()
+	var files []*ast.File
+	for i, src := range sources {
+		f, err := parser.ParseFile(fset, fmt.Sprintf("client%d.go", i), src, 0)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		files = append(files, f)
+	}
+	return fset, files
+}
+
+func TestUnitPackageAPICalls(t *testing.T) {
+	calls := `package client
+
+func (c *Client) Calls(ctx context.Context, id string, existing bool) {
 	c.get(ctx, "/System/Info", nil)
 	c.getRaw(ctx, fmt.Sprintf("/Users/%s/Items?limit=%d", url.PathEscape(id), 5))
+	c.get(ctx, fmt.Sprintf("/Items/%[1]s/Images/%-5d", id, 1), nil)
 	c.delete(ctx, "/Items/"+id)
 	apiPath := "/Library/VirtualFolders?" + params.Encode()
 	c.postRaw(ctx, apiPath, "")
 	u := c.BaseURL + "/Users/AuthenticateByName"
 	http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
+	path := "/Users/New"
+	if existing {
+		path = fmt.Sprintf("/Users/%s", id)
+	}
+	c.postRaw(ctx, path, "")
+	c.put(ctx, "/Users/Foo", nil)
+	c.getConfig(ctx, "/System/Configuration/encoding")
+	c.send(ctx, http.MethodHead, "/System/Ping")
+	c.HTTPClient.Get(c.BaseURL + "/Health")
 }
 `
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "client.go", src, 0)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
+	wrappers := `package client
 
-	calls, err := fileAPICalls(fset, f)
+func (c *Client) put(ctx context.Context, path string, body io.Reader) error {
+	_, err := c.doRequest(ctx, http.MethodPut, path, body)
+	return err
+}
+
+func (c *Client) getConfig(ctx context.Context, path string) (string, error) {
+	return c.getRaw(ctx, path)
+}
+
+func (c *Client) send(ctx context.Context, method, path string) error {
+	_, err := c.doRequest(ctx, method, path, nil)
+	return err
+}
+`
+	fset, files := parseTestClient(t, calls, wrappers, testClientHelpersSource)
+
+	got, err := packageAPICalls(fset, files)
 	if err != nil {
-		t.Fatalf("fileAPICalls: %v", err)
+		t.Fatalf("packageAPICalls: %v", err)
 	}
 
 	want := []apiCall{
 		{http.MethodGet, "/System/Info"},
 		{http.MethodGet, "/Users/{}/Items"},
+		{http.MethodGet, "/Items/{}/Images/{}"},
 		{http.MethodDelete, "/Items/{}"},
 		{http.MethodPost, "/Library/VirtualFolders"},
 		{http.MethodPost, "/Users/AuthenticateByName"},
+		{http.MethodPost, "/Users/New"},
+		{http.MethodPost, "/Users/{}"},
+		{http.MethodPut, "/Users/Foo"},
+		{http.MethodGet, "/System/Configuration/encoding"},
+		{http.MethodHead, "/System/Ping"},
+		{http.MethodGet, "/Health"},
 	}
-	if fmt.Sprint(calls) != fmt.Sprint(want) {
-		t.Fatalf("unexpected calls:\n%v\nwant:\n%v", calls, want)
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("unexpected calls:\n%v\nwant:\n%v", got, want)
 	}
 }
 
-func TestUnitFileAPICallsRejectsUnresolvablePath(t *testing.T) {
-	src := `package client
+func TestUnitPackageAPICallsRejectsUnfollowableRequests(t *testing.T) {
+	tests := map[string]struct {
+		src     string
+		wantErr string
+	}{
+		"unresolvable path": {
+			src: `package client
 
 func (c *Client) Calls(ctx context.Context) {
 	c.get(ctx, routes.Users, nil)
 }
-`
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "client.go", src, 0)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
+`,
+			wantErr: "routes.Users",
+		},
+		"path built from itself": {
+			src: `package client
+
+func (c *Client) Calls(ctx context.Context, q string) {
+	path := "/Users"
+	path = path + "?" + q
+	c.get(ctx, path, nil)
+}
+`,
+			wantErr: "built from its own value: path",
+		},
+		"method forwarded without its path": {
+			src: `package client
+
+func (c *Client) ping(ctx context.Context, method string) error {
+	_, err := c.doRequest(ctx, method, "/System/Ping", nil)
+	return err
+}
+`,
+			wantErr: "request method comes from a parameter",
+		},
+		"forwarding function without callers": {
+			src: `package client
+
+func (c *Client) GetRaw(ctx context.Context, path string) (string, error) {
+	return c.getRaw(ctx, path)
+}
+`,
+			wantErr: "GetRaw passes a parameter on as a request path",
+		},
 	}
 
-	if _, err := fileAPICalls(fset, f); err == nil || !strings.Contains(err.Error(), "routes.Users") {
-		t.Fatalf("expected an unresolvable path error, got %v", err)
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			fset, files := parseTestClient(t, tt.src, testClientHelpersSource)
+			if _, err := packageAPICalls(fset, files); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected an error containing %q, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestUnitFormatPattern(t *testing.T) {
+	tests := map[string]string{
+		"/Users/%s":          "/Users/{}",
+		"/Users/%[1]s/%[1]s": "/Users/{}/{}",
+		"/Items/%5d":         "/Items/{}",
+		"/Items/%-5.2f":      "/Items/{}",
+		"/Items/%*d":         "/Items/{}",
+		"/Search/100%%":      "/Search/100%",
+	}
+	for format, want := range tests {
+		if got := formatPattern(format); got != want {
+			t.Errorf("formatPattern(%q) = %q, want %q", format, got, want)
+		}
 	}
 }
 
