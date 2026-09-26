@@ -359,24 +359,63 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 		name := g.uniqueName("jellyfin_scheduled_task", sanitizeName(task.Name))
 		imports = append(imports, importBlock("jellyfin_scheduled_task", name, task.ID))
 
-		triggersJSON, err := json.Marshal(task.Triggers)
+		triggers, err := triggersHCL(task.Triggers)
 		if err != nil {
-			return nil, nil, fmt.Errorf("marshaling triggers for task %s: %w", task.ID, err)
-		}
-
-		prettyTriggers, err := prettyJSON(string(triggersJSON))
-		if err != nil {
-			return nil, nil, fmt.Errorf("formatting triggers for task %s: %w", task.ID, err)
+			return nil, nil, fmt.Errorf("parsing triggers for task %s: %w", task.ID, err)
 		}
 
 		attrs := map[string]string{
-			"task_id":       quote(task.ID),
-			"triggers_json": "jsonencode(" + prettyTriggers + ")",
+			"task_id":  quote(task.ID),
+			"triggers": triggers,
 		}
 		resources = append(resources, resourceBlock("jellyfin_scheduled_task", name, attrs))
 	}
 
 	return imports, resources, nil
+}
+
+type scheduledTaskTrigger struct {
+	Type            string  `json:"Type"`
+	TimeOfDayTicks  *int64  `json:"TimeOfDayTicks"`
+	IntervalTicks   *int64  `json:"IntervalTicks"`
+	DayOfWeek       *string `json:"DayOfWeek"`
+	MaxRuntimeTicks *int64  `json:"MaxRuntimeTicks"`
+}
+
+// triggersHCL renders server triggers as the jellyfin_scheduled_task triggers list.
+// Every attribute the server returns is written out because the resource removes
+// unset trigger attributes from the server on apply.
+func triggersHCL(raw []json.RawMessage) (string, error) {
+	if len(raw) == 0 {
+		return "[]", nil
+	}
+
+	var b strings.Builder
+	b.WriteString("[\n")
+	for _, r := range raw {
+		var t scheduledTaskTrigger
+		if err := json.Unmarshal(r, &t); err != nil {
+			return "", err
+		}
+
+		b.WriteString("    {\n")
+		fmt.Fprintf(&b, "      type = %s\n", quote(t.Type))
+		if t.TimeOfDayTicks != nil {
+			fmt.Fprintf(&b, "      time_of_day_ticks = %d\n", *t.TimeOfDayTicks)
+		}
+		if t.IntervalTicks != nil {
+			fmt.Fprintf(&b, "      interval_ticks = %d\n", *t.IntervalTicks)
+		}
+		if t.DayOfWeek != nil {
+			fmt.Fprintf(&b, "      day_of_week = %s\n", quote(*t.DayOfWeek))
+		}
+		if t.MaxRuntimeTicks != nil {
+			fmt.Fprintf(&b, "      max_runtime_ticks = %d\n", *t.MaxRuntimeTicks)
+		}
+		b.WriteString("    },\n")
+	}
+	b.WriteString("  ]")
+	return b.String(), nil
 }
 
 func (g *generator) generateSingletonConfigs() ([]string, []string, error) {

@@ -398,6 +398,95 @@ func TestGenerateScheduledTasks(t *testing.T) {
 	if !strings.Contains(imports[0], "task-id-1") {
 		t.Errorf("expected task-id-1 in import: %s", imports[0])
 	}
+
+	want := `resource "jellyfin_scheduled_task" "scan_media_library" {
+  task_id = "task-id-1"
+  triggers = [
+    {
+      type = "IntervalTrigger"
+      interval_ticks = 432000000000
+    },
+  ]
+}
+`
+	if resources[0] != want {
+		t.Errorf("resource block = %q, want %q", resources[0], want)
+	}
+}
+
+func TestTriggersHCL(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		raw  []string
+		want string
+	}{
+		"no triggers": {want: "[]"},
+		"interval trigger without day_of_week": {
+			raw: []string{`{"Type":"IntervalTrigger","IntervalTicks":864000000000}`},
+			want: `[
+    {
+      type = "IntervalTrigger"
+      interval_ticks = 864000000000
+    },
+  ]`,
+		},
+		"daily trigger keeps max_runtime_ticks": {
+			raw: []string{`{"Type":"DailyTrigger","TimeOfDayTicks":72000000000,"MaxRuntimeTicks":144000000000}`},
+			want: `[
+    {
+      type = "DailyTrigger"
+      time_of_day_ticks = 72000000000
+      max_runtime_ticks = 144000000000
+    },
+  ]`,
+		},
+		"weekly trigger and startup trigger": {
+			raw: []string{
+				`{"Type":"WeeklyTrigger","TimeOfDayTicks":36000000000,"DayOfWeek":"Tuesday"}`,
+				`{"Type":"StartupTrigger"}`,
+			},
+			want: `[
+    {
+      type = "WeeklyTrigger"
+      time_of_day_ticks = 36000000000
+      day_of_week = "Tuesday"
+    },
+    {
+      type = "StartupTrigger"
+    },
+  ]`,
+		},
+		"explicit nulls and zero ticks": {
+			raw: []string{`{"Type":"IntervalTrigger","IntervalTicks":0,"TimeOfDayTicks":null,"DayOfWeek":null,"MaxRuntimeTicks":0}`},
+			want: `[
+    {
+      type = "IntervalTrigger"
+      interval_ticks = 0
+      max_runtime_ticks = 0
+    },
+  ]`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			raw := make([]json.RawMessage, len(tc.raw))
+			for i, r := range tc.raw {
+				raw[i] = json.RawMessage(r)
+			}
+
+			got, err := triggersHCL(raw)
+			if err != nil {
+				t.Fatalf("triggersHCL() error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("triggersHCL() = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestGenerateSingletonConfigs(t *testing.T) {
