@@ -4,9 +4,13 @@
 package provider
 
 import (
+	"context"
 	"regexp"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
 
@@ -41,4 +45,42 @@ func libraryNameValidators() []validator.String {
 		noSurroundingWhitespaceValidator,
 		libraryNameCharactersValidator,
 	}
+}
+
+// unsupportedLibraryOptionValidator rejects a value at plan time for an
+// attribute with no Jellyfin library option behind it. The server ignores the
+// key and reads it back as null, which Terraform reports only as an
+// inconsistent result after apply.
+type unsupportedLibraryOptionValidator struct{}
+
+func (unsupportedLibraryOptionValidator) Description(context.Context) string {
+	return "must not be set, because Jellyfin has no such library option"
+}
+
+func (v unsupportedLibraryOptionValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (unsupportedLibraryOptionValidator) check(p path.Path, value attr.Value, diags *diag.Diagnostics) {
+	if value.IsNull() || value.IsUnknown() {
+		return
+	}
+	diags.AddAttributeError(p, "Unsupported library option",
+		"Jellyfin has no such library option, so the server would ignore this value. Remove it from the configuration.")
+}
+
+func (v unsupportedLibraryOptionValidator) ValidateBool(_ context.Context, req validator.BoolRequest, resp *validator.BoolResponse) {
+	v.check(req.Path, req.ConfigValue, &resp.Diagnostics)
+}
+
+func (v unsupportedLibraryOptionValidator) ValidateInt64(_ context.Context, req validator.Int64Request, resp *validator.Int64Response) {
+	v.check(req.Path, req.ConfigValue, &resp.Diagnostics)
+}
+
+func (v unsupportedLibraryOptionValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	v.check(req.Path, req.ConfigValue, &resp.Diagnostics)
+}
+
+func (v unsupportedLibraryOptionValidator) ValidateList(_ context.Context, req validator.ListRequest, resp *validator.ListResponse) {
+	v.check(req.Path, req.ConfigValue, &resp.Diagnostics)
 }

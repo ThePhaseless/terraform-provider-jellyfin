@@ -149,8 +149,8 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"paths": schema.ListAttribute{
-				Description:         "List of file system paths for this library.",
-				MarkdownDescription: "List of file system paths for this library.",
+				Description:         "Paths of the library's media folders. Jellyfin looks them up on the server, so when it runs in a container they must be paths inside the container.",
+				MarkdownDescription: "Paths of the library's media folders. Jellyfin looks them up on the server, so when it runs in a container they must be paths inside the container.",
 				Required:            true,
 				ElementType:         types.StringType,
 				PlanModifiers: []planmodifier.List{
@@ -233,19 +233,43 @@ func libraryOptionsAttributes() map[string]schema.Attribute {
 			},
 		}
 	}
+	unsupportedBool := func(desc string) schema.BoolAttribute {
+		a := optionalBool(desc + " " + unsupportedLibraryOptionMessage)
+		a.DeprecationMessage = unsupportedLibraryOptionMessage
+		a.Validators = []validator.Bool{unsupportedLibraryOptionValidator{}}
+		return a
+	}
+	unsupportedInt := func(desc string) schema.Int64Attribute {
+		a := optionalInt(desc + " " + unsupportedLibraryOptionMessage)
+		a.DeprecationMessage = unsupportedLibraryOptionMessage
+		a.Validators = []validator.Int64{unsupportedLibraryOptionValidator{}}
+		return a
+	}
+	unsupportedString := func(desc string) schema.StringAttribute {
+		a := optionalString(desc + " " + unsupportedLibraryOptionMessage)
+		a.DeprecationMessage = unsupportedLibraryOptionMessage
+		a.Validators = []validator.String{unsupportedLibraryOptionValidator{}}
+		return a
+	}
+	unsupportedStringList := func(desc string) schema.ListAttribute {
+		a := optionalStringList(desc + " " + unsupportedLibraryOptionMessage)
+		a.DeprecationMessage = unsupportedLibraryOptionMessage
+		a.Validators = []validator.List{unsupportedLibraryOptionValidator{}}
+		return a
+	}
 
 	return map[string]schema.Attribute{
 		"enable_photos":                                 optionalBool("Whether photos are enabled."),
 		"enable_realtime_monitor":                       optionalBool("Whether realtime monitoring is enabled."),
-		"enable_emby_photos":                            optionalBool("Whether Emby photos are enabled."),
-		"enable_photo_subtitle":                         optionalBool("Whether photo subtitles are enabled."),
-		"extract_chapters_during_library_scan":          optionalBool("Whether chapters are extracted during library scan."),
+		"enable_emby_photos":                            unsupportedBool("Whether Emby photos are enabled."),
+		"enable_photo_subtitle":                         unsupportedBool("Whether photo subtitles are enabled."),
+		"extract_chapters_during_library_scan":          optionalBool("Whether chapter images are extracted during the library scan."),
 		"enable_chapter_image_extraction":               optionalBool("Whether chapter image extraction is enabled."),
-		"chapter_image_interval_seconds":                optionalInt("Chapter image interval in seconds."),
-		"extract_media_information_during_library_scan": optionalBool("Whether media information is extracted during library scan."),
-		"download_images_in_advance":                    optionalBool("Whether images are downloaded in advance."),
-		"cache_images_in_library":                       optionalBool("Whether images are cached in the library."),
-		"enable_media_conversion":                       optionalBool("Whether media conversion is enabled."),
+		"chapter_image_interval_seconds":                unsupportedInt("Chapter image interval in seconds."),
+		"extract_media_information_during_library_scan": unsupportedBool("Whether media information is extracted during library scan."),
+		"download_images_in_advance":                    unsupportedBool("Whether images are downloaded in advance."),
+		"cache_images_in_library":                       unsupportedBool("Whether images are cached in the library."),
+		"enable_media_conversion":                       unsupportedBool("Whether media conversion is enabled."),
 		"path_infos": schema.ListNestedAttribute{
 			NestedObject: schema.NestedAttributeObject{
 				Attributes: pathInfoAttributes(),
@@ -260,21 +284,21 @@ func libraryOptionsAttributes() map[string]schema.Attribute {
 		},
 		"preferred_metadata_language":      optionalString("Preferred metadata language."),
 		"metadata_country_code":            optionalString("Metadata country code."),
-		"disabled_metadata_savers":         optionalStringList("Disabled metadata savers."),
+		"disabled_metadata_savers":         unsupportedStringList("Disabled metadata savers."),
 		"local_metadata_reader_order":      optionalStringList("Local metadata reader order."),
-		"disabled_metadata_fetchers":       optionalStringList("Disabled metadata fetchers."),
-		"metadata_fetcher_order":           optionalStringList("Metadata fetcher order."),
-		"disabled_image_fetchers":          optionalStringList("Disabled image fetchers."),
-		"image_fetcher_order":              optionalStringList("Image fetcher order."),
+		"disabled_metadata_fetchers":       unsupportedStringList("Disabled metadata fetchers."),
+		"metadata_fetcher_order":           unsupportedStringList("Metadata fetcher order for the whole library; Jellyfin only has it per item type, as `metadata_fetcher_order` in `type_options`."),
+		"disabled_image_fetchers":          unsupportedStringList("Disabled image fetchers."),
+		"image_fetcher_order":              unsupportedStringList("Image fetcher order for the whole library; Jellyfin only has it per item type, as `image_fetcher_order` in `type_options`."),
 		"disabled_subtitle_fetchers":       optionalStringList("Disabled subtitle fetchers."),
 		"subtitle_fetcher_order":           optionalStringList("Subtitle fetcher order."),
 		"save_local_metadata":              optionalBool("Whether local metadata is saved."),
-		"save_local_thumbnail_sets":        optionalBool("Whether local thumbnail sets are saved."),
-		"import_missing_episodes":          optionalBool("Whether missing episodes are imported."),
+		"save_local_thumbnail_sets":        unsupportedBool("Whether local thumbnail sets are saved."),
+		"import_missing_episodes":          unsupportedBool("Whether missing episodes are imported."),
 		"enable_automatic_series_grouping": optionalBool("Whether automatic series grouping is enabled."),
 		"season_zero_display_name":         optionalString("Season zero display name."),
-		"metadata_refresh_mode":            optionalString("Metadata refresh mode."),
-		"disabled":                         optionalBool("Whether the library is disabled."),
+		"metadata_refresh_mode":            unsupportedString("Metadata refresh mode."),
+		"disabled":                         optionalBool("Whether the library is disabled, the inverse of Jellyfin's `Enabled` option."),
 		"type_options": schema.ListNestedAttribute{
 			NestedObject: schema.NestedAttributeObject{
 				Attributes: typeOptionsAttributes(),
@@ -302,22 +326,35 @@ func pathInfoAttributes() map[string]schema.Attribute {
 			},
 		}
 	}
+	const networkPathRemoved = "Jellyfin 10.11 removed network paths, so current servers ignore this value."
+	networkPath := optionalString("Network path. " + networkPathRemoved)
+	networkPath.DeprecationMessage = networkPathRemoved
+	username := optionalString("Username. " + unsupportedLibraryOptionMessage)
+	username.DeprecationMessage = unsupportedLibraryOptionMessage
+	username.Validators = []validator.String{unsupportedLibraryOptionValidator{}}
 	return map[string]schema.Attribute{
 		"path":         optionalString("Local path."),
-		"network_path": optionalString("Network path."),
-		"username":     optionalString("Username."),
+		"network_path": networkPath,
+		"username":     username,
 		"password": schema.StringAttribute{
-			Description:         "Password.",
-			MarkdownDescription: "Password.",
+			Description:         "Password. " + unsupportedLibraryOptionMessage,
+			MarkdownDescription: "Password. " + unsupportedLibraryOptionMessage,
 			Optional:            true,
 			Computed:            true,
 			Sensitive:           true,
+			DeprecationMessage:  unsupportedLibraryOptionMessage,
+			Validators:          []validator.String{unsupportedLibraryOptionValidator{}},
 			PlanModifiers: []planmodifier.String{
 				stringplanmodifier.UseStateForUnknown(),
 			},
 		},
 	}
 }
+
+// Attributes with no Jellyfin library option behind them stay in the schema,
+// deprecated, so configurations that leave them unset keep working until
+// they are removed.
+const unsupportedLibraryOptionMessage = "Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release."
 
 func typeOptionsAttributes() map[string]schema.Attribute {
 	optionalString := func(desc string) schema.StringAttribute {
@@ -828,42 +865,15 @@ func overlayLibraryOptions(ctx context.Context, m map[string]json.RawMessage, op
 
 	putJSONBool(m, "EnablePhotos", opts.EnablePhotos)
 	putJSONBool(m, "EnableRealtimeMonitor", opts.EnableRealtimeMonitor)
-	putJSONBool(m, "EnableEmbiPhotos", opts.EnableEmbiPhotos)
-	putJSONBool(m, "EnablePhotoSubtitle", opts.EnablePhotoSubtitle)
-	putJSONBool(m, "ExtractChaptersDuringLibraryScan", opts.ExtractChaptersDuringLibraryScan)
+	putJSONBool(m, "ExtractChapterImagesDuringLibraryScan", opts.ExtractChaptersDuringLibraryScan)
 	putJSONBool(m, "EnableChapterImageExtraction", opts.EnableChapterImageExtraction)
-	putJSONInt64(m, "ChapterImageIntervalSeconds", opts.ChapterImageIntervalSeconds)
-	putJSONBool(m, "ExtractMediaInformationDuringLibraryScan", opts.ExtractMediaInformationDuringLibraryScan)
-	putJSONBool(m, "DownloadImagesInAdvance", opts.DownloadImagesInAdvance)
-	putJSONBool(m, "CacheImagesInLibrary", opts.CacheImagesInLibrary)
-	putJSONBool(m, "EnableMediaConversion", opts.EnableMediaConversion)
 	if d := overlayPathInfos(ctx, m, opts.PathInfos); d.HasError() {
 		diags.Append(d...)
 		return diags
 	}
 	putJSONString(m, "PreferredMetadataLanguage", opts.PreferredMetadataLanguage)
 	putJSONString(m, "MetadataCountryCode", opts.MetadataCountryCode)
-	if d := putJSONStringList(ctx, m, "DisabledMetadataSavers", opts.DisabledMetadataSavers); d.HasError() {
-		diags.Append(d...)
-		return diags
-	}
 	if d := putJSONStringList(ctx, m, "LocalMetadataReaderOrder", opts.LocalMetadataReaderOrder); d.HasError() {
-		diags.Append(d...)
-		return diags
-	}
-	if d := putJSONStringList(ctx, m, "DisabledMetadataFetchers", opts.DisabledMetadataFetchers); d.HasError() {
-		diags.Append(d...)
-		return diags
-	}
-	if d := putJSONStringList(ctx, m, "MetadataFetcherOrder", opts.MetadataFetcherOrder); d.HasError() {
-		diags.Append(d...)
-		return diags
-	}
-	if d := putJSONStringList(ctx, m, "DisabledImageFetchers", opts.DisabledImageFetchers); d.HasError() {
-		diags.Append(d...)
-		return diags
-	}
-	if d := putJSONStringList(ctx, m, "ImageFetcherOrder", opts.ImageFetcherOrder); d.HasError() {
 		diags.Append(d...)
 		return diags
 	}
@@ -876,12 +886,11 @@ func overlayLibraryOptions(ctx context.Context, m map[string]json.RawMessage, op
 		return diags
 	}
 	putJSONBool(m, "SaveLocalMetadata", opts.SaveLocalMetadata)
-	putJSONBool(m, "SaveLocalThumbnailSets", opts.SaveLocalThumbnailSets)
-	putJSONBool(m, "ImportMissingEpisodes", opts.ImportMissingEpisodes)
 	putJSONBool(m, "EnableAutomaticSeriesGrouping", opts.EnableAutomaticSeriesGrouping)
 	putJSONString(m, "SeasonZeroDisplayName", opts.SeasonZeroDisplayName)
-	putJSONString(m, "MetadataRefreshMode", opts.MetadataRefreshMode)
-	putJSONBool(m, "Disabled", opts.Disabled)
+	if !opts.Disabled.IsNull() && !opts.Disabled.IsUnknown() {
+		putJSONBool(m, "Enabled", types.BoolValue(!opts.Disabled.ValueBool()))
+	}
 	if d := overlayTypeOptions(ctx, m, opts.TypeOptions); d.HasError() {
 		diags.Append(d...)
 		return diags
@@ -905,8 +914,6 @@ func overlayPathInfos(ctx context.Context, m map[string]json.RawMessage, v types
 		entry := map[string]json.RawMessage{}
 		putJSONString(entry, "Path", e.Path)
 		putJSONString(entry, "NetworkPath", e.NetworkPath)
-		putJSONString(entry, "Username", e.Username)
-		putJSONString(entry, "Password", e.Password)
 		rawEntries[i] = entry
 	}
 	b, err := json.Marshal(rawEntries)
@@ -1018,36 +1025,30 @@ func flattenLibraryOptions(ctx context.Context, raw string, diags *diag.Diagnost
 		return nil
 	}
 
-	opts := &LibraryOptionsModel{}
+	// The attributes with no Jellyfin library option behind them stay null.
+	opts := &LibraryOptionsModel{
+		DisabledMetadataSavers:   types.ListNull(types.StringType),
+		DisabledMetadataFetchers: types.ListNull(types.StringType),
+		MetadataFetcherOrder:     types.ListNull(types.StringType),
+		DisabledImageFetchers:    types.ListNull(types.StringType),
+		ImageFetcherOrder:        types.ListNull(types.StringType),
+	}
 	opts.EnablePhotos = getJSONBool(m, "EnablePhotos")
 	opts.EnableRealtimeMonitor = getJSONBool(m, "EnableRealtimeMonitor")
-	opts.EnableEmbiPhotos = getJSONBool(m, "EnableEmbiPhotos")
-	opts.EnablePhotoSubtitle = getJSONBool(m, "EnablePhotoSubtitle")
-	opts.ExtractChaptersDuringLibraryScan = getJSONBool(m, "ExtractChaptersDuringLibraryScan")
+	opts.ExtractChaptersDuringLibraryScan = getJSONBool(m, "ExtractChapterImagesDuringLibraryScan")
 	opts.EnableChapterImageExtraction = getJSONBool(m, "EnableChapterImageExtraction")
-	opts.ChapterImageIntervalSeconds = getJSONInt64(m, "ChapterImageIntervalSeconds")
-	opts.ExtractMediaInformationDuringLibraryScan = getJSONBool(m, "ExtractMediaInformationDuringLibraryScan")
-	opts.DownloadImagesInAdvance = getJSONBool(m, "DownloadImagesInAdvance")
-	opts.CacheImagesInLibrary = getJSONBool(m, "CacheImagesInLibrary")
-	opts.EnableMediaConversion = getJSONBool(m, "EnableMediaConversion")
 	opts.PathInfos = flattenPathInfos(ctx, m, diags)
 	opts.PreferredMetadataLanguage = getJSONString(m, "PreferredMetadataLanguage")
 	opts.MetadataCountryCode = getJSONString(m, "MetadataCountryCode")
-	opts.DisabledMetadataSavers, _ = getJSONStringList(ctx, m, "DisabledMetadataSavers")
 	opts.LocalMetadataReaderOrder, _ = getJSONStringList(ctx, m, "LocalMetadataReaderOrder")
-	opts.DisabledMetadataFetchers, _ = getJSONStringList(ctx, m, "DisabledMetadataFetchers")
-	opts.MetadataFetcherOrder, _ = getJSONStringList(ctx, m, "MetadataFetcherOrder")
-	opts.DisabledImageFetchers, _ = getJSONStringList(ctx, m, "DisabledImageFetchers")
-	opts.ImageFetcherOrder, _ = getJSONStringList(ctx, m, "ImageFetcherOrder")
 	opts.DisabledSubtitleFetchers, _ = getJSONStringList(ctx, m, "DisabledSubtitleFetchers")
 	opts.SubtitleFetcherOrder, _ = getJSONStringList(ctx, m, "SubtitleFetcherOrder")
 	opts.SaveLocalMetadata = getJSONBool(m, "SaveLocalMetadata")
-	opts.SaveLocalThumbnailSets = getJSONBool(m, "SaveLocalThumbnailSets")
-	opts.ImportMissingEpisodes = getJSONBool(m, "ImportMissingEpisodes")
 	opts.EnableAutomaticSeriesGrouping = getJSONBool(m, "EnableAutomaticSeriesGrouping")
 	opts.SeasonZeroDisplayName = getJSONString(m, "SeasonZeroDisplayName")
-	opts.MetadataRefreshMode = getJSONString(m, "MetadataRefreshMode")
-	opts.Disabled = getJSONBool(m, "Disabled")
+	if enabled := getJSONBool(m, "Enabled"); !enabled.IsNull() {
+		opts.Disabled = types.BoolValue(!enabled.ValueBool())
+	}
 	opts.TypeOptions = flattenTypeOptions(ctx, m, diags)
 	return opts
 }
@@ -1068,8 +1069,8 @@ func flattenPathInfos(_ context.Context, m map[string]json.RawMessage, diags *di
 		attrs := map[string]attr.Value{
 			"path":         getJSONString(e, "Path"),
 			"network_path": getJSONString(e, "NetworkPath"),
-			"username":     getJSONString(e, "Username"),
-			"password":     getJSONString(e, "Password"),
+			"username":     types.StringNull(),
+			"password":     types.StringNull(),
 		}
 		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
 		if d.HasError() {

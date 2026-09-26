@@ -16,35 +16,33 @@ Manages a Jellyfin media library (virtual folder).
 resource "jellyfin_library" "movies" {
   name            = "Movies"
   collection_type = "movies"
-  paths           = ["/media/movies"]
+  # Paths are looked up by the Jellyfin server. When it runs in a container,
+  # use the path where the media is mounted inside the container.
+  paths = ["/media/movies"]
 
   library_options = {
-    enable_photos                                 = true
-    enable_realtime_monitor                       = true
-    extract_chapters_during_library_scan          = false
-    enable_chapter_image_extraction               = false
-    extract_media_information_during_library_scan = true
-    download_images_in_advance                    = false
-    cache_images_in_library                       = true
-    preferred_metadata_language                   = "en"
-    metadata_country_code                         = "US"
-    save_local_metadata                           = true
-    save_local_thumbnail_sets                     = true
-    import_missing_episodes                       = true
-    season_zero_display_name                      = "Specials"
-    metadata_refresh_mode                         = "Default"
-    disabled                                      = false
+    enable_photos                        = true
+    enable_realtime_monitor              = true
+    enable_chapter_image_extraction      = false
+    extract_chapters_during_library_scan = false
+    preferred_metadata_language          = "en"
+    metadata_country_code                = "US"
+    save_local_metadata                  = true
+    season_zero_display_name             = "Specials"
+    disabled                             = false
 
     type_options = [
       {
-        type                = "Movie"
-        metadata_fetchers   = ["TheMovieDb"]
-        image_fetchers      = ["TheMovieDb"]
-        image_fetcher_order = ["TheMovieDb"]
+        type                   = "Movie"
+        metadata_fetchers      = ["TheMovieDb"]
+        metadata_fetcher_order = ["TheMovieDb"]
+        image_fetchers         = ["TheMovieDb"]
+        image_fetcher_order    = ["TheMovieDb"]
         image_options = [
           {
-            type  = "Backdrop"
-            limit = 3
+            type      = "Backdrop"
+            limit     = 3
+            min_width = 1280
           }
         ]
       }
@@ -60,7 +58,7 @@ resource "jellyfin_library" "movies" {
 
 - `collection_type` (String) The collection type (e.g., `movies`, `tvshows`, `music`, `books`, `homevideos`, `boxsets`, `mixed`).
 - `name` (String) The library name.
-- `paths` (List of String) List of file system paths for this library.
+- `paths` (List of String) Paths of the library's media folders. Jellyfin looks them up on the server, so when it runs in a container they must be paths inside the container.
 
 ### Optional
 
@@ -76,33 +74,33 @@ resource "jellyfin_library" "movies" {
 
 Optional:
 
-- `cache_images_in_library` (Boolean) Whether images are cached in the library.
-- `chapter_image_interval_seconds` (Number) Chapter image interval in seconds.
-- `disabled` (Boolean) Whether the library is disabled.
-- `disabled_image_fetchers` (List of String) Disabled image fetchers.
-- `disabled_metadata_fetchers` (List of String) Disabled metadata fetchers.
-- `disabled_metadata_savers` (List of String) Disabled metadata savers.
+- `cache_images_in_library` (Boolean, Deprecated) Whether images are cached in the library. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `chapter_image_interval_seconds` (Number, Deprecated) Chapter image interval in seconds. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `disabled` (Boolean) Whether the library is disabled, the inverse of Jellyfin's `Enabled` option.
+- `disabled_image_fetchers` (List of String, Deprecated) Disabled image fetchers. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `disabled_metadata_fetchers` (List of String, Deprecated) Disabled metadata fetchers. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `disabled_metadata_savers` (List of String, Deprecated) Disabled metadata savers. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `disabled_subtitle_fetchers` (List of String) Disabled subtitle fetchers.
-- `download_images_in_advance` (Boolean) Whether images are downloaded in advance.
+- `download_images_in_advance` (Boolean, Deprecated) Whether images are downloaded in advance. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `enable_automatic_series_grouping` (Boolean) Whether automatic series grouping is enabled.
 - `enable_chapter_image_extraction` (Boolean) Whether chapter image extraction is enabled.
-- `enable_emby_photos` (Boolean) Whether Emby photos are enabled.
-- `enable_media_conversion` (Boolean) Whether media conversion is enabled.
-- `enable_photo_subtitle` (Boolean) Whether photo subtitles are enabled.
+- `enable_emby_photos` (Boolean, Deprecated) Whether Emby photos are enabled. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `enable_media_conversion` (Boolean, Deprecated) Whether media conversion is enabled. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `enable_photo_subtitle` (Boolean, Deprecated) Whether photo subtitles are enabled. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `enable_photos` (Boolean) Whether photos are enabled.
 - `enable_realtime_monitor` (Boolean) Whether realtime monitoring is enabled.
-- `extract_chapters_during_library_scan` (Boolean) Whether chapters are extracted during library scan.
-- `extract_media_information_during_library_scan` (Boolean) Whether media information is extracted during library scan.
-- `image_fetcher_order` (List of String) Image fetcher order.
-- `import_missing_episodes` (Boolean) Whether missing episodes are imported.
+- `extract_chapters_during_library_scan` (Boolean) Whether chapter images are extracted during the library scan.
+- `extract_media_information_during_library_scan` (Boolean, Deprecated) Whether media information is extracted during library scan. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `image_fetcher_order` (List of String, Deprecated) Image fetcher order for the whole library; Jellyfin only has it per item type, as `image_fetcher_order` in `type_options`. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `import_missing_episodes` (Boolean, Deprecated) Whether missing episodes are imported. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `local_metadata_reader_order` (List of String) Local metadata reader order.
 - `metadata_country_code` (String) Metadata country code.
-- `metadata_fetcher_order` (List of String) Metadata fetcher order.
-- `metadata_refresh_mode` (String) Metadata refresh mode.
+- `metadata_fetcher_order` (List of String, Deprecated) Metadata fetcher order for the whole library; Jellyfin only has it per item type, as `metadata_fetcher_order` in `type_options`. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `metadata_refresh_mode` (String, Deprecated) Metadata refresh mode. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `path_infos` (Attributes List) Path information entries. (see [below for nested schema](#nestedatt--library_options--path_infos))
 - `preferred_metadata_language` (String) Preferred metadata language.
 - `save_local_metadata` (Boolean) Whether local metadata is saved.
-- `save_local_thumbnail_sets` (Boolean) Whether local thumbnail sets are saved.
+- `save_local_thumbnail_sets` (Boolean, Deprecated) Whether local thumbnail sets are saved. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `season_zero_display_name` (String) Season zero display name.
 - `subtitle_fetcher_order` (List of String) Subtitle fetcher order.
 - `type_options` (Attributes List) Type-specific options. The list replaces the server's list; each entry is applied over the server's entry with the same `type`, so attributes left unset keep the server's values. (see [below for nested schema](#nestedatt--library_options--type_options))
@@ -112,10 +110,10 @@ Optional:
 
 Optional:
 
-- `network_path` (String) Network path.
-- `password` (String, Sensitive) Password.
+- `network_path` (String, Deprecated) Network path. Jellyfin 10.11 removed network paths, so current servers ignore this value.
+- `password` (String, Sensitive, Deprecated) Password. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `path` (String) Local path.
-- `username` (String) Username.
+- `username` (String, Deprecated) Username. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 
 
 <a id="nestedatt--library_options--type_options"></a>

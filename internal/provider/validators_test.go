@@ -7,6 +7,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -39,6 +40,57 @@ func TestNoPathSeparatorsValidator(t *testing.T) {
 				t.Fatalf("expected error %t, got diagnostics: %v", test.expectError, resp.Diagnostics)
 			}
 		})
+	}
+}
+
+func TestUnsupportedLibraryOptionValidatorRejectsOnlySetValues(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	v := unsupportedLibraryOptionValidator{}
+	p := path.Root("library_options").AtName("disabled_metadata_savers")
+	validateBool := func(value types.Bool) diag.Diagnostics {
+		resp := validator.BoolResponse{}
+		v.ValidateBool(ctx, validator.BoolRequest{Path: p, ConfigValue: value}, &resp)
+		return resp.Diagnostics
+	}
+	validateInt64 := func(value types.Int64) diag.Diagnostics {
+		resp := validator.Int64Response{}
+		v.ValidateInt64(ctx, validator.Int64Request{Path: p, ConfigValue: value}, &resp)
+		return resp.Diagnostics
+	}
+	validateString := func(value types.String) diag.Diagnostics {
+		resp := validator.StringResponse{}
+		v.ValidateString(ctx, validator.StringRequest{Path: p, ConfigValue: value}, &resp)
+		return resp.Diagnostics
+	}
+	validateList := func(value types.List) diag.Diagnostics {
+		resp := validator.ListResponse{}
+		v.ValidateList(ctx, validator.ListRequest{Path: p, ConfigValue: value}, &resp)
+		return resp.Diagnostics
+	}
+	emptyList, _ := types.ListValue(types.StringType, nil)
+
+	tests := map[string]struct {
+		diags       diag.Diagnostics
+		expectError bool
+	}{
+		"bool set":       {validateBool(types.BoolValue(false)), true},
+		"bool null":      {validateBool(types.BoolNull()), false},
+		"bool unknown":   {validateBool(types.BoolUnknown()), false},
+		"int64 set":      {validateInt64(types.Int64Value(0)), true},
+		"int64 null":     {validateInt64(types.Int64Null()), false},
+		"string set":     {validateString(types.StringValue("")), true},
+		"string null":    {validateString(types.StringNull()), false},
+		"string unknown": {validateString(types.StringUnknown()), false},
+		"list set":       {validateList(emptyList), true},
+		"list null":      {validateList(types.ListNull(types.StringType)), false},
+		"list unknown":   {validateList(types.ListUnknown(types.StringType)), false},
+	}
+	for name, test := range tests {
+		if test.diags.HasError() != test.expectError {
+			t.Errorf("%s: expected error %t, got diagnostics: %v", name, test.expectError, test.diags)
+		}
 	}
 }
 

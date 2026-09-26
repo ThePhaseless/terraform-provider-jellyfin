@@ -17,37 +17,22 @@ import (
 func TestUnitLibraryOptionsOverlay(t *testing.T) {
 	ctx := context.Background()
 	fixture := `{
+		"Enabled": false,
 		"EnablePhotos": true,
 		"EnableRealtimeMonitor": true,
-		"EnableEmbiPhotos": false,
-		"EnablePhotoSubtitle": false,
-		"ExtractChaptersDuringLibraryScan": false,
+		"ExtractChapterImagesDuringLibraryScan": true,
 		"EnableChapterImageExtraction": false,
-		"ChapterImageIntervalSeconds": 100,
-		"ExtractMediaInformationDuringLibraryScan": true,
-		"DownloadImagesInAdvance": false,
-		"CacheImagesInLibrary": true,
-		"EnableMediaConversion": false,
 		"PathInfos": [
-			{"Path": "/media", "NetworkPath": "\\\\server\\media", "Username": "user", "Password": "pass"}
+			{"Path": "/media", "NetworkPath": "\\\\server\\media"}
 		],
 		"PreferredMetadataLanguage": "en",
 		"MetadataCountryCode": "US",
-		"DisabledMetadataSavers": ["Nfo"],
 		"LocalMetadataReaderOrder": ["Nfo"],
-		"DisabledMetadataFetchers": ["TheMovieDb"],
-		"MetadataFetcherOrder": ["TheMovieDb"],
-		"DisabledImageFetchers": ["TheMovieDb"],
-		"ImageFetcherOrder": ["TheMovieDb"],
 		"DisabledSubtitleFetchers": ["OpenSubtitles"],
 		"SubtitleFetcherOrder": ["OpenSubtitles"],
 		"SaveLocalMetadata": true,
-		"SaveLocalThumbnailSets": true,
-		"ImportMissingEpisodes": true,
 		"EnableAutomaticSeriesGrouping": false,
 		"SeasonZeroDisplayName": "Specials",
-		"MetadataRefreshMode": "Default",
-		"Disabled": false,
 		"TypeOptions": [
 			{
 				"Type": "Movie",

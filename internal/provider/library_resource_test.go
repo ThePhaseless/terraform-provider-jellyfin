@@ -238,6 +238,76 @@ resource "jellyfin_library" "second" {
 	})
 }
 
+func TestAccLibraryResourceDocumentedExample(t *testing.T) {
+	example, err := os.ReadFile("../../examples/resources/jellyfin_library/resource.tf")
+	if err != nil {
+		t.Fatalf("reading the library example: %v", err)
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckNoLibraryNamed(t, "Movies"),
+		Steps: []resource.TestStep{
+			{
+				Config: string(example),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_library.movies", "library_options.disabled", "false"),
+					resource.TestCheckResourceAttr("jellyfin_library.movies", "library_options.preferred_metadata_language", "en"),
+					resource.TestCheckResourceAttr("jellyfin_library.movies", "library_options.type_options.0.image_options.0.min_width", "1280"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccLibraryResourceMappedAndUnsupportedOptions(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckNoLibraryNamed(t, "TestOptions"),
+		Steps: []resource.TestStep{
+			// Rejected at plan time, before anything is created.
+			{
+				Config: `
+resource "jellyfin_library" "test" {
+  name            = "TestOptions"
+  collection_type = "movies"
+  paths           = ["/media/movies"]
+
+  library_options = {
+    import_missing_episodes = true
+  }
+}
+`,
+				ExpectError: regexp.MustCompile(`Unsupported\s+library\s+option`),
+			},
+			// disabled and extract_chapters_during_library_scan are stored as
+			// Jellyfin's Enabled and ExtractChapterImagesDuringLibraryScan.
+			{
+				Config: `
+resource "jellyfin_library" "test" {
+  name            = "TestOptions"
+  collection_type = "movies"
+  paths           = ["/media/movies"]
+
+  library_options = {
+    disabled                             = true
+    extract_chapters_during_library_scan = true
+  }
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.disabled", "true"),
+					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.extract_chapters_during_library_scan", "true"),
+					testAccCheckLibraryOption(t, "TestOptions", "Enabled", "false"),
+					testAccCheckLibraryOption(t, "TestOptions", "ExtractChapterImagesDuringLibraryScan", "true"),
+				),
+			},
+		},
+	})
+}
+
 const testAccLibrarySimilarItemsConfig = `
 resource "jellyfin_library" "test" {
   name            = "TestMovies"
@@ -306,6 +376,29 @@ func testAccCheckLibraryTypeOptions(t *testing.T, library, typ string, want map[
 			if !slices.Equal(got, values) {
 				return fmt.Errorf("%s type options %s = %q on the server, want %q", typ, key, got, values)
 			}
+		}
+		return nil
+	}
+}
+
+// testAccCheckLibraryOption compares one of the server's library options with
+// a JSON literal, to check the key the provider writes an attribute to.
+func testAccCheckLibraryOption(t *testing.T, library, key, want string) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		folders, err := testAccClient(t).GetVirtualFolders(context.Background())
+		if err != nil {
+			return err
+		}
+		idx := slices.IndexFunc(folders, func(f client.VirtualFolder) bool { return f.Name == library })
+		if idx < 0 {
+			return fmt.Errorf("library %q not found", library)
+		}
+		var opts map[string]json.RawMessage
+		if err := json.Unmarshal(folders[idx].LibraryOptions, &opts); err != nil {
+			return fmt.Errorf("parsing library options of %q: %w", library, err)
+		}
+		if got := string(opts[key]); got != want {
+			return fmt.Errorf("library option %s = %s on the server, want %s", key, got, want)
 		}
 		return nil
 	}
