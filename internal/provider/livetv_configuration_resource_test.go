@@ -29,15 +29,18 @@ resource "jellyfin_livetv_configuration" "test" {
   save_recording_images                         = true
 
   tuner_hosts = [{
-    type          = "m3u"
-    url           = "http://127.0.0.1:9/tf-acc.m3u"
-    friendly_name = "tf-acc tuner"
+    type                 = "m3u"
+    url                  = "http://127.0.0.1:9/tf-acc.m3u"
+    friendly_name        = "tf-acc tuner"
+    tuner_count          = 2
+    allow_hw_transcoding = false
   }]
 
   listing_providers = [{
     type              = "xmltv"
     path              = "/config/tf-acc-guide.xml"
     enable_all_tuners = true
+    news_categories   = ["news"]
     channel_mappings = [{
       name  = "1"
       value = "one"
@@ -60,10 +63,14 @@ resource "jellyfin_livetv_configuration" "test" {
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.0.type", "m3u"),
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.0.url", "http://127.0.0.1:9/tf-acc.m3u"),
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.0.friendly_name", "tf-acc tuner"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.0.tuner_count", "2"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.0.allow_hw_transcoding", "false"),
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.#", "1"),
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.type", "xmltv"),
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.path", "/config/tf-acc-guide.xml"),
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.enable_all_tuners", "true"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.news_categories.#", "1"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.news_categories.0", "news"),
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.channel_mappings.#", "1"),
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.channel_mappings.0.name", "1"),
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.channel_mappings.0.value", "one"),
@@ -76,7 +83,9 @@ resource "jellyfin_livetv_configuration" "test" {
 				ImportStateVerify: true,
 				ImportStateId:     "livetv",
 			},
-			// Update.
+			// Update: insert a tuner host ahead of the existing one, which moves to
+			// index 1 and keeps the settings its config no longer sets; move the
+			// listing provider's guide file, which keeps its news categories.
 			{
 				Config: `
 resource "jellyfin_livetv_configuration" "test" {
@@ -90,15 +99,21 @@ resource "jellyfin_livetv_configuration" "test" {
   save_recording_nfo                            = false
   save_recording_images                         = true
 
-  tuner_hosts = [{
-    type          = "m3u"
-    url           = "http://127.0.0.1:9/tf-acc.m3u"
-    friendly_name = "tf-acc tuner renamed"
-  }]
+  tuner_hosts = [
+    {
+      type = "m3u"
+      url  = "http://127.0.0.1:9/tf-acc-second.m3u"
+    },
+    {
+      type          = "m3u"
+      url           = "http://127.0.0.1:9/tf-acc.m3u"
+      friendly_name = "tf-acc tuner renamed"
+    },
+  ]
 
   listing_providers = [{
     type              = "xmltv"
-    path              = "/config/tf-acc-guide.xml"
+    path              = "/config/tf-acc-guide-moved.xml"
     enable_all_tuners = true
     channel_mappings = [
       {
@@ -119,8 +134,18 @@ resource "jellyfin_livetv_configuration" "test" {
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "pre_padding_seconds", "120"),
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "post_padding_seconds", "300"),
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "save_recording_nfo", "false"),
-					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.#", "1"),
-					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.0.friendly_name", "tf-acc tuner renamed"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.#", "2"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.0.url", "http://127.0.0.1:9/tf-acc-second.m3u"),
+					resource.TestCheckNoResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.0.friendly_name"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.0.tuner_count", "0"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.1.url", "http://127.0.0.1:9/tf-acc.m3u"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.1.friendly_name", "tf-acc tuner renamed"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.1.tuner_count", "2"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.1.allow_hw_transcoding", "false"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.#", "1"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.path", "/config/tf-acc-guide-moved.xml"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.news_categories.#", "1"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.news_categories.0", "news"),
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.channel_mappings.#", "2"),
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.channel_mappings.1.name", "2"),
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.channel_mappings.1.value", "two"),

@@ -30,7 +30,7 @@ resource "jellyfin_livetv_configuration" "example" {
 - `enable_original_audio_with_encoded_recordings` (Boolean) Whether original audio is kept with encoded recordings.
 - `enable_recording_subfolders` (Boolean) Whether recording subfolders are enabled.
 - `guide_days` (Number) Number of guide days.
-- `listing_providers` (Attributes List) Listing providers. (see [below for nested schema](#nestedatt--listing_providers))
+- `listing_providers` (Attributes List) Listing providers. An entry keeps the settings it does not configure from the existing entry with the same `id`, else the same `type` and `listings_id`, else the same `type` and `path`, else the same `type`. (see [below for nested schema](#nestedatt--listing_providers))
 - `media_locations_created` (List of String) Recording folders Jellyfin has added as libraries. Jellyfin maintains this list itself when a recording path points at an existing directory, so it is usually left unset.
 - `movie_recording_path` (String) Movie recording path.
 - `post_padding_seconds` (Number) Post-padding seconds.
@@ -41,7 +41,7 @@ resource "jellyfin_livetv_configuration" "example" {
 - `save_recording_images` (Boolean) Whether to save recording images.
 - `save_recording_nfo` (Boolean) Whether to save recording NFO.
 - `series_recording_path` (String) Series recording path.
-- `tuner_hosts` (Attributes List) Tuner hosts. (see [below for nested schema](#nestedatt--tuner_hosts))
+- `tuner_hosts` (Attributes List) Tuner hosts. An entry keeps the settings it does not configure from the existing entry with the same `id`, else the same `url`, else the same `type`. (see [below for nested schema](#nestedatt--tuner_hosts))
 
 ### Read-Only
 

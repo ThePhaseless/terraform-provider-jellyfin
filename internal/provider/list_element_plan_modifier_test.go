@@ -1,0 +1,97 @@
+// Copyright IBM Corp. 2021, 2025
+// SPDX-License-Identifier: MPL-2.0
+
+package provider
+
+import (
+	"context"
+	"testing"
+
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+)
+
+var testHostType = types.ObjectType{AttrTypes: map[string]attr.Type{
+	"url":   types.StringType,
+	"type":  types.StringType,
+	"count": types.Int64Type,
+}}
+
+func testHost(t *testing.T, url, typ string, count types.Int64) attr.Value {
+	t.Helper()
+	obj, d := types.ObjectValue(testHostType.AttrTypes, map[string]attr.Value{
+		"url":   types.StringValue(url),
+		"type":  types.StringValue(typ),
+		"count": count,
+	})
+	if d.HasError() {
+		t.Fatalf("object: %v", d)
+	}
+	return obj
+}
+
+func testHostList(t *testing.T, hosts ...attr.Value) types.List {
+	t.Helper()
+	list, d := types.ListValue(testHostType, hosts)
+	if d.HasError() {
+		t.Fatalf("list: %v", d)
+	}
+	return list
+}
+
+func TestUseStateForUnknownByKey(t *testing.T) {
+	t.Parallel()
+
+	unknown := types.Int64Unknown()
+	tests := map[string]struct {
+		state types.List
+		plan  types.List
+		want  types.List
+	}{
+		"appended element stays unknown": {
+			state: testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2))),
+			plan:  testHostList(t, testHost(t, "a", "m3u", unknown), testHost(t, "b", "hdhomerun", unknown)),
+			want:  testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2)), testHost(t, "b", "hdhomerun", unknown)),
+		},
+		"reordered elements follow their key, not their index": {
+			state: testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2)), testHost(t, "b", "m3u", types.Int64Value(3))),
+			plan:  testHostList(t, testHost(t, "b", "m3u", unknown), testHost(t, "a", "m3u", unknown)),
+			want:  testHostList(t, testHost(t, "b", "m3u", types.Int64Value(3)), testHost(t, "a", "m3u", types.Int64Value(2))),
+		},
+		"exact key is claimed before an earlier element falls back": {
+			state: testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2))),
+			plan:  testHostList(t, testHost(t, "new", "m3u", unknown), testHost(t, "a", "m3u", unknown)),
+			want:  testHostList(t, testHost(t, "new", "m3u", unknown), testHost(t, "a", "m3u", types.Int64Value(2))),
+		},
+		"fallback key matches an edited element": {
+			state: testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2))),
+			plan:  testHostList(t, testHost(t, "moved", "m3u", unknown)),
+			want:  testHostList(t, testHost(t, "moved", "m3u", types.Int64Value(2))),
+		},
+		"no prior state leaves the plan alone": {
+			state: types.ListNull(testHostType),
+			plan:  testHostList(t, testHost(t, "a", "m3u", unknown)),
+			want:  testHostList(t, testHost(t, "a", "m3u", unknown)),
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			resp := planmodifier.ListResponse{PlanValue: test.plan}
+			useStateForUnknownByKey([]string{"url"}, []string{"type"}).PlanModifyList(context.Background(), planmodifier.ListRequest{
+				StateValue: test.state,
+				PlanValue:  test.plan,
+			}, &resp)
+
+			if resp.Diagnostics.HasError() {
+				t.Fatalf("diagnostics: %v", resp.Diagnostics)
+			}
+			if !resp.PlanValue.Equal(test.want) {
+				t.Fatalf("plan = %s, want %s", resp.PlanValue, test.want)
+			}
+		})
+	}
+}
