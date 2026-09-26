@@ -4,9 +4,15 @@
 package provider
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccLiveTVConfigurationResource(t *testing.T) {
@@ -202,7 +208,10 @@ resource "jellyfin_livetv_configuration" "test" {
   recording_path = "/tmp"
 }
 `,
-				Check: resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "recording_path", "/tmp"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "recording_path", "/tmp"),
+					testAccWaitForLiveTVMediaLocations(t, "/tmp"),
+				),
 			},
 			{
 				RefreshState: true,
@@ -218,7 +227,10 @@ resource "jellyfin_livetv_configuration" "test" {
   recording_path = "/config/tf-acc-missing-recordings"
 }
 `,
-				Check: resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "recording_path", "/config/tf-acc-missing-recordings"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "recording_path", "/config/tf-acc-missing-recordings"),
+					testAccWaitForLiveTVMediaLocations(t),
+				),
 			},
 			{
 				RefreshState: true,
@@ -226,6 +238,38 @@ resource "jellyfin_livetv_configuration" "test" {
 			},
 		},
 	})
+}
+
+// Jellyfin rewrites MediaLocationsCreated from an async handler that can still
+// be running after the configuration POST returns, so a refresh straight after
+// an apply may read the list from before it.
+func testAccWaitForLiveTVMediaLocations(t *testing.T, want ...string) resource.TestCheckFunc {
+	t.Helper()
+
+	return func(*terraform.State) error {
+		const timeout = time.Minute
+		c := testAccClient(t)
+		deadline := time.Now().Add(timeout)
+		for {
+			current, err := c.GetLiveTVConfiguration(context.Background())
+			if err != nil {
+				return err
+			}
+			var cfg struct {
+				MediaLocationsCreated []string
+			}
+			if err := json.Unmarshal([]byte(current.RawJSON), &cfg); err != nil {
+				return fmt.Errorf("parsing Live TV configuration: %w", err)
+			}
+			if slices.Equal(cfg.MediaLocationsCreated, want) {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("MediaLocationsCreated = %q after %s, want %q", cfg.MediaLocationsCreated, timeout, want)
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
 }
 
 func TestAccLiveTVConfigurationResourceUnknownEntryValues(t *testing.T) {
