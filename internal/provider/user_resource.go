@@ -382,9 +382,12 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
+	// A failed policy update still reads the user back, so the tainted state
+	// holds the user as the server has it rather than only its id. From the
+	// id alone, an untaint followed by an apply without refresh plans a null
+	// policy, and Update fails with an inconsistent result.
 	if err := r.applyPolicy(ctx, &data, user.ID, &resp.Diagnostics); err != nil {
 		resp.Diagnostics.AddError("Failed to update user policy", err.Error())
-		return
 	}
 
 	createdUser, err := r.client.GetUserByID(ctx, user.ID)

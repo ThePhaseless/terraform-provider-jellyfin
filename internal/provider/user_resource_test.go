@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -156,6 +157,11 @@ func TestAccUserResourceRetryAfterFailedCreate(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		// Without refresh, the retry plans from the state the failed create
+		// saved rather than from one Read rebuilt from the server.
+		AdditionalCLIOptions: &resource.AdditionalCLIOptions{
+			Plan: resource.PlanOptions{NoRefresh: true},
+		},
 		Steps: []resource.TestStep{
 			{
 				Config: `
@@ -172,7 +178,15 @@ resource "jellyfin_user" "test" {
 			},
 			{
 				Config: testAccUserResourceConfig("retryuser"),
-				Check:  resource.TestCheckResourceAttr("jellyfin_user.test", "name", "retryuser"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						expectPriorStateAttributesSet{
+							address:    "jellyfin_user.test",
+							attributes: []string{"name", "policy"},
+						},
+					},
+				},
+				Check: resource.TestCheckResourceAttr("jellyfin_user.test", "name", "retryuser"),
 			},
 		},
 	})
@@ -199,6 +213,31 @@ resource "jellyfin_user" "test" {
   }
 }
 `, rating, subRating)
+}
+
+type expectPriorStateAttributesSet struct {
+	address    string
+	attributes []string
+}
+
+func (e expectPriorStateAttributesSet) CheckPlan(_ context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
+	if req.Plan.PriorState == nil || req.Plan.PriorState.Values == nil {
+		resp.Error = fmt.Errorf("plan has no prior state")
+		return
+	}
+	for _, r := range req.Plan.PriorState.Values.RootModule.Resources {
+		if r.Address != e.address {
+			continue
+		}
+		for _, a := range e.attributes {
+			if r.AttributeValues[a] == nil {
+				resp.Error = fmt.Errorf("%s.%s is null in the prior state", e.address, a)
+				return
+			}
+		}
+		return
+	}
+	resp.Error = fmt.Errorf("%s is not in the prior state", e.address)
 }
 
 func testAccPreCheckJellyfinVersionAtLeast(t *testing.T, minVersion string) {
