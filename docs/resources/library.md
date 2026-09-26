@@ -105,7 +105,7 @@ Optional:
 - `save_local_thumbnail_sets` (Boolean) Whether local thumbnail sets are saved.
 - `season_zero_display_name` (String) Season zero display name.
 - `subtitle_fetcher_order` (List of String) Subtitle fetcher order.
-- `type_options` (Attributes List) Type-specific options. (see [below for nested schema](#nestedatt--library_options--type_options))
+- `type_options` (Attributes List) Type-specific options. The list replaces the server's list; each entry is applied over the server's entry with the same `type`, so attributes left unset keep the server's values. (see [below for nested schema](#nestedatt--library_options--type_options))
 
 <a id="nestedatt--library_options--path_infos"></a>
 ### Nested Schema for `library_options.path_infos`
@@ -125,8 +125,11 @@ Optional:
 
 - `image_fetcher_order` (List of String) Image fetcher order for this type.
 - `image_fetchers` (List of String) Image fetchers for this type.
-- `image_options` (Attributes List) Image options for this type. (see [below for nested schema](#nestedatt--library_options--type_options--image_options))
+- `image_options` (Attributes List) Image options for this type. Each entry is applied over the server's entry with the same image `type`. (see [below for nested schema](#nestedatt--library_options--type_options--image_options))
+- `metadata_fetcher_order` (List of String) Metadata fetcher order for this type.
 - `metadata_fetchers` (List of String) Metadata fetchers for this type.
+- `similar_item_provider_order` (List of String) Similar item provider order for this type. Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error.
+- `similar_item_providers` (List of String) Similar item providers for this type. Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error.
 - `type` (String) Item type.
 
 <a id="nestedatt--library_options--type_options--image_options"></a>
@@ -135,6 +138,7 @@ Optional:
 Optional:
 
 - `limit` (Number) Image limit.
+- `min_width` (Number) Minimum image width in pixels.
 - `type` (String) Image type.
 
 ## Import

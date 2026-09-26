@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -34,6 +35,7 @@ import (
 var (
 	_ resource.Resource                = &LibraryResource{}
 	_ resource.ResourceWithImportState = &LibraryResource{}
+	_ resource.ResourceWithModifyPlan  = &LibraryResource{}
 )
 
 // NewLibraryResource creates a new library resource.
@@ -100,17 +102,21 @@ type PathInfoModel struct {
 
 // TypeOptionsModel describes one TypeOptions entry.
 type TypeOptionsModel struct {
-	Type              types.String `tfsdk:"type"`
-	MetadataFetchers  types.List   `tfsdk:"metadata_fetchers"`
-	ImageFetchers     types.List   `tfsdk:"image_fetchers"`
-	ImageOptions      types.List   `tfsdk:"image_options"`
-	ImageFetcherOrder types.List   `tfsdk:"image_fetcher_order"`
+	Type                     types.String `tfsdk:"type"`
+	MetadataFetchers         types.List   `tfsdk:"metadata_fetchers"`
+	MetadataFetcherOrder     types.List   `tfsdk:"metadata_fetcher_order"`
+	ImageFetchers            types.List   `tfsdk:"image_fetchers"`
+	ImageOptions             types.List   `tfsdk:"image_options"`
+	ImageFetcherOrder        types.List   `tfsdk:"image_fetcher_order"`
+	SimilarItemProviders     types.List   `tfsdk:"similar_item_providers"`
+	SimilarItemProviderOrder types.List   `tfsdk:"similar_item_provider_order"`
 }
 
 // ImageOptionsModel describes one ImageOptions entry.
 type ImageOptionsModel struct {
-	Type  types.String `tfsdk:"type"`
-	Limit types.Int64  `tfsdk:"limit"`
+	Type     types.String `tfsdk:"type"`
+	Limit    types.Int64  `tfsdk:"limit"`
+	MinWidth types.Int64  `tfsdk:"min_width"`
 }
 
 func (r *LibraryResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -273,8 +279,8 @@ func libraryOptionsAttributes() map[string]schema.Attribute {
 			NestedObject: schema.NestedAttributeObject{
 				Attributes: typeOptionsAttributes(),
 			},
-			Description:         "Type-specific options.",
-			MarkdownDescription: "Type-specific options.",
+			Description:         "Type-specific options. The list replaces the server's list; each entry is applied over the server's entry with the same type, so attributes left unset keep the server's values.",
+			MarkdownDescription: "Type-specific options. The list replaces the server's list; each entry is applied over the server's entry with the same `type`, so attributes left unset keep the server's values.",
 			Optional:            true,
 			Computed:            true,
 			PlanModifiers: []planmodifier.List{
@@ -338,22 +344,25 @@ func typeOptionsAttributes() map[string]schema.Attribute {
 		}
 	}
 	return map[string]schema.Attribute{
-		"type":              optionalString("Item type."),
-		"metadata_fetchers": optionalStringList("Metadata fetchers for this type."),
-		"image_fetchers":    optionalStringList("Image fetchers for this type."),
+		"type":                   optionalString("Item type."),
+		"metadata_fetchers":      optionalStringList("Metadata fetchers for this type."),
+		"metadata_fetcher_order": optionalStringList("Metadata fetcher order for this type."),
+		"image_fetchers":         optionalStringList("Image fetchers for this type."),
 		"image_options": schema.ListNestedAttribute{
 			NestedObject: schema.NestedAttributeObject{
 				Attributes: imageOptionsAttributes(),
 			},
-			Description:         "Image options for this type.",
-			MarkdownDescription: "Image options for this type.",
+			Description:         "Image options for this type. Each entry is applied over the server's entry with the same image type.",
+			MarkdownDescription: "Image options for this type. Each entry is applied over the server's entry with the same image `type`.",
 			Optional:            true,
 			Computed:            true,
 			PlanModifiers: []planmodifier.List{
 				listplanmodifier.UseStateForUnknown(),
 			},
 		},
-		"image_fetcher_order": optionalStringList("Image fetcher order for this type."),
+		"image_fetcher_order":         optionalStringList("Image fetcher order for this type."),
+		"similar_item_providers":      optionalStringList("Similar item providers for this type. Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error."),
+		"similar_item_provider_order": optionalStringList("Similar item provider order for this type. Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error."),
 	}
 }
 
@@ -377,6 +386,15 @@ func imageOptionsAttributes() map[string]schema.Attribute {
 				int64planmodifier.UseStateForUnknown(),
 			},
 		},
+		"min_width": schema.Int64Attribute{
+			Description:         "Minimum image width in pixels.",
+			MarkdownDescription: "Minimum image width in pixels.",
+			Optional:            true,
+			Computed:            true,
+			PlanModifiers: []planmodifier.Int64{
+				int64planmodifier.UseStateForUnknown(),
+			},
+		},
 	}
 }
 
@@ -391,18 +409,22 @@ func pathInfoObjectType() types.ObjectType {
 
 func typeOptionsObjectType() types.ObjectType {
 	return types.ObjectType{AttrTypes: map[string]attr.Type{
-		"type":                types.StringType,
-		"metadata_fetchers":   types.ListType{ElemType: types.StringType},
-		"image_fetchers":      types.ListType{ElemType: types.StringType},
-		"image_options":       types.ListType{ElemType: imageOptionsObjectType()},
-		"image_fetcher_order": types.ListType{ElemType: types.StringType},
+		"type":                        types.StringType,
+		"metadata_fetchers":           types.ListType{ElemType: types.StringType},
+		"metadata_fetcher_order":      types.ListType{ElemType: types.StringType},
+		"image_fetchers":              types.ListType{ElemType: types.StringType},
+		"image_options":               types.ListType{ElemType: imageOptionsObjectType()},
+		"image_fetcher_order":         types.ListType{ElemType: types.StringType},
+		"similar_item_providers":      types.ListType{ElemType: types.StringType},
+		"similar_item_provider_order": types.ListType{ElemType: types.StringType},
 	}}
 }
 
 func imageOptionsObjectType() types.ObjectType {
 	return types.ObjectType{AttrTypes: map[string]attr.Type{
-		"type":  types.StringType,
-		"limit": types.Int64Type,
+		"type":      types.StringType,
+		"limit":     types.Int64Type,
+		"min_width": types.Int64Type,
 	}}
 }
 
@@ -528,7 +550,9 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, updated.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues
-	data.LibraryOptions = keepPlannedNulls(ctx, data.LibraryOptions, flattenLibraryOptions(ctx, updated.GetLibraryOptions().RawJSON, &resp.Diagnostics))
+	got := flattenLibraryOptions(ctx, updated.GetLibraryOptions().RawJSON, &resp.Diagnostics)
+	checkSimilarItemSettingsKept(ctx, data.LibraryOptions, got, &resp.Diagnostics)
+	data.LibraryOptions = keepPlannedNulls(ctx, data.LibraryOptions, got)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -616,7 +640,9 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, updated.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues
-	data.LibraryOptions = keepPlannedNulls(ctx, data.LibraryOptions, flattenLibraryOptions(ctx, updated.GetLibraryOptions().RawJSON, &resp.Diagnostics))
+	got := flattenLibraryOptions(ctx, updated.GetLibraryOptions().RawJSON, &resp.Diagnostics)
+	checkSimilarItemSettingsKept(ctx, data.LibraryOptions, got, &resp.Diagnostics)
+	data.LibraryOptions = keepPlannedNulls(ctx, data.LibraryOptions, got)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -673,6 +699,125 @@ func (r *LibraryResource) missingPathsHint(ctx context.Context, createErr error,
 
 func (r *LibraryResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
+}
+
+// ModifyPlan plans each type_options attribute left unset from the prior
+// entry with the same type, which is the server entry apply writes over.
+// UseStateForUnknown takes it from the prior entry at the same index instead,
+// so inserting or reordering entries would plan, and then write, another
+// type's values.
+func (r *LibraryResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+
+	typeOptionsPath := path.Root("library_options").AtName("type_options")
+	var config, plan, state types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, typeOptionsPath, &config)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, typeOptionsPath, &plan)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, typeOptionsPath, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if config.IsNull() || config.IsUnknown() || plan.IsNull() || plan.IsUnknown() {
+		return
+	}
+
+	planned, diags := planTypeOptionsByType(ctx, config, plan, state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, typeOptionsPath, planned)...)
+}
+
+func planTypeOptionsByType(ctx context.Context, config, plan, state types.List) (types.List, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	var c, p, s []TypeOptionsModel
+	if config.ElementsAs(ctx, &c, false).HasError() || plan.ElementsAs(ctx, &p, false).HasError() || len(c) != len(p) {
+		return plan, diags
+	}
+	if !state.IsNull() && !state.IsUnknown() && state.ElementsAs(ctx, &s, false).HasError() {
+		return plan, diags
+	}
+
+	unknownList := types.ListUnknown(types.StringType)
+	for i := range p {
+		prior, found := entryWithType(s, c[i].Type, func(e TypeOptionsModel) types.String { return e.Type })
+		p[i].MetadataFetchers = unsetFromPrior(c[i].MetadataFetchers, p[i].MetadataFetchers, prior.MetadataFetchers, found, unknownList)
+		p[i].MetadataFetcherOrder = unsetFromPrior(c[i].MetadataFetcherOrder, p[i].MetadataFetcherOrder, prior.MetadataFetcherOrder, found, unknownList)
+		p[i].ImageFetchers = unsetFromPrior(c[i].ImageFetchers, p[i].ImageFetchers, prior.ImageFetchers, found, unknownList)
+		p[i].ImageFetcherOrder = unsetFromPrior(c[i].ImageFetcherOrder, p[i].ImageFetcherOrder, prior.ImageFetcherOrder, found, unknownList)
+		p[i].SimilarItemProviders = unsetFromPrior(c[i].SimilarItemProviders, p[i].SimilarItemProviders, prior.SimilarItemProviders, found, unknownList)
+		p[i].SimilarItemProviderOrder = unsetFromPrior(c[i].SimilarItemProviderOrder, p[i].SimilarItemProviderOrder, prior.SimilarItemProviderOrder, found, unknownList)
+
+		if c[i].ImageOptions.IsNull() {
+			p[i].ImageOptions = unsetFromPrior(c[i].ImageOptions, p[i].ImageOptions, prior.ImageOptions, found, types.ListUnknown(imageOptionsObjectType()))
+			continue
+		}
+		imageOptions, d := planImageOptionsByType(ctx, c[i].ImageOptions, p[i].ImageOptions, prior.ImageOptions)
+		diags.Append(d...)
+		if diags.HasError() {
+			return plan, diags
+		}
+		p[i].ImageOptions = imageOptions
+	}
+
+	out, d := types.ListValueFrom(ctx, typeOptionsObjectType(), p)
+	diags.Append(d...)
+	return out, diags
+}
+
+func planImageOptionsByType(ctx context.Context, config, plan, state types.List) (types.List, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if config.IsUnknown() || plan.IsNull() || plan.IsUnknown() {
+		return plan, diags
+	}
+	var c, p, s []ImageOptionsModel
+	if config.ElementsAs(ctx, &c, false).HasError() || plan.ElementsAs(ctx, &p, false).HasError() || len(c) != len(p) {
+		return plan, diags
+	}
+	if !state.IsNull() && !state.IsUnknown() && state.ElementsAs(ctx, &s, false).HasError() {
+		return plan, diags
+	}
+
+	for i := range p {
+		prior, found := entryWithType(s, c[i].Type, func(e ImageOptionsModel) types.String { return e.Type })
+		p[i].Limit = unsetFromPrior(c[i].Limit, p[i].Limit, prior.Limit, found, types.Int64Unknown())
+		p[i].MinWidth = unsetFromPrior(c[i].MinWidth, p[i].MinWidth, prior.MinWidth, found, types.Int64Unknown())
+	}
+
+	out, d := types.ListValueFrom(ctx, imageOptionsObjectType(), p)
+	diags.Append(d...)
+	return out, diags
+}
+
+// entryWithType matches the way Jellyfin looks options up: the first entry
+// whose type equals typ, ignoring case.
+func entryWithType[T any](entries []T, typ types.String, typeOf func(T) types.String) (T, bool) {
+	var zero T
+	if typ.IsNull() || typ.IsUnknown() {
+		return zero, false
+	}
+	for _, e := range entries {
+		if t := typeOf(e); !t.IsNull() && !t.IsUnknown() && strings.EqualFold(t.ValueString(), typ.ValueString()) {
+			return e, true
+		}
+	}
+	return zero, false
+}
+
+// unsetFromPrior plans an unset attribute unknown when there is no prior entry
+// of the same type, because the server fills it in.
+func unsetFromPrior[T attr.Value](configured, planned, prior T, found bool, unknown T) T {
+	switch {
+	case !configured.IsNull():
+		return planned
+	case found:
+		return prior
+	default:
+		return unknown
+	}
 }
 
 func overlayLibraryOptions(ctx context.Context, m map[string]json.RawMessage, opts *LibraryOptionsModel) diag.Diagnostics {
@@ -782,23 +927,28 @@ func overlayTypeOptions(ctx context.Context, m map[string]json.RawMessage, v typ
 		diags.Append(d...)
 		return diags
 	}
+	existing, err := parseJSONObjectList(m["TypeOptions"])
+	if err != nil {
+		return append(diags, diag.NewErrorDiagnostic("Failed to parse type options", err.Error()))
+	}
 	rawEntries := make([]map[string]json.RawMessage, len(entries))
 	for i, e := range entries {
-		entry := map[string]json.RawMessage{}
+		entry := jsonEntryWithType(existing, e.Type)
 		putJSONString(entry, "Type", e.Type)
-		if d := putJSONStringList(ctx, entry, "MetadataFetchers", e.MetadataFetchers); d.HasError() {
-			diags.Append(d...)
-			return diags
-		}
-		if d := putJSONStringList(ctx, entry, "ImageFetchers", e.ImageFetchers); d.HasError() {
-			diags.Append(d...)
-			return diags
+		for key, list := range map[string]types.List{
+			"MetadataFetchers":         e.MetadataFetchers,
+			"MetadataFetcherOrder":     e.MetadataFetcherOrder,
+			"ImageFetchers":            e.ImageFetchers,
+			"ImageFetcherOrder":        e.ImageFetcherOrder,
+			"SimilarItemProviders":     e.SimilarItemProviders,
+			"SimilarItemProviderOrder": e.SimilarItemProviderOrder,
+		} {
+			if d := putJSONStringList(ctx, entry, key, list); d.HasError() {
+				diags.Append(d...)
+				return diags
+			}
 		}
 		if d := overlayImageOptions(ctx, entry, e.ImageOptions); d.HasError() {
-			diags.Append(d...)
-			return diags
-		}
-		if d := putJSONStringList(ctx, entry, "ImageFetcherOrder", e.ImageFetcherOrder); d.HasError() {
 			diags.Append(d...)
 			return diags
 		}
@@ -822,11 +972,16 @@ func overlayImageOptions(ctx context.Context, m map[string]json.RawMessage, v ty
 		diags.Append(d...)
 		return diags
 	}
+	existing, err := parseJSONObjectList(m["ImageOptions"])
+	if err != nil {
+		return append(diags, diag.NewErrorDiagnostic("Failed to parse image options", err.Error()))
+	}
 	rawEntries := make([]map[string]json.RawMessage, len(entries))
 	for i, e := range entries {
-		entry := map[string]json.RawMessage{}
+		entry := jsonEntryWithType(existing, e.Type)
 		putJSONString(entry, "Type", e.Type)
 		putJSONInt64(entry, "Limit", e.Limit)
+		putJSONInt64(entry, "MinWidth", e.MinWidth)
 		rawEntries[i] = entry
 	}
 	b, err := json.Marshal(rawEntries)
@@ -835,6 +990,25 @@ func overlayImageOptions(ctx context.Context, m map[string]json.RawMessage, v ty
 	}
 	m["ImageOptions"] = b
 	return diags
+}
+
+func parseJSONObjectList(raw json.RawMessage) ([]map[string]json.RawMessage, error) {
+	if len(raw) == 0 || isJSONNull(raw) {
+		return nil, nil
+	}
+	var entries []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func jsonEntryWithType(entries []map[string]json.RawMessage, typ types.String) map[string]json.RawMessage {
+	entry := map[string]json.RawMessage{}
+	if e, ok := entryWithType(entries, typ, func(e map[string]json.RawMessage) types.String { return getJSONString(e, "Type") }); ok {
+		maps.Copy(entry, e)
+	}
+	return entry
 }
 
 func flattenLibraryOptions(ctx context.Context, raw string, diags *diag.Diagnostics) *LibraryOptionsModel {
@@ -926,20 +1100,21 @@ func flattenTypeOptions(ctx context.Context, m map[string]json.RawMessage, diags
 	objects := make([]attr.Value, len(entries))
 	for i, e := range entries {
 		attrs := map[string]attr.Value{
-			"type":                getJSONString(e, "Type"),
-			"metadata_fetchers":   types.ListNull(types.StringType),
-			"image_fetchers":      types.ListNull(types.StringType),
-			"image_options":       flattenImageOptions(ctx, e, diags),
-			"image_fetcher_order": types.ListNull(types.StringType),
+			"type":          getJSONString(e, "Type"),
+			"image_options": flattenImageOptions(ctx, e, diags),
 		}
-		if v, d := getJSONStringList(ctx, e, "MetadataFetchers"); !d.HasError() {
-			attrs["metadata_fetchers"] = v
-		}
-		if v, d := getJSONStringList(ctx, e, "ImageFetchers"); !d.HasError() {
-			attrs["image_fetchers"] = v
-		}
-		if v, d := getJSONStringList(ctx, e, "ImageFetcherOrder"); !d.HasError() {
-			attrs["image_fetcher_order"] = v
+		for name, key := range map[string]string{
+			"metadata_fetchers":           "MetadataFetchers",
+			"metadata_fetcher_order":      "MetadataFetcherOrder",
+			"image_fetchers":              "ImageFetchers",
+			"image_fetcher_order":         "ImageFetcherOrder",
+			"similar_item_providers":      "SimilarItemProviders",
+			"similar_item_provider_order": "SimilarItemProviderOrder",
+		} {
+			attrs[name] = types.ListNull(types.StringType)
+			if v, d := getJSONStringList(ctx, e, key); !d.HasError() {
+				attrs[name] = v
+			}
 		}
 		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
 		if d.HasError() {
@@ -970,8 +1145,9 @@ func flattenImageOptions(_ context.Context, m map[string]json.RawMessage, diags 
 	objects := make([]attr.Value, len(entries))
 	for i, e := range entries {
 		attrs := map[string]attr.Value{
-			"type":  getJSONString(e, "Type"),
-			"limit": getJSONInt64(e, "Limit"),
+			"type":      getJSONString(e, "Type"),
+			"limit":     getJSONInt64(e, "Limit"),
+			"min_width": getJSONInt64(e, "MinWidth"),
 		}
 		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
 		if d.HasError() {
@@ -990,9 +1166,9 @@ func flattenImageOptions(_ context.Context, m map[string]json.RawMessage, diags 
 
 // keepPlannedNulls returns got with, inside type_options and path_infos
 // elements, the attributes the plan left null set back to null where the
-// server returned an empty list or an empty string. The framework does not
-// mark computed attributes inside list elements unknown, so the value after
-// apply has to match the plan exactly.
+// server returned an empty list or an empty string. Attributes left unset
+// inside list elements are planned from the prior state, where null is a
+// known value, so the value after apply has to match the plan exactly.
 func keepPlannedNulls(ctx context.Context, planned, got *LibraryOptionsModel) *LibraryOptionsModel {
 	if planned == nil || got == nil {
 		return got
@@ -1000,6 +1176,34 @@ func keepPlannedNulls(ctx context.Context, planned, got *LibraryOptionsModel) *L
 	got.TypeOptions = reconcileTypeOptions(ctx, planned.TypeOptions, got.TypeOptions)
 	got.PathInfos = reconcilePathInfos(ctx, planned.PathInfos, got.PathInfos)
 	return got
+}
+
+// checkSimilarItemSettingsKept exists because Jellyfin 10.x has no similar
+// item settings and drops them, and Terraform's own inconsistent-result error
+// cannot name the attribute: library_options holds a sensitive value.
+func checkSimilarItemSettingsKept(ctx context.Context, planned, got *LibraryOptionsModel, diags *diag.Diagnostics) {
+	if planned == nil || got == nil || planned.TypeOptions.IsNull() || planned.TypeOptions.IsUnknown() || got.TypeOptions.IsNull() || got.TypeOptions.IsUnknown() {
+		return
+	}
+	var p, g []TypeOptionsModel
+	if planned.TypeOptions.ElementsAs(ctx, &p, false).HasError() || got.TypeOptions.ElementsAs(ctx, &g, false).HasError() || len(p) != len(g) {
+		return
+	}
+	var dropped []string
+	for i := range g {
+		if !p[i].SimilarItemProviders.IsNull() && !p[i].SimilarItemProviders.IsUnknown() && g[i].SimilarItemProviders.IsNull() {
+			dropped = append(dropped, fmt.Sprintf("type_options[%d].similar_item_providers", i))
+		}
+		if !p[i].SimilarItemProviderOrder.IsNull() && !p[i].SimilarItemProviderOrder.IsUnknown() && g[i].SimilarItemProviderOrder.IsNull() {
+			dropped = append(dropped, fmt.Sprintf("type_options[%d].similar_item_provider_order", i))
+		}
+	}
+	if len(dropped) > 0 {
+		diags.AddError(
+			"Similar item settings not supported",
+			fmt.Sprintf("The Jellyfin server did not keep %s. Similar item providers need Jellyfin 12 or later; remove these attributes for older servers.", strings.Join(dropped, ", ")),
+		)
+	}
 }
 
 func nullIfPlannedNullList(planned types.List, got *types.List) {
@@ -1024,9 +1228,12 @@ func reconcileTypeOptions(ctx context.Context, planned, got types.List) types.Li
 	}
 	for i := range g {
 		nullIfPlannedNullList(p[i].MetadataFetchers, &g[i].MetadataFetchers)
+		nullIfPlannedNullList(p[i].MetadataFetcherOrder, &g[i].MetadataFetcherOrder)
 		nullIfPlannedNullList(p[i].ImageFetchers, &g[i].ImageFetchers)
 		nullIfPlannedNullList(p[i].ImageOptions, &g[i].ImageOptions)
 		nullIfPlannedNullList(p[i].ImageFetcherOrder, &g[i].ImageFetcherOrder)
+		nullIfPlannedNullList(p[i].SimilarItemProviders, &g[i].SimilarItemProviders)
+		nullIfPlannedNullList(p[i].SimilarItemProviderOrder, &g[i].SimilarItemProviderOrder)
 	}
 	out, diags := types.ListValueFrom(ctx, typeOptionsObjectType(), g)
 	if diags.HasError() {
