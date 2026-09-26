@@ -751,7 +751,11 @@ func testAccImportClient(t *testing.T) *client.Client {
 	username := os.Getenv("JELLYFIN_USERNAME")
 	password := os.Getenv("JELLYFIN_PASSWORD")
 	if endpoint == "" || (apiKey == "" && (username == "" || password == "")) {
-		t.Skip("JELLYFIN_ENDPOINT and either JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD must be set for acceptance tests")
+		skip := t.Skip
+		if os.Getenv("TF_ACC") != "" {
+			skip = t.Fatal
+		}
+		skip("JELLYFIN_ENDPOINT and either JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD must be set for acceptance tests")
 	}
 
 	c, err := importClient(context.Background(), endpoint, apiKey, username, password)

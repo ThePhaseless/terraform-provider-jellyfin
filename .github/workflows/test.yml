@@ -69,7 +69,8 @@ jobs:
       - name: Setup Jellyfin
         run: |
           chmod +x scripts/setup_jellyfin.sh
-          eval "$(scripts/setup_jellyfin.sh 2>/dev/null | grep '^export ')"
+          exports="$(scripts/setup_jellyfin.sh | grep '^export ')"
+          eval "$exports"
           echo "JELLYFIN_ENDPOINT=${JELLYFIN_ENDPOINT}" >> "$GITHUB_ENV"
           echo "JELLYFIN_USERNAME=${JELLYFIN_USERNAME}" >> "$GITHUB_ENV"
           echo "JELLYFIN_PASSWORD=${JELLYFIN_PASSWORD}" >> "$GITHUB_ENV"
@@ -83,6 +84,8 @@ jobs:
       - name: Run import tool e2e tests
         # JELLYFIN_ENDPOINT, JELLYFIN_USERNAME, and JELLYFIN_PASSWORD are set via $GITHUB_ENV in "Setup Jellyfin" step.
         # Disable Go test caching because these tests depend on the Jellyfin container state from the prior step.
+        env:
+          TF_ACC: "1"
         run: go test -count=1 -v -timeout 5m -run 'TestAcc' ./cmd/jellyfin-import/
 
       - name: Run restart acceptance test (isolated)

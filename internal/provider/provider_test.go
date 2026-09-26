@@ -21,11 +21,16 @@ var testAccProtoV6ProviderFactories = map[string]func() (tfprotov6.ProviderServe
 func testAccPreCheck(t *testing.T) {
 	t.Helper()
 
+	// Under TF_ACC a missing server is a broken environment, not an opt-out.
+	skip := t.Skip
+	if os.Getenv("TF_ACC") != "" {
+		skip = t.Fatal
+	}
 	if os.Getenv("JELLYFIN_ENDPOINT") == "" {
-		t.Skip("JELLYFIN_ENDPOINT must be set for acceptance tests")
+		skip("JELLYFIN_ENDPOINT must be set for acceptance tests")
 	}
 	if os.Getenv("JELLYFIN_API_KEY") == "" && (os.Getenv("JELLYFIN_USERNAME") == "" || os.Getenv("JELLYFIN_PASSWORD") == "") {
-		t.Skip("JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD must be set for acceptance tests")
+		skip("JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD must be set for acceptance tests")
 	}
 }
 
