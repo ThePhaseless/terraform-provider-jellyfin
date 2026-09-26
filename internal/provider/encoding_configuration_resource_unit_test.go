@@ -6,6 +6,10 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -13,7 +17,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 func TestUnitEncodingConfigurationOverlay(t *testing.T) {
@@ -172,5 +179,61 @@ func TestUnitEncodingConfigurationJellyfin12FieldsCheckedAgainstServerKeys(t *te
 				}
 			}
 		})
+	}
+}
+
+func TestUnitEncodingConfigurationApplyStopsBeforePostWhenServerLacksJellyfin12Keys(t *testing.T) {
+	t.Parallel()
+
+	var posts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/System/Configuration/encoding" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"EnableFallbackFont":false,"EnableSubtitleExtraction":true}`)
+		case http.MethodPost:
+			posts.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+
+	ctx := context.Background()
+	r := &EncodingConfigurationResource{client: client.NewClient(server.URL, "k")}
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+
+	data := EncodingConfigurationResourceModel{
+		EnableFallbackFont:               types.BoolValue(true),
+		SubtitleExtractionTimeoutMinutes: types.Int64Value(45),
+		HlsAudioSeekStrategy:             types.StringValue("TranscodeAudio"),
+	}
+	var diags diag.Diagnostics
+	state := tfsdk.State{Schema: schemaResp.Schema}
+	r.apply(ctx, &data, &diags, &state)
+
+	if got := posts.Load(); got != 0 {
+		t.Errorf("POST /System/Configuration/encoding sent %d times, want 0", got)
+	}
+	wantPaths := []path.Path{path.Root("subtitle_extraction_timeout_minutes"), path.Root("hls_audio_seek_strategy")}
+	if got := diags.ErrorsCount(); got != len(wantPaths) {
+		t.Fatalf("got %d errors, want %d: %v", got, len(wantPaths), diags)
+	}
+	for i, want := range wantPaths {
+		withPath, ok := diags.Errors()[i].(diag.DiagnosticWithPath)
+		if !ok {
+			t.Fatalf("error %d has no attribute path: %v", i, diags.Errors()[i])
+		}
+		if !withPath.Path().Equal(want) {
+			t.Errorf("error %d path = %s, want %s", i, withPath.Path(), want)
+		}
 	}
 }
