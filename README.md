@@ -17,7 +17,7 @@ A [Terraform](https://www.terraform.io) provider for managing [Jellyfin](https:/
 ## Requirements
 
 - [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.0
-- [Go](https://golang.org/doc/install) >= 1.24
+- [Go](https://golang.org/doc/install) >= 1.26, to build the provider or run `make generate` (the `go` lines in `go.mod` and `tools/go.mod` are the exact minimums)
 - A running Jellyfin server instance
 
 ## Quick Start
