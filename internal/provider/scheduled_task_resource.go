@@ -8,23 +8,32 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 var (
-	_ resource.Resource                = &ScheduledTaskResource{}
-	_ resource.ResourceWithImportState = &ScheduledTaskResource{}
+	_ resource.Resource                   = &ScheduledTaskResource{}
+	_ resource.ResourceWithImportState    = &ScheduledTaskResource{}
+	_ resource.ResourceWithValidateConfig = &ScheduledTaskResource{}
+)
+
+const (
+	triggerTypeDaily    = "DailyTrigger"
+	triggerTypeWeekly   = "WeeklyTrigger"
+	triggerTypeInterval = "IntervalTrigger"
+	triggerTypeStartup  = "StartupTrigger"
 )
 
 // NewScheduledTaskResource creates a new scheduled task resource.
@@ -79,58 +88,48 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
+			// The trigger attributes are Optional without Computed because Jellyfin
+			// stores each trigger exactly as posted and never fills in fields, so an
+			// omitted attribute must plan as null rather than unknown.
 			"triggers": schema.ListNestedAttribute{
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"type": schema.StringAttribute{
 							Description:         "The trigger type (DailyTrigger, WeeklyTrigger, IntervalTrigger, StartupTrigger).",
-							MarkdownDescription: "The trigger type (DailyTrigger, WeeklyTrigger, IntervalTrigger, StartupTrigger).",
+							MarkdownDescription: "The trigger type (`DailyTrigger`, `WeeklyTrigger`, `IntervalTrigger`, `StartupTrigger`).",
 							Required:            true,
+							Validators: []validator.String{
+								stringvalidator.OneOf(triggerTypeDaily, triggerTypeWeekly, triggerTypeInterval, triggerTypeStartup),
+							},
 						},
 						"time_of_day_ticks": schema.Int64Attribute{
-							Description:         "Time of day ticks.",
-							MarkdownDescription: "Time of day ticks.",
+							Description:         "Time of day the task runs, in ticks (100 ns) after midnight. Required for DailyTrigger and WeeklyTrigger.",
+							MarkdownDescription: "Time of day the task runs, in ticks (100 ns) after midnight. Required for `DailyTrigger` and `WeeklyTrigger`.",
 							Optional:            true,
-							Computed:            true,
-							PlanModifiers: []planmodifier.Int64{
-								int64planmodifier.UseStateForUnknown(),
-							},
 						},
 						"interval_ticks": schema.Int64Attribute{
-							Description:         "Interval ticks.",
-							MarkdownDescription: "Interval ticks.",
+							Description:         "Interval between runs, in ticks (100 ns). Required for IntervalTrigger.",
+							MarkdownDescription: "Interval between runs, in ticks (100 ns). Required for `IntervalTrigger`.",
 							Optional:            true,
-							Computed:            true,
-							PlanModifiers: []planmodifier.Int64{
-								int64planmodifier.UseStateForUnknown(),
-							},
 						},
 						"day_of_week": schema.StringAttribute{
-							Description:         "Day of week.",
-							MarkdownDescription: "Day of week.",
+							Description:         "Day of the week the task runs (Sunday through Saturday). Required for WeeklyTrigger.",
+							MarkdownDescription: "Day of the week the task runs (`Sunday` through `Saturday`). Required for `WeeklyTrigger`.",
 							Optional:            true,
-							Computed:            true,
-							PlanModifiers: []planmodifier.String{
-								stringplanmodifier.UseStateForUnknown(),
+							Validators: []validator.String{
+								stringvalidator.OneOf("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"),
 							},
 						},
 						"max_runtime_ticks": schema.Int64Attribute{
-							Description:         "Maximum runtime ticks.",
-							MarkdownDescription: "Maximum runtime ticks.",
+							Description:         "Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns).",
+							MarkdownDescription: "Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns).",
 							Optional:            true,
-							Computed:            true,
-							PlanModifiers: []planmodifier.Int64{
-								int64planmodifier.UseStateForUnknown(),
-							},
 						},
 					},
 				},
 				Description:         "The task triggers.",
 				MarkdownDescription: "The task triggers.",
 				Required:            true,
-				PlanModifiers: []planmodifier.List{
-					listplanmodifier.UseStateForUnknown(),
-				},
 			},
 		},
 	}
@@ -151,6 +150,35 @@ func (r *ScheduledTaskResource) Configure(_ context.Context, req resource.Config
 	}
 
 	r.client = c
+}
+
+func (r *ScheduledTaskResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var triggers types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("triggers"), &triggers)...)
+	if resp.Diagnostics.HasError() || triggers.IsNull() || triggers.IsUnknown() {
+		return
+	}
+
+	for i, elem := range triggers.Elements() {
+		obj, ok := elem.(types.Object)
+		if !ok || obj.IsNull() || obj.IsUnknown() {
+			continue
+		}
+
+		var trigger ScheduledTaskTriggerModel
+		resp.Diagnostics.Append(obj.As(ctx, &trigger, basetypes.ObjectAsOptions{})...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		for _, name := range missingTriggerAttributes(trigger) {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("triggers").AtListIndex(i).AtName(name),
+				"Missing trigger attribute",
+				fmt.Sprintf("%s is required when type is %q.", name, trigger.Type.ValueString()),
+			)
+		}
+	}
 }
 
 func (r *ScheduledTaskResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -177,6 +205,19 @@ func (r *ScheduledTaskResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
+	task, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read scheduled task after create", err.Error())
+		return
+	}
+
+	triggers, diags := flattenTriggers(ctx, task.Triggers)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	data.Triggers = triggers
 	data.ID = data.TaskID
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -254,6 +295,30 @@ func (r *ScheduledTaskResource) Delete(_ context.Context, _ resource.DeleteReque
 
 func (r *ScheduledTaskResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("task_id"), req, resp)
+}
+
+// missingTriggerAttributes reports the attributes the trigger's type needs.
+// Jellyfin rejects a trigger without them with a bare "Error processing request." 400.
+func missingTriggerAttributes(t ScheduledTaskTriggerModel) []string {
+	var missing []string
+	switch t.Type.ValueString() {
+	case triggerTypeDaily:
+		if t.TimeOfDayTicks.IsNull() {
+			missing = append(missing, "time_of_day_ticks")
+		}
+	case triggerTypeWeekly:
+		if t.TimeOfDayTicks.IsNull() {
+			missing = append(missing, "time_of_day_ticks")
+		}
+		if t.DayOfWeek.IsNull() {
+			missing = append(missing, "day_of_week")
+		}
+	case triggerTypeInterval:
+		if t.IntervalTicks.IsNull() {
+			missing = append(missing, "interval_ticks")
+		}
+	}
+	return missing
 }
 
 func marshalTriggers(ctx context.Context, list types.List) (string, error) {

@@ -42,14 +42,14 @@ resource "jellyfin_scheduled_task" "example" {
 
 Required:
 
-- `type` (String) The trigger type (DailyTrigger, WeeklyTrigger, IntervalTrigger, StartupTrigger).
+- `type` (String) The trigger type (`DailyTrigger`, `WeeklyTrigger`, `IntervalTrigger`, `StartupTrigger`).
 
 Optional:
 
-- `day_of_week` (String) Day of week.
-- `interval_ticks` (Number) Interval ticks.
-- `max_runtime_ticks` (Number) Maximum runtime ticks.
-- `time_of_day_ticks` (Number) Time of day ticks.
+- `day_of_week` (String) Day of the week the task runs (`Sunday` through `Saturday`). Required for `WeeklyTrigger`.
+- `interval_ticks` (Number) Interval between runs, in ticks (100 ns). Required for `IntervalTrigger`.
+- `max_runtime_ticks` (Number) Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns).
+- `time_of_day_ticks` (Number) Time of day the task runs, in ticks (100 ns) after midnight. Required for `DailyTrigger` and `WeeklyTrigger`.
 
 ## Import
 
