@@ -343,6 +343,20 @@ resource "jellyfin_livetv_configuration" "test" {
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.password", "b"),
 				),
 			},
+			// Clear the lists so the shared test server is left without the tuner
+			// and the Schedules Direct credentials.
+			{
+				Config: `
+resource "jellyfin_livetv_configuration" "test" {
+  tuner_hosts       = []
+  listing_providers = []
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.#", "0"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.#", "0"),
+				),
+			},
 		},
 	})
 }
