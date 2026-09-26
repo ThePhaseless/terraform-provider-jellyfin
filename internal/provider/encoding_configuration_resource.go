@@ -89,8 +89,10 @@ type EncodingConfigurationResourceModel struct {
 	AllowHevcEncoding                                         types.Bool    `tfsdk:"allow_hevc_encoding"`
 	AllowAv1Encoding                                          types.Bool    `tfsdk:"allow_av1_encoding"`
 	EnableSubtitleExtraction                                  types.Bool    `tfsdk:"enable_subtitle_extraction"`
+	SubtitleExtractionTimeoutMinutes                          types.Int64   `tfsdk:"subtitle_extraction_timeout_minutes"`
 	HardwareDecodingCodecs                                    types.List    `tfsdk:"hardware_decoding_codecs"`
 	AllowOnDemandMetadataBasedKeyframeExtractionForExtensions types.List    `tfsdk:"allow_on_demand_metadata_based_keyframe_extraction_for_extensions"`
+	HlsAudioSeekStrategy                                      types.String  `tfsdk:"hls_audio_seek_strategy"`
 }
 
 func (r *EncodingConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -155,8 +157,10 @@ func (r *EncodingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 			"allow_hevc_encoding":                     schema.BoolAttribute{Description: "Whether HEVC encoding is allowed.", MarkdownDescription: "Whether HEVC encoding is allowed.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 			"allow_av1_encoding":                      schema.BoolAttribute{Description: "Whether AV1 encoding is allowed.", MarkdownDescription: "Whether AV1 encoding is allowed.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 			"enable_subtitle_extraction":              schema.BoolAttribute{Description: "Whether subtitle extraction is enabled.", MarkdownDescription: "Whether subtitle extraction is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
+			"subtitle_extraction_timeout_minutes":     schema.Int64Attribute{Description: "Subtitle extraction timeout in minutes. Requires Jellyfin 12.0 or later.", MarkdownDescription: "Subtitle extraction timeout in minutes. Requires Jellyfin 12.0 or later.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()}},
 			"hardware_decoding_codecs":                schema.ListAttribute{ElementType: types.StringType, Description: "Hardware decoding codecs.", MarkdownDescription: "Hardware decoding codecs.", Optional: true, Computed: true, PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}},
 			"allow_on_demand_metadata_based_keyframe_extraction_for_extensions": schema.ListAttribute{ElementType: types.StringType, Description: "Extensions allowing on-demand metadata-based keyframe extraction.", MarkdownDescription: "Extensions allowing on-demand metadata-based keyframe extraction.", Optional: true, Computed: true, PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}},
+			"hls_audio_seek_strategy": schema.StringAttribute{Description: "Method used to seek the audio stream when transcoding HLS segments. One of `TrimCopiedAudio`, `TranscodeAudio`. Requires Jellyfin 12.0 or later.", MarkdownDescription: "Method used to seek the audio stream when transcoding HLS segments. One of `TrimCopiedAudio`, `TranscodeAudio`. Requires Jellyfin 12.0 or later.", Optional: true, Computed: true, Validators: []validator.String{stringvalidator.OneOf("TrimCopiedAudio", "TranscodeAudio")}, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 		},
 	}
 }
@@ -320,12 +324,14 @@ func overlayEncodingConfiguration(ctx context.Context, m map[string]json.RawMess
 	putJSONBool(m, "AllowHevcEncoding", data.AllowHevcEncoding)
 	putJSONBool(m, "AllowAv1Encoding", data.AllowAv1Encoding)
 	putJSONBool(m, "EnableSubtitleExtraction", data.EnableSubtitleExtraction)
+	putJSONInt64(m, "SubtitleExtractionTimeoutMinutes", data.SubtitleExtractionTimeoutMinutes)
 	if d := putJSONStringList(ctx, m, "HardwareDecodingCodecs", data.HardwareDecodingCodecs); d.HasError() {
 		return d
 	}
 	if d := putJSONStringList(ctx, m, "AllowOnDemandMetadataBasedKeyframeExtractionForExtensions", data.AllowOnDemandMetadataBasedKeyframeExtractionForExtensions); d.HasError() {
 		return d
 	}
+	putJSONString(m, "HlsAudioSeekStrategy", data.HlsAudioSeekStrategy)
 	return diags
 }
 
@@ -380,6 +386,8 @@ func flattenEncodingConfiguration(ctx context.Context, raw string, data *Encodin
 	data.AllowHevcEncoding = getJSONBool(m, "AllowHevcEncoding")
 	data.AllowAv1Encoding = getJSONBool(m, "AllowAv1Encoding")
 	data.EnableSubtitleExtraction = getJSONBool(m, "EnableSubtitleExtraction")
+	data.SubtitleExtractionTimeoutMinutes = getJSONInt64(m, "SubtitleExtractionTimeoutMinutes")
 	data.HardwareDecodingCodecs, _ = getJSONStringList(ctx, m, "HardwareDecodingCodecs")
 	data.AllowOnDemandMetadataBasedKeyframeExtractionForExtensions, _ = getJSONStringList(ctx, m, "AllowOnDemandMetadataBasedKeyframeExtractionForExtensions")
+	data.HlsAudioSeekStrategy = getJSONString(m, "HlsAudioSeekStrategy")
 }
