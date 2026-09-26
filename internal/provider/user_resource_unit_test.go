@@ -52,10 +52,24 @@ func TestUnitUserPolicyOverlay(t *testing.T) {
 	}
 
 	got := policyFromRaw(ctx, string(mustJSON(m)), nil)
-	gotJSON, _ := json.Marshal(got)
-	wantJSON, _ := json.Marshal(policy)
-	if string(gotJSON) != string(wantJSON) {
-		t.Fatalf("round-trip mismatch\n got: %s\nwant: %s", gotJSON, wantJSON)
+	fields := []struct {
+		name      string
+		got, want attr.Value
+	}{
+		{"IsHidden", got.IsHidden, policy.IsHidden},
+		{"EnableMediaPlayback", got.EnableMediaPlayback, policy.EnableMediaPlayback},
+		{"MaxParentalRating", got.MaxParentalRating, policy.MaxParentalRating},
+		{"MaxParentalSubRating", got.MaxParentalSubRating, policy.MaxParentalSubRating},
+		{"LoginAttemptsBeforeLockout", got.LoginAttemptsBeforeLockout, policy.LoginAttemptsBeforeLockout},
+		{"MaxActiveSessions", got.MaxActiveSessions, policy.MaxActiveSessions},
+		{"SyncPlayAccess", got.SyncPlayAccess, policy.SyncPlayAccess},
+		{"EnabledFolders", got.EnabledFolders, policy.EnabledFolders},
+		{"AccessSchedules", got.AccessSchedules, policy.AccessSchedules},
+	}
+	for _, f := range fields {
+		if !f.got.Equal(f.want) {
+			t.Errorf("%s = %s, want %s", f.name, f.got, f.want)
+		}
 	}
 }
 

@@ -113,7 +113,6 @@ func TestAccUserResourceParentalRating(t *testing.T) {
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Create with a rating and an explicitly null sub-rating.
 			{
 				Config: testAccUserResourceParentalRatingConfig("10", "null"),
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -122,7 +121,6 @@ func TestAccUserResourceParentalRating(t *testing.T) {
 					resource.TestCheckResourceAttr("jellyfin_user.test", "policy.enable_media_playback", "true"),
 				),
 			},
-			// Update both.
 			{
 				Config: testAccUserResourceParentalRatingConfig("13", "1"),
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -136,7 +134,6 @@ func TestAccUserResourceParentalRating(t *testing.T) {
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"password"},
 			},
-			// Back to null.
 			{
 				Config: testAccUserResourceParentalRatingConfig("null", "null"),
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -144,7 +141,6 @@ func TestAccUserResourceParentalRating(t *testing.T) {
 					resource.TestCheckNoResourceAttr("jellyfin_user.test", "policy.max_parental_sub_rating"),
 				),
 			},
-			// ImportState.
 			{
 				ResourceName:            "jellyfin_user.test",
 				ImportState:             true,
