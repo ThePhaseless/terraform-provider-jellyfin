@@ -176,6 +176,57 @@ func TestRestartServerPostsSystemRestart(t *testing.T) {
 	}
 }
 
+func TestDirectoryExistsAsksValidatePathForADirectory(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/Environment/ValidatePath" {
+			t.Errorf("expected POST /Environment/ValidatePath, got %s %s", r.Method, r.URL.Path)
+		}
+		var req struct {
+			Path   string
+			IsFile *bool
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decoding request: %v", err)
+		}
+		if req.IsFile == nil || *req.IsFile {
+			t.Errorf("IsFile = %v, want false", req.IsFile)
+		}
+		switch req.Path {
+		case "/media/movies":
+			w.WriteHeader(http.StatusNoContent)
+		case "/media/missing":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusForbidden)
+		}
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "test-key")
+	tests := map[string]struct {
+		path    string
+		want    bool
+		wantErr bool
+	}{
+		"existing directory": {path: "/media/movies", want: true},
+		"missing directory":  {path: "/media/missing", want: false},
+		"other error":        {path: "/forbidden", wantErr: true},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := c.DirectoryExists(context.Background(), test.path)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("DirectoryExists(%q) error = %v, wantErr %t", test.path, err, test.wantErr)
+			}
+			if got != test.want {
+				t.Fatalf("DirectoryExists(%q) = %t, want %t", test.path, got, test.want)
+			}
+		})
+	}
+}
+
 func writeJSON(t *testing.T, w http.ResponseWriter, v interface{}) {
 	t.Helper()
 
