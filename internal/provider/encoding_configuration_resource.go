@@ -283,10 +283,9 @@ func (r *EncodingConfigurationResource) read(ctx context.Context, data *Encoding
 	diags.Append(state.Set(ctx, data)...)
 }
 
-// checkJellyfin12EncodingKeys rejects configured Jellyfin 12.0+ fields that the
-// server's document lacks. Older servers accept the POST and silently drop
-// unknown keys, which would otherwise surface only as the framework's generic
-// "inconsistent result after apply" error, repeated on every apply.
+// Older servers accept the POST and silently drop keys they do not know, which
+// would otherwise surface only as the framework's generic "inconsistent result
+// after apply" error, repeated on every apply.
 func checkJellyfin12EncodingKeys(m map[string]json.RawMessage, data *EncodingConfigurationResourceModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 	for _, f := range []struct {

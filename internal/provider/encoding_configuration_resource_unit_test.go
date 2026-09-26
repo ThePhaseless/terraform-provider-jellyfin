@@ -122,8 +122,8 @@ func TestUnitEncodingConfigurationEnumValidators(t *testing.T) {
 }
 
 func TestUnitEncodingConfigurationJellyfin12FieldsCheckedAgainstServerKeys(t *testing.T) {
-	jellyfin1011 := `{"EnableSubtitleExtraction":true}`
-	jellyfin12 := `{"EnableSubtitleExtraction":true,"SubtitleExtractionTimeoutMinutes":30,"HlsAudioSeekStrategy":"TrimCopiedAudio"}`
+	withoutKeys := `{"EnableSubtitleExtraction":true}`
+	withKeys := `{"EnableSubtitleExtraction":true,"SubtitleExtractionTimeoutMinutes":30,"HlsAudioSeekStrategy":"TrimCopiedAudio"}`
 	configured := EncodingConfigurationResourceModel{
 		SubtitleExtractionTimeoutMinutes: types.Int64Value(45),
 		HlsAudioSeekStrategy:             types.StringValue("TranscodeAudio"),
@@ -134,17 +134,17 @@ func TestUnitEncodingConfigurationJellyfin12FieldsCheckedAgainstServerKeys(t *te
 		data      EncodingConfigurationResourceModel
 		wantPaths []path.Path
 	}{
-		"configured on 10.11": {
-			server:    jellyfin1011,
+		"configured, server lacks keys": {
+			server:    withoutKeys,
 			data:      configured,
 			wantPaths: []path.Path{path.Root("subtitle_extraction_timeout_minutes"), path.Root("hls_audio_seek_strategy")},
 		},
-		"configured on 12": {
-			server: jellyfin12,
+		"configured, server has keys": {
+			server: withKeys,
 			data:   configured,
 		},
-		"unset on 10.11": {
-			server: jellyfin1011,
+		"unset, server lacks keys": {
+			server: withoutKeys,
 			data: EncodingConfigurationResourceModel{
 				SubtitleExtractionTimeoutMinutes: types.Int64Null(),
 				HlsAudioSeekStrategy:             types.StringUnknown(),
