@@ -4,10 +4,13 @@
 package provider
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccUserResource(t *testing.T) {
@@ -58,6 +61,47 @@ func TestAccUserResourceRenameLetterCaseOnly(t *testing.T) {
 			{
 				Config: testAccUserResourceConfig("CaseUser"),
 				Check:  resource.TestCheckResourceAttr("jellyfin_user.test", "name", "CaseUser"),
+			},
+		},
+	})
+}
+
+func TestAccUserResourceUpdateKeepsUserConfiguration(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccUserResourceConfig("cfguser"),
+				Check: resource.ComposeTestCheckFunc(
+					testAccSetUserSubtitleLanguage(t, "fre"),
+					testAccCheckUserSubtitleLanguage(t, "fre"),
+				),
+			},
+			// Rename.
+			{
+				Config: testAccUserResourceConfig("cfguser_renamed"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_user.test", "name", "cfguser_renamed"),
+					testAccCheckUserSubtitleLanguage(t, "fre"),
+				),
+			},
+			// Policy-only change.
+			{
+				Config: `
+resource "jellyfin_user" "test" {
+  name     = "cfguser_renamed"
+  password = "testpass123"
+
+  policy = {
+    max_active_sessions = 3
+  }
+}
+`,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_user.test", "policy.max_active_sessions", "3"),
+					testAccCheckUserSubtitleLanguage(t, "fre"),
+				),
 			},
 		},
 	})
@@ -125,4 +169,60 @@ resource "jellyfin_user" "test" {
   }
 }
 `, rating, subRating)
+}
+
+// testAccSetUserSubtitleLanguage changes a per-user setting of
+// jellyfin_user.test outside Terraform, so a later step can check that the
+// provider leaves it alone.
+func testAccSetUserSubtitleLanguage(t *testing.T, language string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		c := testAccClient(t)
+		id := s.RootModule().Resources["jellyfin_user.test"].Primary.ID
+
+		raw, err := c.GetUserRaw(ctx, id)
+		if err != nil {
+			return err
+		}
+		user, err := parseJSONObject(raw)
+		if err != nil {
+			return err
+		}
+		configuration, err := parseJSONObject(string(user["Configuration"]))
+		if err != nil {
+			return err
+		}
+		configuration["SubtitleLanguagePreference"], _ = json.Marshal(language)
+		if user["Configuration"], err = json.Marshal(configuration); err != nil {
+			return err
+		}
+		body, err := json.Marshal(user)
+		if err != nil {
+			return err
+		}
+		return c.UpdateUserRaw(ctx, id, string(body))
+	}
+}
+
+func testAccCheckUserSubtitleLanguage(t *testing.T, want string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		id := s.RootModule().Resources["jellyfin_user.test"].Primary.ID
+		raw, err := testAccClient(t).GetUserRaw(context.Background(), id)
+		if err != nil {
+			return err
+		}
+
+		var user struct {
+			Configuration struct {
+				SubtitleLanguagePreference string `json:"SubtitleLanguagePreference"`
+			} `json:"Configuration"`
+		}
+		if err := json.Unmarshal([]byte(raw), &user); err != nil {
+			return fmt.Errorf("parsing user %s: %w", id, err)
+		}
+		if got := user.Configuration.SubtitleLanguagePreference; got != want {
+			return fmt.Errorf("SubtitleLanguagePreference = %q, want %q (user configuration was reset)", got, want)
+		}
+		return nil
+	}
 }

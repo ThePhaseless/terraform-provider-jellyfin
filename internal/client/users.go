@@ -123,14 +123,22 @@ func (c *Client) DeleteUser(ctx context.Context, id string) error {
 	return nil
 }
 
-// UpdateUser updates an existing user.
-func (c *Client) UpdateUser(ctx context.Context, user *User) error {
-	jsonBody, err := json.Marshal(user)
+// GetUserRaw returns the raw JSON of GET /Users/{id}.
+func (c *Client) GetUserRaw(ctx context.Context, id string) (string, error) {
+	raw, err := c.getRaw(ctx, fmt.Sprintf("/Users/%s", url.PathEscape(id)))
 	if err != nil {
-		return fmt.Errorf("marshaling update user request for %s: %w", user.ID, err)
+		return "", fmt.Errorf("getting user %s: %w", id, err)
 	}
-	if err := c.post(ctx, fmt.Sprintf("/Users/%s", url.PathEscape(user.ID)), jsonBody); err != nil {
-		return fmt.Errorf("updating user %s: %w", user.ID, err)
+	return raw, nil
+}
+
+// UpdateUserRaw POSTs a raw user JSON to /Users/{id}.
+// The server replaces the user's Configuration with the one in the body, so
+// the body must carry the Configuration read from GetUserRaw or the user's
+// settings are reset to defaults.
+func (c *Client) UpdateUserRaw(ctx context.Context, id, userJSON string) error {
+	if err := c.postRaw(ctx, fmt.Sprintf("/Users/%s", url.PathEscape(id)), userJSON); err != nil {
+		return fmt.Errorf("updating user %s: %w", id, err)
 	}
 	return nil
 }

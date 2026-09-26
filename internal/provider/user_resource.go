@@ -447,16 +447,11 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		return
 	}
 
-	currentUser, err := r.client.GetUserByID(ctx, state.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to read current user", err.Error())
-		return
-	}
-
-	currentUser.Name = data.Name.ValueString()
-	if err := r.client.UpdateUser(ctx, currentUser); err != nil {
-		resp.Diagnostics.AddError("Failed to update user", err.Error())
-		return
+	if !data.Name.Equal(state.Name) {
+		if err := r.renameUser(ctx, state.ID.ValueString(), data.Name.ValueString()); err != nil {
+			resp.Diagnostics.AddError("Failed to update user", err.Error())
+			return
+		}
 	}
 
 	if err := r.applyPolicy(ctx, &data, state.ID.ValueString(), &resp.Diagnostics); err != nil {
@@ -511,6 +506,30 @@ func (r *UserResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 
 func (r *UserResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+// renameUser posts the user read from the server back with only Name changed.
+// The server also replaces the user's Configuration with the one in the body,
+// so sending just the name would reset per-user settings such as language
+// preferences.
+func (r *UserResource) renameUser(ctx context.Context, id, name string) error {
+	raw, err := r.client.GetUserRaw(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	user, err := parseJSONObject(raw)
+	if err != nil {
+		return fmt.Errorf("parsing user: %w", err)
+	}
+	putJSONString(user, "Name", types.StringValue(name))
+
+	payloadBytes, err := json.Marshal(user)
+	if err != nil {
+		return fmt.Errorf("marshaling user: %w", err)
+	}
+
+	return r.client.UpdateUserRaw(ctx, id, string(payloadBytes))
 }
 
 // applyPolicy overlays the planned top-level booleans and typed policy onto the

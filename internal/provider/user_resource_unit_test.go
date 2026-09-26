@@ -6,10 +6,14 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 func TestUnitUserPolicyOverlay(t *testing.T) {
@@ -78,6 +82,41 @@ func TestUnitUserPolicyOverlayWritesNullParentalRatings(t *testing.T) {
 	}
 	if got := string(m["IsHidden"]); got != "true" {
 		t.Errorf("IsHidden = %s, want the server value true kept", got)
+	}
+}
+
+func TestUnitUserRenameKeepsConfiguration(t *testing.T) {
+	t.Parallel()
+
+	var posted map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/Users/user-1" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.Method == http.MethodPost {
+			if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
+				t.Errorf("decoding posted user: %v", err)
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"Id":"user-1","Name":"old","Configuration":{"SubtitleLanguagePreference":"fre"},"Policy":{"IsHidden":true}}`))
+	}))
+	defer server.Close()
+
+	r := &UserResource{client: client.NewClient(server.URL, "k")}
+	if err := r.renameUser(context.Background(), "user-1", "New"); err != nil {
+		t.Fatalf("renameUser() error = %v", err)
+	}
+
+	if got := string(posted["Name"]); got != `"New"` {
+		t.Errorf("Name = %s, want \"New\"", got)
+	}
+	if got := string(posted["Configuration"]); got != `{"SubtitleLanguagePreference":"fre"}` {
+		t.Errorf("Configuration = %s, want the one read from the server", got)
 	}
 }
 
