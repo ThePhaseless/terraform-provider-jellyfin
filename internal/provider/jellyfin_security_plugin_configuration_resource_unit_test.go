@@ -6,6 +6,10 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -208,5 +212,222 @@ func TestUnitSameInstantPlanModifier(t *testing.T) {
 				t.Errorf("plan = %v, want %v", resp.PlanValue, c.want)
 			}
 		})
+	}
+}
+
+func TestUnitReduceSecurityPluginPayload(t *testing.T) {
+	lines, err := reduceSecurityPluginPayload(`{"Enabled":true,"Port":587,"Name":"x","Empty":[],"Cidrs":["10.0.0.0/8"],"Deadline":null,"Providers":[{"Id":"a","Maps":[{"Role":"r"}]}]}`)
+	if err != nil {
+		t.Fatalf("reduce: %v", err)
+	}
+
+	want := []string{
+		"Cidrs: []string",
+		"Deadline: null",
+		"Empty: array",
+		"Enabled: boolean",
+		"Name: string",
+		"Port: number",
+		"Providers: []object",
+		"Providers[].Id: string",
+		"Providers[].Maps: []object",
+		"Providers[].Maps[].Role: string",
+	}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected lines:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// securityPluginUnmanagedKeys are served keys the resource deliberately has no
+// attribute for; overlay leaves them as the server holds them.
+var securityPluginUnmanagedKeys = map[string]string{
+	"RequireForAllUsers": "legacy alias the plugin keeps for EnforcementScope=All",
+}
+
+func TestUnitJellyfinSecurityWritesBackExactlyTheServedKeys(t *testing.T) {
+	ctx := context.Background()
+
+	raw, err := os.ReadFile(securityPluginPayloadGolden)
+	if err != nil {
+		t.Fatalf("reading %s: %v", securityPluginPayloadGolden, err)
+	}
+	golden := strings.Split(strings.TrimSpace(string(raw)), "\n")
+
+	payload, err := securityPluginPayloadFromShape(golden)
+	if err != nil {
+		t.Fatalf("building payload from golden: %v", err)
+	}
+
+	var data JellyfinSecurityPluginConfigurationResourceModel
+	var diags diag.Diagnostics
+	flattenJellyfinSecurity(ctx, payload, &data, &diags)
+	if diags.HasError() {
+		t.Fatalf("flatten: %v", diags.Errors())
+	}
+
+	served, err := parseJSONObject(payload)
+	if err != nil {
+		t.Fatalf("parsing payload: %v", err)
+	}
+	// Overlay rebuilds each OIDC provider and carries only the server-managed
+	// CreatedAt over from the entries already there.
+	written := map[string]json.RawMessage{"OidcProviders": served["OidcProviders"]}
+	if d := overlayJellyfinSecurity(ctx, written, &data); d.HasError() {
+		t.Fatalf("overlay: %v", d.Errors())
+	}
+	out, err := json.Marshal(written)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	got, err := reduceSecurityPluginPayload(string(out))
+	if err != nil {
+		t.Fatalf("reduce: %v", err)
+	}
+
+	gotSet := map[string]bool{}
+	for _, line := range got {
+		gotSet[line] = true
+	}
+	goldenSet := map[string]bool{}
+	for _, line := range golden {
+		goldenSet[line] = true
+		path, _, _ := strings.Cut(line, ": ")
+		if _, unmanaged := securityPluginUnmanagedKeys[path]; unmanaged {
+			continue
+		}
+		if !gotSet[line] {
+			t.Errorf("served %q is not written back by the resource", line)
+		}
+	}
+	for _, line := range got {
+		if !goldenSet[line] {
+			t.Errorf("resource writes %q, which the plugin does not serve", line)
+		}
+	}
+}
+
+// reduceSecurityPluginPayload flattens a plugin configuration payload into
+// sorted "path: type" lines; elements of an array of objects share "Key[]".
+func reduceSecurityPluginPayload(raw string) ([]string, error) {
+	var root map[string]any
+	if err := json.Unmarshal([]byte(raw), &root); err != nil {
+		return nil, fmt.Errorf("parsing plugin configuration: %w", err)
+	}
+
+	var out []string
+	reducePayloadObject(root, "", &out)
+	sort.Strings(out)
+	return dedupStrings(out), nil
+}
+
+func reducePayloadObject(obj map[string]any, prefix string, out *[]string) {
+	for key, value := range obj {
+		path := prefix + key
+		switch v := value.(type) {
+		case map[string]any:
+			*out = append(*out, path+": object")
+			reducePayloadObject(v, path+".", out)
+		case []any:
+			*out = append(*out, path+": "+payloadArrayType(v))
+			for _, elem := range v {
+				if m, ok := elem.(map[string]any); ok {
+					reducePayloadObject(m, path+"[].", out)
+				}
+			}
+		default:
+			*out = append(*out, path+": "+payloadScalarType(v))
+		}
+	}
+}
+
+func payloadArrayType(v []any) string {
+	if len(v) == 0 {
+		return "array"
+	}
+	switch v[0].(type) {
+	case map[string]any:
+		return "[]object"
+	case []any:
+		return "[]array"
+	default:
+		return "[]" + payloadScalarType(v[0])
+	}
+}
+
+func payloadScalarType(v any) string {
+	switch v.(type) {
+	case string:
+		return "string"
+	case float64:
+		return "number"
+	case bool:
+		return "boolean"
+	case nil:
+		return "null"
+	default:
+		return fmt.Sprintf("%T", v)
+	}
+}
+
+// securityPluginPayloadFromShape builds a payload holding one sample value for
+// every line of a reduced payload, so each served key reaches flatten.
+func securityPluginPayloadFromShape(lines []string) (string, error) {
+	root := map[string]any{}
+	for _, line := range lines {
+		path, typ, ok := strings.Cut(line, ": ")
+		if !ok {
+			return "", fmt.Errorf("malformed line %q", line)
+		}
+		segments := strings.Split(path, ".")
+		obj := root
+		for _, segment := range segments[:len(segments)-1] {
+			key, isArray := strings.CutSuffix(segment, "[]")
+			if !isArray {
+				next, ok := obj[key].(map[string]any)
+				if !ok {
+					next = map[string]any{}
+					obj[key] = next
+				}
+				obj = next
+				continue
+			}
+			elems, _ := obj[key].([]any)
+			if len(elems) == 0 {
+				elems = []any{map[string]any{}}
+				obj[key] = elems
+			}
+			next, ok := elems[0].(map[string]any)
+			if !ok {
+				return "", fmt.Errorf("line %q nests under %s, which is not an array of objects", line, key)
+			}
+			obj = next
+		}
+		leaf := segments[len(segments)-1]
+		if _, seen := obj[leaf]; !seen {
+			obj[leaf] = samplePayloadValue(typ)
+		}
+	}
+	out, err := json.Marshal(root)
+	return string(out), err
+}
+
+func samplePayloadValue(typ string) any {
+	switch typ {
+	case "string":
+		return "x"
+	case "number":
+		return 1
+	case "boolean":
+		return true
+	case "object":
+		return map[string]any{}
+	case "array":
+		return []any{}
+	case "[]object":
+		return []any{map[string]any{}}
+	case "[]string", "[]number", "[]boolean":
+		return []any{samplePayloadValue(strings.TrimPrefix(typ, "[]"))}
+	default:
+		return nil
 	}
 }
