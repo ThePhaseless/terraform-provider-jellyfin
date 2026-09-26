@@ -360,3 +360,74 @@ resource "jellyfin_livetv_configuration" "test" {
 		},
 	})
 }
+
+func TestAccLiveTVConfigurationResourceDuplicateTunerURLs(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "jellyfin_livetv_configuration" "test" {
+  tuner_hosts = [
+    {
+      type          = "m3u"
+      url           = "http://127.0.0.1:9/tf-acc-dup.m3u"
+      friendly_name = "first"
+      tuner_count   = 2
+    },
+    {
+      type          = "m3u"
+      url           = "http://127.0.0.1:9/tf-acc-dup.m3u"
+      friendly_name = "second"
+      tuner_count   = 3
+    },
+  ]
+}
+`,
+				Check: resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.#", "2"),
+			},
+			// The second entry's url matches both tuners and the first entry
+			// matches either by type. The name resolves to the first tuner's, so
+			// the final plan pairs the entries with the tuners by index; the plan
+			// has to pair them the same way or the apply fails as inconsistent.
+			{
+				Config: `
+resource "terraform_data" "name" {
+  input = "first"
+}
+
+resource "jellyfin_livetv_configuration" "test" {
+  tuner_hosts = [
+    {
+      type          = "m3u"
+      friendly_name = terraform_data.name.output
+    },
+    {
+      type = "m3u"
+      url  = "http://127.0.0.1:9/tf-acc-dup.m3u"
+    },
+  ]
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.#", "2"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.0.url", "http://127.0.0.1:9/tf-acc-dup.m3u"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.0.friendly_name", "first"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.0.tuner_count", "2"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.1.friendly_name", "second"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.1.tuner_count", "3"),
+				),
+			},
+			// Clear the list so the shared test server is left without the tuners.
+			{
+				Config: `
+resource "jellyfin_livetv_configuration" "test" {
+  tuner_hosts = []
+}
+`,
+				Check: resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.#", "0"),
+			},
+		},
+	})
+}

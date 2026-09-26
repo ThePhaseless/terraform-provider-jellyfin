@@ -93,6 +93,12 @@ func TestUseStateForUnknownByKey(t *testing.T) {
 			plan:   testHostList(t, testHost(t, "a", "m3u", unknown)),
 			want:   testHostList(t, testHost(t, "a", "m3u", unknown)),
 		},
+		"duplicate key prefers the element at the same index": {
+			state:  testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2)), testHost(t, "a", "m3u", types.Int64Value(3))),
+			config: testHostList(t, testHostURL(t, types.StringNull(), "m3u", omitted), testHost(t, "a", "m3u", omitted)),
+			plan:   testHostList(t, testHostURL(t, unknownURL, "m3u", unknown), testHost(t, "a", "m3u", unknown)),
+			want:   testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2)), testHost(t, "a", "m3u", types.Int64Value(3))),
+		},
 		"key unknown in config leaves every element unknown": {
 			state:  testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2)), testHost(t, "b", "m3u", types.Int64Value(3))),
 			config: testHostList(t, testHost(t, "a", "m3u", omitted), testHostURL(t, unknownURL, "m3u", omitted)),
