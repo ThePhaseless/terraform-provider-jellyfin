@@ -19,6 +19,7 @@ op GET /System/Info/Public | resp=#PublicSystemInfo
 op GET /Users | params=isDisabled:query:required=false,isHidden:query:required=false | resp=[]#UserDto
 op GET /Users/{userId} | params=userId:path:required=true | resp=#UserDto
 op POST /Auth/Keys | params=app:query:required=true
+op POST /Environment/ValidatePath | body=#ValidatePathDto
 op POST /Library/VirtualFolders | params=collectionType:query:required=false,name:query:required=false,paths:query:required=false,refreshLibrary:query:required=false | body=#AddVirtualFolderDto
 op POST /Library/VirtualFolders/LibraryOptions | body=#UpdateLibraryOptionsDto
 op POST /Packages/Installed/{name} | params=assemblyGuid:query:required=false,name:path:required=true,repositoryUrl:query:required=false,version:query:required=false
@@ -514,6 +515,9 @@ schema UserPolicy.MaxParentalSubRating: integer:int32
 schema UserPolicy.PasswordResetProviderId: string
 schema UserPolicy.RemoteClientBitrateLimit: integer:int32
 schema UserPolicy.SyncPlayAccess: #SyncPlayUserAccessType
+schema ValidatePathDto.IsFile: boolean
+schema ValidatePathDto.Path: string
+schema ValidatePathDto.ValidateWritable: boolean
 schema VersionInfo.VersionNumber: string
 schema VersionInfo.changelog: string
 schema VersionInfo.checksum: string
