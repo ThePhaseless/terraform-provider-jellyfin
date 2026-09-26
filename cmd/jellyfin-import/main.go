@@ -483,14 +483,12 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting livetv configuration: %w", err)
 	}
-	pretty, err = prettyJSON(livetvConfig.RawJSON)
+	livetvAttrs, err := livetvAttributes(livetvConfig.RawJSON)
 	if err != nil {
 		return nil, nil, fmt.Errorf("formatting livetv configuration: %w", err)
 	}
 	imports = append(imports, importBlock("jellyfin_livetv_configuration", "this", "livetv"))
-	resources = append(resources, resourceBlock("jellyfin_livetv_configuration", "this", map[string]string{
-		"configuration_json": "jsonencode(" + pretty + ")",
-	}))
+	resources = append(resources, resourceBlock("jellyfin_livetv_configuration", "this", livetvAttrs))
 
 	// Metadata Configuration
 	metaConfig, err := g.client.GetMetadataConfiguration(g.context())
