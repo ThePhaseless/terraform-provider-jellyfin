@@ -44,7 +44,7 @@ resource "jellyfin_encoding_configuration" "test" {
   vpp_tonemapping_contrast = 1
   h264_crf = 23
   h265_crf = 28
-  encoder_preset = ""
+  encoder_preset = "auto"
   deinterlace_double_rate = false
   deinterlace_method = "yadif"
   enable_decoding_color_depth10_hevc = true
@@ -94,7 +94,7 @@ resource "jellyfin_encoding_configuration" "test" {
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "vpp_tonemapping_contrast", "1"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "h264_crf", "23"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "h265_crf", "28"),
-					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "encoder_preset", ""),
+					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "encoder_preset", "auto"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "deinterlace_double_rate", "false"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "deinterlace_method", "yadif"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "enable_decoding_color_depth10_hevc", "true"),
@@ -154,7 +154,7 @@ resource "jellyfin_encoding_configuration" "test" {
   vpp_tonemapping_contrast = 1
   h264_crf = 23
   h265_crf = 28
-  encoder_preset = ""
+  encoder_preset = "auto"
   deinterlace_double_rate = false
   deinterlace_method = "yadif"
   enable_decoding_color_depth10_hevc = true
@@ -204,7 +204,7 @@ resource "jellyfin_encoding_configuration" "test" {
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "vpp_tonemapping_contrast", "1"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "h264_crf", "23"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "h265_crf", "28"),
-					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "encoder_preset", ""),
+					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "encoder_preset", "auto"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "deinterlace_double_rate", "false"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "deinterlace_method", "yadif"),
 					resource.TestCheckResourceAttr("jellyfin_encoding_configuration.test", "enable_decoding_color_depth10_hevc", "true"),
