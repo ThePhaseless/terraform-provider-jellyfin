@@ -123,14 +123,22 @@ func (c *Client) DeleteUser(ctx context.Context, id string) error {
 	return nil
 }
 
-// UpdateUser updates an existing user.
-func (c *Client) UpdateUser(ctx context.Context, user *User) error {
-	jsonBody, err := json.Marshal(user)
+// GetUserRaw returns the raw JSON of GET /Users/{id}.
+func (c *Client) GetUserRaw(ctx context.Context, id string) (string, error) {
+	raw, err := c.getRaw(ctx, fmt.Sprintf("/Users/%s", url.PathEscape(id)))
 	if err != nil {
-		return fmt.Errorf("marshaling update user request for %s: %w", user.ID, err)
+		return "", fmt.Errorf("getting user %s: %w", id, err)
 	}
-	if err := c.post(ctx, fmt.Sprintf("/Users/%s", url.PathEscape(user.ID)), jsonBody); err != nil {
-		return fmt.Errorf("updating user %s: %w", user.ID, err)
+	return raw, nil
+}
+
+// UpdateUserRaw POSTs a raw user JSON to /Users/{id}.
+// The server replaces the user's Configuration with the one in the body, so
+// the body must carry the Configuration read from GetUserRaw or the user's
+// settings are reset to defaults.
+func (c *Client) UpdateUserRaw(ctx context.Context, id, userJSON string) error {
+	if err := c.postRaw(ctx, fmt.Sprintf("/Users/%s", url.PathEscape(id)), userJSON); err != nil {
+		return fmt.Errorf("updating user %s: %w", id, err)
 	}
 	return nil
 }
@@ -152,23 +160,26 @@ func (c *Client) UpdateUserPassword(ctx context.Context, id, currentPassword, ne
 }
 
 // GetUserPolicyRaw returns the raw JSON of the user's Policy object (extracted from GET /Users/{id}).
+// The policy is not decoded into UserPolicy: the server resets every field
+// missing from a policy update, so fields the struct lacks (such as
+// MaxParentalSubRating) must survive the read-modify-write untouched.
 func (c *Client) GetUserPolicyRaw(ctx context.Context, id string) (string, error) {
 	raw, err := c.getRaw(ctx, fmt.Sprintf("/Users/%s", url.PathEscape(id)))
 	if err != nil {
 		return "", fmt.Errorf("getting user %s for policy: %w", id, err)
 	}
 
-	var user User
+	var user struct {
+		Policy json.RawMessage `json:"Policy"`
+	}
 	if err := json.Unmarshal([]byte(raw), &user); err != nil {
 		return "", fmt.Errorf("parsing user %s for policy: %w", id, err)
 	}
-
-	policyBytes, err := json.Marshal(user.Policy)
-	if err != nil {
-		return "", fmt.Errorf("marshaling policy for user %s: %w", id, err)
+	if len(user.Policy) == 0 || string(user.Policy) == "null" {
+		return "", fmt.Errorf("user %s has no policy", id)
 	}
 
-	return string(policyBytes), nil
+	return string(user.Policy), nil
 }
 
 // UpdateUserPolicyRaw POSTs a raw policy JSON to /Users/{id}/Policy.
