@@ -52,6 +52,7 @@ type JellyfinSecurityPluginConfigurationResourceModel struct {
 	RequireChallengeIPMatch            types.Bool   `tfsdk:"require_challenge_ip_match"`
 	RegisteredDeviceMaxAgeDays         types.Int64  `tfsdk:"registered_device_max_age_days"`
 	BareDeviceIDBypassEnabled          types.Bool   `tfsdk:"bare_device_id_bypass_enabled"`
+	PairDeviceOnSecondScreenApproval   types.Bool   `tfsdk:"pair_device_on_second_screen_approval"`
 	RequireTwoFactorToDisable          types.Bool   `tfsdk:"require_two_factor_to_disable"`
 	SelfServiceStepUpMode              types.String `tfsdk:"self_service_step_up_mode"`
 	StepUpLevel                        types.String `tfsdk:"step_up_level"`
@@ -111,6 +112,7 @@ type JellyfinSecurityPluginConfigurationResourceModel struct {
 	GeoIPCountryDbPath                 types.String `tfsdk:"geo_ip_country_db_path"`
 	WebauthnRpID                       types.String `tfsdk:"webauthn_rp_id"`
 	WebauthnOrigins                    types.List   `tfsdk:"webauthn_origins"`
+	PublicBaseURL                      types.String `tfsdk:"public_base_url"`
 	BypassForExternalAuthProviders     types.Bool   `tfsdk:"bypass_for_external_auth_providers"`
 	OidcProviders                      types.List   `tfsdk:"oidc_providers"`
 	GeoIPCityDbPath                    types.String `tfsdk:"geo_ip_city_db_path"`
@@ -145,6 +147,7 @@ type OidcProviderModel struct {
 	AllowAdminGroupElevation     types.Bool   `tfsdk:"allow_admin_group_elevation"`
 	TemplateUserID               types.String `tfsdk:"template_user_id"`
 	AutoCreateUsers              types.Bool   `tfsdk:"auto_create_users"`
+	LinkExistingUsersByUsername  types.Bool   `tfsdk:"link_existing_users_by_username"`
 	RequireIdpMfa                types.Bool   `tfsdk:"require_idp_mfa"`
 	BypassPluginTwoFa            types.Bool   `tfsdk:"bypass_plugin_two_fa"`
 	Enabled                      types.Bool   `tfsdk:"enabled"`
@@ -378,6 +381,8 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 			"onboarding_password_require_lowercase": optionalBool("Require lowercase in onboarding passwords."),
 			"onboarding_password_require_digit":     optionalBool("Require digit in onboarding passwords."),
 			"onboarding_password_require_symbol":    optionalBool("Require symbol in onboarding passwords."),
+			"pair_device_on_second_screen_approval": optionalBool("Remember a device signed in through a second-screen approval (OIDC device flow or Quick Connect) in the user's paired devices. Requires plugin 2.6.3 or later."),
+			"public_base_url":                       optionalString("Public base URL of the server, used for OIDC redirect URIs, pairing QR codes and password reset links. Empty uses the request host. Requires plugin 2.6.3 or later."),
 		},
 	}
 }
@@ -436,6 +441,7 @@ func oidcProviderAttributes(
 		"button_text":                      optionalString("Login button text."),
 		"button_icon_url":                  optionalString("Login button icon URL."),
 		"force_password_setup":             optionalBool("Force password setup on first login."),
+		"link_existing_users_by_username":  optionalBool("Link an unlinked identity to an existing non-administrator user with the same username."),
 		"rp_initiated_logout_enabled":      optionalBool("End the provider session on Jellyfin sign-out (OIDC RP-Initiated Logout)."),
 		"rp_initiated_logout_redirect_uri": optionalString("Absolute https post_logout_redirect_uri; must be registered at the IdP."),
 		"created_at": schema.StringAttribute{
@@ -556,7 +562,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) checkJellyfinSecurityVersi
 	canonical := normalizeGUID(jellyfinSecurityPluginID)
 	for _, p := range installed {
 		if normalizeGUID(p.ID) == canonical {
-			if detail, ok := versionNewerWarning("JellyfinSecurity plugin", p.Version, supportedSecurityPluginVersion()); ok {
+			if detail, ok := versionNewerWarning("JellyfinSecurity plugin", pluginRelease(p.Version), pluginRelease(supportedSecurityPluginVersion())); ok {
 				diags.AddWarning("JellyfinSecurity plugin version newer than supported", detail)
 			}
 			return
@@ -639,6 +645,7 @@ func overlayJellyfinSecurity(ctx context.Context, m map[string]json.RawMessage, 
 	putJSONBool(m, "RequireChallengeIpMatch", data.RequireChallengeIPMatch)
 	putJSONInt64(m, "RegisteredDeviceMaxAgeDays", data.RegisteredDeviceMaxAgeDays)
 	putJSONBool(m, "BareDeviceIdBypassEnabled", data.BareDeviceIDBypassEnabled)
+	putJSONBool(m, "PairDeviceOnSecondScreenApproval", data.PairDeviceOnSecondScreenApproval)
 	putJSONBool(m, "RequireTwoFactorToDisable", data.RequireTwoFactorToDisable)
 	putJSONString(m, "SelfServiceStepUpMode", data.SelfServiceStepUpMode)
 	putJSONString(m, "StepUpLevel", data.StepUpLevel)
@@ -691,6 +698,7 @@ func overlayJellyfinSecurity(ctx context.Context, m map[string]json.RawMessage, 
 	putJSONString(m, "GeoIpAsnDbPath", data.GeoIPAsnDbPath)
 	putJSONString(m, "GeoIpCountryDbPath", data.GeoIPCountryDbPath)
 	putJSONString(m, "WebAuthnRpId", data.WebauthnRpID)
+	putJSONString(m, "PublicBaseUrl", data.PublicBaseURL)
 	putJSONBool(m, "BypassForExternalAuthProviders", data.BypassForExternalAuthProviders)
 	putJSONString(m, "GeoIpCityDbPath", data.GeoIPCityDbPath)
 	putJSONBool(m, "IpBanEnabled", data.IPBanEnabled)
@@ -810,6 +818,7 @@ func overlayOidcProvider(ctx context.Context, m map[string]json.RawMessage, p *O
 	putJSONBool(m, "AllowAdminGroupElevation", p.AllowAdminGroupElevation)
 	putJSONString(m, "TemplateUserId", p.TemplateUserID)
 	putJSONBool(m, "AutoCreateUsers", p.AutoCreateUsers)
+	putJSONBool(m, "LinkExistingUsersByUsername", p.LinkExistingUsersByUsername)
 	putJSONBool(m, "RequireIdpMfa", p.RequireIdpMfa)
 	putJSONBool(m, "BypassPluginTwoFa", p.BypassPluginTwoFa)
 	putJSONBool(m, "Enabled", p.Enabled)
@@ -900,6 +909,7 @@ func flattenJellyfinSecurity(ctx context.Context, raw string, data *JellyfinSecu
 	data.RequireChallengeIPMatch = getJSONBool(m, "RequireChallengeIpMatch")
 	data.RegisteredDeviceMaxAgeDays = getJSONInt64(m, "RegisteredDeviceMaxAgeDays")
 	data.BareDeviceIDBypassEnabled = getJSONBool(m, "BareDeviceIdBypassEnabled")
+	data.PairDeviceOnSecondScreenApproval = getJSONBool(m, "PairDeviceOnSecondScreenApproval")
 	data.RequireTwoFactorToDisable = getJSONBool(m, "RequireTwoFactorToDisable")
 	data.SelfServiceStepUpMode = getJSONString(m, "SelfServiceStepUpMode")
 	data.StepUpLevel = getJSONString(m, "StepUpLevel")
@@ -952,6 +962,7 @@ func flattenJellyfinSecurity(ctx context.Context, raw string, data *JellyfinSecu
 	data.GeoIPAsnDbPath = getJSONString(m, "GeoIpAsnDbPath")
 	data.GeoIPCountryDbPath = getJSONString(m, "GeoIpCountryDbPath")
 	data.WebauthnRpID = getJSONString(m, "WebAuthnRpId")
+	data.PublicBaseURL = getJSONString(m, "PublicBaseUrl")
 	data.BypassForExternalAuthProviders = getJSONBool(m, "BypassForExternalAuthProviders")
 	data.GeoIPCityDbPath = getJSONString(m, "GeoIpCityDbPath")
 	data.IPBanEnabled = getJSONBool(m, "IpBanEnabled")
@@ -1178,6 +1189,7 @@ func oidcProviderObjectTypes() map[string]attr.Type {
 		"allow_admin_group_elevation":      types.BoolType,
 		"template_user_id":                 types.StringType,
 		"auto_create_users":                types.BoolType,
+		"link_existing_users_by_username":  types.BoolType,
 		"require_idp_mfa":                  types.BoolType,
 		"bypass_plugin_two_fa":             types.BoolType,
 		"enabled":                          types.BoolType,
@@ -1232,6 +1244,7 @@ func oidcProviderAttrs(ctx context.Context, m map[string]json.RawMessage, diags 
 	attrs["allow_admin_group_elevation"] = getJSONBool(m, "AllowAdminGroupElevation")
 	attrs["template_user_id"] = getJSONString(m, "TemplateUserId")
 	attrs["auto_create_users"] = getJSONBool(m, "AutoCreateUsers")
+	attrs["link_existing_users_by_username"] = getJSONBool(m, "LinkExistingUsersByUsername")
 	attrs["require_idp_mfa"] = getJSONBool(m, "RequireIdpMfa")
 	attrs["bypass_plugin_two_fa"] = getJSONBool(m, "BypassPluginTwoFa")
 	attrs["enabled"] = getJSONBool(m, "Enabled")
