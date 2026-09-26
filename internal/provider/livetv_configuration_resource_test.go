@@ -151,3 +151,54 @@ resource "jellyfin_livetv_configuration" "test" {}
 		},
 	})
 }
+
+func TestAccLiveTVConfigurationResourceExistingRecordingPath(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// A missing directory is stored without adding a library.
+			{
+				Config: `
+resource "jellyfin_livetv_configuration" "test" {
+  recording_path = "/config/tf-acc-missing-recordings"
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "recording_path", "/config/tf-acc-missing-recordings"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "media_locations_created.#", "0"),
+				),
+			},
+			// An existing directory makes Jellyfin add a Recordings library and
+			// rewrite media_locations_created while the apply reads the result back.
+			{
+				Config: `
+resource "jellyfin_livetv_configuration" "test" {
+  recording_path = "/tmp"
+}
+`,
+				Check: resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "recording_path", "/tmp"),
+			},
+			{
+				RefreshState: true,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "media_locations_created.#", "1"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "media_locations_created.0", "/tmp"),
+				),
+			},
+			// Pointing back at a missing directory makes Jellyfin remove that library again.
+			{
+				Config: `
+resource "jellyfin_livetv_configuration" "test" {
+  recording_path = "/config/tf-acc-missing-recordings"
+}
+`,
+				Check: resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "recording_path", "/config/tf-acc-missing-recordings"),
+			},
+			{
+				RefreshState: true,
+				Check:        resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "media_locations_created.#", "0"),
+			},
+		},
+	})
+}

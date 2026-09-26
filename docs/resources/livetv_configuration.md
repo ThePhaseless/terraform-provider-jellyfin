@@ -31,7 +31,7 @@ resource "jellyfin_livetv_configuration" "example" {
 - `enable_recording_subfolders` (Boolean) Whether recording subfolders are enabled.
 - `guide_days` (Number) Number of guide days.
 - `listing_providers` (Attributes List) Listing providers. (see [below for nested schema](#nestedatt--listing_providers))
-- `media_locations_created` (List of String) Media locations created.
+- `media_locations_created` (List of String) Recording folders Jellyfin has added as libraries. Jellyfin maintains this list itself when a recording path points at an existing directory, so it is usually left unset.
 - `movie_recording_path` (String) Movie recording path.
 - `post_padding_seconds` (Number) Post-padding seconds.
 - `pre_padding_seconds` (Number) Pre-padding seconds.

@@ -220,15 +220,15 @@ func (r *LiveTVConfigurationResource) Schema(_ context.Context, _ resource.Schem
 					int64planmodifier.UseStateForUnknown(),
 				},
 			},
+			// No UseStateForUnknown: Jellyfin rewrites this list in the background
+			// whenever a save points a recording path at an existing directory, so
+			// a value carried over from state would not match the one read back.
 			"media_locations_created": schema.ListAttribute{
 				ElementType:         types.StringType,
-				Description:         "Media locations created.",
-				MarkdownDescription: "Media locations created.",
+				Description:         "Recording folders Jellyfin has added as libraries. Jellyfin maintains this list itself when a recording path points at an existing directory, so it is usually left unset.",
+				MarkdownDescription: "Recording folders Jellyfin has added as libraries. Jellyfin maintains this list itself when a recording path points at an existing directory, so it is usually left unset.",
 				Optional:            true,
 				Computed:            true,
-				PlanModifiers: []planmodifier.List{
-					listplanmodifier.UseStateForUnknown(),
-				},
 			},
 			"recording_post_processor": schema.StringAttribute{
 				Description:         "Recording post processor.",
