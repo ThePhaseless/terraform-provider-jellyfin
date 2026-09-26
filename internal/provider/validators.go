@@ -34,8 +34,10 @@ var libraryNameCharactersValidator = stringvalidator.RegexMatches(
 	`must not contain " < > | : * ? \ / or control characters`,
 )
 
+// Jellyfin checks names against .NET's `^\S(?:.*\S)?$`, and .NET's \s also
+// matches \v, U+0085 and the Unicode separators, which RE2's \s does not.
 var noSurroundingWhitespaceValidator = stringvalidator.RegexMatches(
-	regexp.MustCompile(`^\S(?:.*\S)?$`),
+	regexp.MustCompile(`^[^\s\v\x{85}\p{Z}](?:.*[^\s\v\x{85}\p{Z}])?$`),
 	"must not start or end with whitespace",
 )
 
