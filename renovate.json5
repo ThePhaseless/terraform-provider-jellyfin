@@ -68,6 +68,11 @@
       "automerge": true
     },
     {
+      // .0 builds target the Jellyfin 10.11 ABI; CI and the supported server run 12.x.
+      "matchPackageNames": ["JellyfinSecurity"],
+      "allowedVersions": "/^\\d+\\.\\d+\\.\\d+\\.1$/"
+    },
+    {
       // Gated by the acceptance suite, which boots this Jellyfin version.
       "matchPackageNames": ["jellyfin/jellyfin"],
       "commitMessagePrefix": "chore:",
