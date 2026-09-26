@@ -38,6 +38,8 @@ func TestUnitUserPolicyOverlay(t *testing.T) {
 	policy := &UserPolicyModel{
 		IsHidden:                   types.BoolValue(true),
 		EnableMediaPlayback:        types.BoolValue(false),
+		MaxParentalRating:          types.Int64Value(13),
+		MaxParentalSubRating:       types.Int64Value(1),
 		LoginAttemptsBeforeLockout: types.Int64Value(3),
 		MaxActiveSessions:          types.Int64Value(2),
 		SyncPlayAccess:             types.StringValue("JoinGroups"),
@@ -66,7 +68,7 @@ func TestUnitUserPolicyOverlayWritesNullParentalRatings(t *testing.T) {
 
 	policy := &UserPolicyModel{
 		MaxParentalRating:    types.Int64Null(),
-		MaxParentalSubRating: types.Int64Value(3),
+		MaxParentalSubRating: types.Int64Null(),
 		IsHidden:             types.BoolNull(),
 	}
 
@@ -77,8 +79,8 @@ func TestUnitUserPolicyOverlayWritesNullParentalRatings(t *testing.T) {
 	if got := string(m["MaxParentalRating"]); got != "null" {
 		t.Errorf("MaxParentalRating = %s, want null", got)
 	}
-	if got := string(m["MaxParentalSubRating"]); got != "3" {
-		t.Errorf("MaxParentalSubRating = %s, want 3", got)
+	if got := string(m["MaxParentalSubRating"]); got != "null" {
+		t.Errorf("MaxParentalSubRating = %s, want null", got)
 	}
 	if got := string(m["IsHidden"]); got != "true" {
 		t.Errorf("IsHidden = %s, want the server value true kept", got)

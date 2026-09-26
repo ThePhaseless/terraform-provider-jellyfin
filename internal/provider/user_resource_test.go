@@ -51,7 +51,10 @@ func TestAccUserResource(t *testing.T) {
 // it with "The new and old names must be different".
 func TestAccUserResourceRenameLetterCaseOnly(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
+		PreCheck: func() {
+			testAccPreCheck(t)
+			testAccPreCheckJellyfinVersionAtLeast(t, "12")
+		},
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
@@ -78,7 +81,6 @@ func TestAccUserResourceUpdateKeepsUserConfiguration(t *testing.T) {
 					testAccCheckUserSubtitleLanguage(t, "fre"),
 				),
 			},
-			// Rename.
 			{
 				Config: testAccUserResourceConfig("cfguser_renamed"),
 				Check: resource.ComposeTestCheckFunc(
@@ -86,7 +88,6 @@ func TestAccUserResourceUpdateKeepsUserConfiguration(t *testing.T) {
 					testAccCheckUserSubtitleLanguage(t, "fre"),
 				),
 			},
-			// Policy-only change.
 			{
 				Config: `
 resource "jellyfin_user" "test" {
@@ -129,6 +130,12 @@ func TestAccUserResourceParentalRating(t *testing.T) {
 					resource.TestCheckResourceAttr("jellyfin_user.test", "policy.max_parental_sub_rating", "1"),
 				),
 			},
+			{
+				ResourceName:            "jellyfin_user.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"password"},
+			},
 			// Back to null.
 			{
 				Config: testAccUserResourceParentalRatingConfig("null", "null"),
@@ -169,6 +176,18 @@ resource "jellyfin_user" "test" {
   }
 }
 `, rating, subRating)
+}
+
+func testAccPreCheckJellyfinVersionAtLeast(t *testing.T, minVersion string) {
+	t.Helper()
+
+	info, err := testAccClient(t).GetSystemInfo(context.Background())
+	if err != nil {
+		t.Fatalf("reading Jellyfin version: %v", err)
+	}
+	if compareDottedVersions(info.Version, minVersion) < 0 {
+		t.Skipf("requires Jellyfin %s or newer, server is %s", minVersion, info.Version)
+	}
 }
 
 // testAccSetUserSubtitleLanguage changes a per-user setting of
