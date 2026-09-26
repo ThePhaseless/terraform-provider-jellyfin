@@ -27,8 +27,11 @@ import (
 const (
 	jellyfinAPISchemaGolden     = "testdata/jellyfin_api_schema.golden"
 	ssoPluginConfigSchemaGolden = "testdata/sso_plugin_config_schema.golden"
-	clientSourceDir             = "../client"
-	namedConfigurationPath      = "/System/Configuration/{key}"
+)
+
+const (
+	clientSourceDir        = "../client"
+	namedConfigurationPath = "/System/Configuration/{key}"
 )
 
 // The spec types /System/Configuration/{key} as an opaque blob, so the schema
@@ -49,8 +52,17 @@ var unexpandedSchemas = map[string]bool{
 }
 
 // formatVerb matches a whole fmt verb, with any flags, argument index, width
-// and precision, so "%[1]s" and "%5d" each become one runtime value.
+// and precision, so "%[1]s" and "%5d" each print one argument.
 var formatVerb = regexp.MustCompile(`%[-+# 0]*(?:\[\d+\])?(?:\*|\d+)?(?:\.(?:\[\d+\])?(?:\*|\d+)?)?(?:\[\d+\])?[a-zA-Z%]`)
+
+// A resolved request path writes a runtime value as "{}" and, when the value
+// is computed from parameters of the enclosing function, lists their indexes
+// inside it, as in "{#1}". That tells a parameter passed on as the whole path
+// apart from one built into a path, and a path segment from a query value.
+var (
+	pathPlaceholder = regexp.MustCompile(`\{((?:#\d+)*)\}`)
+	wholeParamPath  = regexp.MustCompile(`^\{#(\d+)\}$`)
+)
 
 type apiCall struct {
 	method string
@@ -180,6 +192,60 @@ func matchOperation(paths map[string]map[string]json.RawMessage, call apiCall) s
 		}
 	}
 	return best
+}
+
+// goldenClientDrift lists where the golden and the client disagree on the
+// endpoints called, so a client change that needs a new golden fails without a
+// server. Matching against the golden's own templates, it misses a new call
+// that an existing, less specific template also matches; the acceptance test
+// still catches that one.
+func goldenClientDrift(golden []string, calls []apiCall) []string {
+	paths := map[string]map[string]json.RawMessage{}
+	var listed []string
+	for _, line := range golden {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || (fields[0] != "op" && fields[0] != "undocumented") {
+			continue
+		}
+		listed = append(listed, strings.Join(fields[:3], " "))
+		if fields[0] == "op" {
+			if paths[fields[2]] == nil {
+				paths[fields[2]] = map[string]json.RawMessage{}
+			}
+			paths[fields[2]][strings.ToLower(fields[1])] = nil
+		}
+	}
+
+	var drift []string
+	used := map[string]bool{}
+	for _, call := range calls {
+		entry := "undocumented " + call.method + " " + call.path
+		if !slices.Contains(listed, entry) {
+			tmpl := matchOperation(paths, call)
+			if tmpl == "" {
+				drift = append(drift, fmt.Sprintf("  + internal/client calls %s %s, which the golden does not list", call.method, call.path))
+				continue
+			}
+			entry = "op " + call.method + " " + tmpl
+			key := strings.ToLower(call.path[strings.LastIndex(call.path, "/")+1:])
+			if name, ok := namedConfigurationSchemas[key]; ok && tmpl == namedConfigurationPath && !goldenHasSchema(golden, name) {
+				drift = append(drift, fmt.Sprintf("  + internal/client uses named configuration %q, whose schema %s the golden does not list", key, name))
+			}
+		}
+		used[entry] = true
+	}
+	for _, entry := range listed {
+		if !used[entry] {
+			drift = append(drift, fmt.Sprintf("  - the golden lists %s, which internal/client no longer calls", entry))
+		}
+	}
+	return dedupStrings(drift)
+}
+
+func goldenHasSchema(golden []string, name string) bool {
+	return slices.ContainsFunc(golden, func(line string) bool {
+		return strings.HasPrefix(line, "schema "+name+".") || strings.HasPrefix(line, "schema "+name+":")
+	})
 }
 
 func operationLine(method, tmpl string, rawOp json.RawMessage, refs map[string]bool) (string, error) {
@@ -463,10 +529,19 @@ func clientAPICalls(dir string) ([]apiCall, error) {
 }
 
 // packageAPICalls finds request helpers instead of listing them: a function
-// that passes a parameter on as a request path becomes a request site for its
-// callers, repeated until none turns up, so a new wrapper cannot hide the
-// endpoints requested through it.
+// that passes a parameter on as the whole request path becomes a request site
+// for its callers, repeated until none turns up. A parameter built into a
+// larger path is recorded as a runtime value, which is right for the IDs
+// callers pass to exported methods. A call in the package that passes path text
+// for such a parameter, or a request site used as a value, fails instead,
+// since the guard would record the wrong endpoint or none.
 func packageAPICalls(fset *token.FileSet, files []*ast.File) ([]apiCall, error) {
+	info := &types.Info{Defs: map[*ast.Ident]types.Object{}, Uses: map[*ast.Ident]types.Object{}}
+	// Only the scopes of local names are needed, so imports stay unresolved and
+	// the type errors that causes are ignored.
+	conf := types.Config{Error: func(error) {}}
+	_, _ = conf.Check("client", fset, files, info)
+
 	var funcs []*ast.FuncDecl
 	for _, f := range files {
 		for _, decl := range f.Decls {
@@ -476,21 +551,27 @@ func packageAPICalls(fset *token.FileSet, files []*ast.File) ([]apiCall, error) 
 		}
 	}
 
-	sites := map[string][]requestSite{}
+	f := &requestFinder{fset: fset, info: info, sites: map[string][]requestSite{}, embeds: map[string][]int{}}
 	for {
 		var calls []apiCall
-		reached := map[string]bool{}
+		f.reached = map[string]bool{}
 		changed := false
 		for _, fn := range funcs {
-			fnCalls, fnSites, err := requestsIn(fset, fn, sites, reached)
+			fnCalls, fnSites, fnEmbeds, err := f.requestsIn(fn)
 			if err != nil {
 				return nil, err
 			}
 			calls = append(calls, fnCalls...)
 			key := siteKey(fn)
 			for _, site := range fnSites {
-				if !slices.Contains(sites[key], site) {
-					sites[key] = append(sites[key], site)
+				if !slices.Contains(f.sites[key], site) {
+					f.sites[key] = append(f.sites[key], site)
+					changed = true
+				}
+			}
+			for _, i := range fnEmbeds {
+				if !slices.Contains(f.embeds[key], i) {
+					f.embeds[key] = append(f.embeds[key], i)
 					changed = true
 				}
 			}
@@ -500,7 +581,12 @@ func packageAPICalls(fset *token.FileSet, files []*ast.File) ([]apiCall, error) 
 		}
 
 		for _, fn := range funcs {
-			if key := siteKey(fn); len(sites[key]) > 0 && !reached[key] {
+			if err := f.siteValues(fn); err != nil {
+				return nil, err
+			}
+		}
+		for _, fn := range funcs {
+			if key := siteKey(fn); len(f.sites[key]) > 0 && !f.reached[key] {
 				return nil, fmt.Errorf("%s: %s passes a parameter on as a request path, but nothing in its package calls it, so the guard cannot see the endpoints it requests", fset.Position(fn.Pos()), fn.Name.Name)
 			}
 		}
@@ -527,6 +613,16 @@ var netHTTPRequestSites = map[string]requestSite{
 	"PostForm":              {method: http.MethodPost, pathArg: 0},
 }
 
+// requestFinder holds, by siteKey, the request sites found so far and the
+// parameters each function builds into a request path.
+type requestFinder struct {
+	fset    *token.FileSet
+	info    *types.Info
+	sites   map[string][]requestSite
+	embeds  map[string][]int
+	reached map[string]bool
+}
+
 // siteKey names a function the way a call spells it, so the client's delete
 // method stays apart from the builtin delete.
 func siteKey(fn *ast.FuncDecl) string {
@@ -536,7 +632,7 @@ func siteKey(fn *ast.FuncDecl) string {
 	return fn.Name.Name
 }
 
-func callSites(call *ast.CallExpr, sites map[string][]requestSite) (string, []requestSite) {
+func (f *requestFinder) callSites(call *ast.CallExpr) (string, []requestSite) {
 	switch fun := call.Fun.(type) {
 	case *ast.SelectorExpr:
 		if isNetHTTP(fun.X) {
@@ -545,9 +641,9 @@ func callSites(call *ast.CallExpr, sites map[string][]requestSite) (string, []re
 			}
 			return "", nil
 		}
-		return "." + fun.Sel.Name, sites["."+fun.Sel.Name]
+		return "." + fun.Sel.Name, f.sites["."+fun.Sel.Name]
 	case *ast.Ident:
-		return fun.Name, sites[fun.Name]
+		return fun.Name, f.sites[fun.Name]
 	}
 	return "", nil
 }
@@ -561,10 +657,13 @@ func isNetHTTP(expr ast.Expr) bool {
 }
 
 // A request in fn whose path is one of fn's parameters is not an endpoint; it
-// makes fn a request site for its callers.
-func requestsIn(fset *token.FileSet, fn *ast.FuncDecl, sites map[string][]requestSite, reached map[string]bool) ([]apiCall, []requestSite, error) {
+// makes fn a request site for its callers. The parameters fn builds into a
+// request path, itself or through a function it calls, are returned too.
+func (f *requestFinder) requestsIn(fn *ast.FuncDecl) ([]apiCall, []requestSite, []int, error) {
+	r := newPathResolver(fn, f.info)
 	var calls []apiCall
-	var fnSites []requestSite
+	var sites []requestSite
+	var embeds []int
 	var firstErr error
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		if firstErr != nil {
@@ -574,27 +673,103 @@ func requestsIn(fset *token.FileSet, fn *ast.FuncDecl, sites map[string][]reques
 		if !ok {
 			return true
 		}
-		key, callee := callSites(call, sites)
+		key, callee := f.callSites(call)
 		if len(callee) > 0 {
-			reached[key] = true
+			f.reached[key] = true
 		}
 		for _, site := range callee {
-			siteCalls, forwarded, err := resolveRequest(fn, call, site)
+			siteCalls, forwarded, embedded, err := r.request(call, site)
 			if err != nil {
-				firstErr = fmt.Errorf("%s: %w", fset.Position(call.Pos()), err)
+				firstErr = fmt.Errorf("%s: %w", f.fset.Position(call.Pos()), err)
 				return false
 			}
 			calls = append(calls, siteCalls...)
-			fnSites = append(fnSites, forwarded...)
+			sites = append(sites, forwarded...)
+			embeds = append(embeds, embedded...)
+		}
+		for _, i := range f.embeds[key] {
+			embedded, err := r.embeddedArg(call, strings.TrimPrefix(key, "."), i)
+			if err != nil {
+				firstErr = fmt.Errorf("%s: %w", f.fset.Position(call.Pos()), err)
+				return false
+			}
+			embeds = append(embeds, embedded...)
 		}
 		return true
 	})
-	return calls, fnSites, firstErr
+	return calls, sites, embeds, firstErr
 }
 
-func resolveRequest(fn *ast.FuncDecl, call *ast.CallExpr, site requestSite) ([]apiCall, []requestSite, error) {
+// siteValues rejects a request site that fn uses other than by calling it, as
+// in f := c.get, since the guard cannot tell what is requested through it.
+func (f *requestFinder) siteValues(fn *ast.FuncDecl) error {
+	skip := map[ast.Node]bool{}
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		switch e := n.(type) {
+		case *ast.CallExpr:
+			skip[e.Fun] = true
+		case *ast.SelectorExpr:
+			skip[e.Sel] = true
+		}
+		return true
+	})
+
+	var err error
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if err != nil || skip[n] {
+			return err == nil
+		}
+		var name string
+		switch e := n.(type) {
+		case *ast.SelectorExpr:
+			if _, ok := netHTTPRequestSites[e.Sel.Name]; (ok && isNetHTTP(e.X)) || len(f.sites["."+e.Sel.Name]) > 0 {
+				name = types.ExprString(e)
+			}
+		case *ast.Ident:
+			if _, ok := f.info.Uses[e].(*types.Func); ok && len(f.sites[e.Name]) > 0 {
+				name = e.Name
+			}
+		}
+		if name != "" {
+			err = fmt.Errorf("%s: %s sends requests but is used here as a value, so the guard cannot see what it requests; call it directly", f.fset.Position(n.Pos()), name)
+		}
+		return err == nil
+	})
+	return err
+}
+
+// pathResolver resolves the request path expressions of fn to patterns, as
+// described at pathPlaceholder.
+type pathResolver struct {
+	fn       *ast.FuncDecl
+	info     *types.Info
+	params   map[types.Object]int
+	visiting map[types.Object]bool
+}
+
+var errPathCycle = errors.New("request path is built from its own value")
+
+func newPathResolver(fn *ast.FuncDecl, info *types.Info) *pathResolver {
+	params := map[types.Object]int{}
+	i := 0
+	for _, field := range fn.Type.Params.List {
+		if len(field.Names) == 0 {
+			i++
+			continue
+		}
+		for _, id := range field.Names {
+			if obj := info.Defs[id]; obj != nil {
+				params[obj] = i
+			}
+			i++
+		}
+	}
+	return &pathResolver{fn: fn, info: info, params: params, visiting: map[types.Object]bool{}}
+}
+
+func (r *pathResolver) request(call *ast.CallExpr, site requestSite) ([]apiCall, []requestSite, []int, error) {
 	if len(call.Args) <= max(site.methodArg, site.pathArg) {
-		return nil, nil, fmt.Errorf("request call %s has too few arguments", types.ExprString(call))
+		return nil, nil, nil, fmt.Errorf("request call %s has too few arguments", types.ExprString(call))
 	}
 
 	method, methodParam := site.method, -1
@@ -602,69 +777,81 @@ func resolveRequest(fn *ast.FuncDecl, call *ast.CallExpr, site requestSite) ([]a
 		arg := call.Args[site.methodArg]
 		if m, ok := arg.(*ast.SelectorExpr); ok && isIdent(m.X, "http") && strings.HasPrefix(m.Sel.Name, "Method") {
 			method = strings.ToUpper(strings.TrimPrefix(m.Sel.Name, "Method"))
-		} else if id, ok := arg.(*ast.Ident); ok && paramIndex(fn, id.Name) >= 0 {
-			methodParam = paramIndex(fn, id.Name)
+		} else if i, ok := r.paramOf(arg); ok {
+			methodParam = i
 		} else {
-			return nil, nil, fmt.Errorf("cannot resolve request method %s", types.ExprString(arg))
+			return nil, nil, nil, fmt.Errorf("cannot resolve request method %s", types.ExprString(arg))
 		}
 	}
 
 	pathExpr := call.Args[site.pathArg]
-	values, err := (&pathResolver{fn: fn, visiting: map[string]bool{}}).values(pathExpr)
+	values, err := r.values(pathExpr)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	var calls []apiCall
 	var forwarded []requestSite
+	var embedded []int
 	for _, v := range values {
-		if v.param != "" {
-			forwarded = append(forwarded, requestSite{method: method, methodArg: methodParam, pathArg: paramIndex(fn, v.param)})
+		if m := wholeParamPath.FindStringSubmatch(v); m != nil {
+			i, _ := strconv.Atoi(m[1])
+			forwarded = append(forwarded, requestSite{method: method, methodArg: methodParam, pathArg: i})
 			continue
 		}
 		if methodParam >= 0 {
-			return nil, nil, fmt.Errorf("request method comes from a parameter but path %s does not", types.ExprString(pathExpr))
+			return nil, nil, nil, fmt.Errorf("request method comes from a parameter but path %s does not", types.ExprString(pathExpr))
 		}
-		path, _, _ := strings.Cut(v.pattern, "?")
+		path, _, _ := strings.Cut(v, "?")
 		if !strings.HasPrefix(path, "/") {
-			return nil, nil, fmt.Errorf("request path %q does not start with /", path)
+			return nil, nil, nil, fmt.Errorf("request path %q does not start with /", untagPath(path))
 		}
-		calls = append(calls, apiCall{method: method, path: path})
+		embedded = append(embedded, placeholderParams(path)...)
+		calls = append(calls, apiCall{method: method, path: untagPath(path)})
 	}
-	return calls, forwarded, nil
+	return calls, forwarded, embedded, nil
 }
 
-// pathValue is one value a request path expression can take: a pattern with
-// "{}" for every runtime value or, when param is set, that parameter of the
-// function passed on unchanged.
-type pathValue struct {
-	pattern string
-	param   string
+// embeddedArg checks argument i of a call to callee, which builds that
+// argument into a request path, and returns the parameters of fn it is
+// computed from, which fn then builds into a request path as well.
+func (r *pathResolver) embeddedArg(call *ast.CallExpr, callee string, i int) ([]int, error) {
+	if i >= len(call.Args) {
+		return nil, fmt.Errorf("call %s has too few arguments", types.ExprString(call))
+	}
+	values, err := r.operand(call.Args[i])
+	if err != nil {
+		return nil, err
+	}
+	var params []int
+	for _, v := range values {
+		if text := untagPath(v); strings.ReplaceAll(text, "{}", "") != "" {
+			return nil, fmt.Errorf("%s builds argument %d into a request path and the guard records it as a runtime value, so it cannot see which endpoint %q selects; pass the whole path to a request helper instead", callee, i, text)
+		}
+		params = append(params, placeholderParams(v)...)
+	}
+	return params, nil
 }
 
-var errPathCycle = errors.New("request path is built from its own value")
-
-type pathResolver struct {
-	fn       *ast.FuncDecl
-	visiting map[string]bool
-}
-
-func (r *pathResolver) values(expr ast.Expr) ([]pathValue, error) {
+func (r *pathResolver) values(expr ast.Expr) ([]string, error) {
 	switch e := expr.(type) {
 	case *ast.BasicLit:
 		if e.Kind == token.STRING {
 			s, err := strconv.Unquote(e.Value)
-			return []pathValue{{pattern: s}}, err
+			return []string{s}, err
 		}
 	case *ast.ParenExpr:
 		return r.values(e.X)
 	case *ast.Ident:
-		return r.identValues(e.Name)
+		return r.identValues(e)
 	case *ast.CallExpr:
 		if sel, ok := e.Fun.(*ast.SelectorExpr); ok && isIdent(sel.X, "fmt") && sel.Sel.Name == "Sprintf" && len(e.Args) > 0 {
 			if lit, ok := e.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
-				s, err := strconv.Unquote(lit.Value)
-				return []pathValue{{pattern: formatPattern(s)}}, err
+				format, err := strconv.Unquote(lit.Value)
+				if err != nil {
+					return nil, err
+				}
+				return r.sprintfValues(format, e.Args[1:])
 			}
 		}
 	case *ast.BinaryExpr:
@@ -677,70 +864,83 @@ func (r *pathResolver) values(expr ast.Expr) ([]pathValue, error) {
 			if err != nil {
 				return nil, err
 			}
-			var out []pathValue
-			for _, lv := range left {
-				for _, rv := range right {
-					out = append(out, concatPathValues(lv, rv))
-				}
-			}
-			return out, nil
+			return concatEach(left, right), nil
 		}
 	}
 	return nil, fmt.Errorf("cannot resolve request path %s", types.ExprString(expr))
 }
 
-// identValues follows every assignment to name, since a path variable can be
-// reassigned on some branch; a parameter also stands for itself.
-func (r *pathResolver) identValues(name string) ([]pathValue, error) {
-	if r.visiting[name] {
-		return nil, fmt.Errorf("%w: %s", errPathCycle, name)
-	}
-	r.visiting[name] = true
-	defer delete(r.visiting, name)
-
-	var values []pathValue
-	if paramIndex(r.fn, name) >= 0 {
-		values = append(values, pathValue{param: name})
-	}
-
-	var exprs []ast.Expr
-	var err error
-	ast.Inspect(r.fn.Body, func(n ast.Node) bool {
-		switch s := n.(type) {
-		case *ast.AssignStmt:
-			for i, lhs := range s.Lhs {
-				if !isIdent(lhs, name) {
-					continue
+func (r *pathResolver) sprintfValues(format string, args []ast.Expr) ([]string, error) {
+	out := []string{""}
+	argIndexes := formatArgs(format)
+	last := 0
+	for n, loc := range formatVerb.FindAllStringIndex(format, -1) {
+		printed := []string{"%"}
+		if i := argIndexes[n]; i >= 0 {
+			printed = []string{"{}"}
+			if i < len(args) {
+				var err error
+				if printed, err = r.operand(args[i]); err != nil {
+					return nil, err
 				}
-				if (s.Tok != token.ASSIGN && s.Tok != token.DEFINE) || len(s.Lhs) != len(s.Rhs) {
-					err = fmt.Errorf("cannot resolve request path %s: unsupported assignment %s", name, s.Tok)
-					return false
-				}
-				exprs = append(exprs, s.Rhs[i])
-			}
-		case *ast.ValueSpec:
-			for i, id := range s.Names {
-				if id.Name != name || len(s.Values) == 0 {
-					continue
-				}
-				if len(s.Values) != len(s.Names) {
-					err = fmt.Errorf("cannot resolve request path %s: unsupported declaration", name)
-					return false
-				}
-				exprs = append(exprs, s.Values[i])
-			}
-		case *ast.RangeStmt:
-			if isIdent(s.Key, name) || isIdent(s.Value, name) {
-				err = fmt.Errorf("cannot resolve request path %s: it is a range variable", name)
-				return false
 			}
 		}
-		return err == nil
-	})
-	if err != nil {
-		return nil, err
+		out = concatEach(concatEach(out, []string{format[last:loc[0]]}), printed)
+		last = loc[1]
+	}
+	return concatEach(out, []string{format[last:]}), nil
+}
+
+// formatArgs returns the index of the argument each verb of format prints, or
+// -1 for "%%", following fmt: "[n]" picks argument n and each "*" consumes one.
+func formatArgs(format string) []int {
+	var out []int
+	next := 0
+	for _, verb := range formatVerb.FindAllString(format, -1) {
+		if verb == "%%" {
+			out = append(out, -1)
+			continue
+		}
+		for i := 1; i < len(verb)-1; i++ {
+			switch verb[i] {
+			case '[':
+				end := i + strings.IndexByte(verb[i:], ']')
+				n, _ := strconv.Atoi(verb[i+1 : end])
+				next = n - 1
+				i = end
+			case '*':
+				next++
+			}
+		}
+		out = append(out, next)
+		next++
+	}
+	return out
+}
+
+// identValues follows every assignment to the variable id refers to, since a
+// path variable can be reassigned on some branch; a parameter also stands for
+// itself.
+func (r *pathResolver) identValues(id *ast.Ident) ([]string, error) {
+	obj := r.info.Uses[id]
+	if obj == nil {
+		return nil, fmt.Errorf("cannot resolve request path %s", id.Name)
+	}
+	if r.visiting[obj] {
+		return nil, fmt.Errorf("%w: %s", errPathCycle, id.Name)
+	}
+	r.visiting[obj] = true
+	defer delete(r.visiting, obj)
+
+	var values []string
+	if i, ok := r.params[obj]; ok {
+		values = append(values, placeholder([]int{i}))
 	}
 
+	exprs, err := r.assignments(obj)
+	if err != nil {
+		return nil, fmt.Errorf("cannot resolve request path %s: %w", id.Name, err)
+	}
 	for _, expr := range exprs {
 		v, err := r.values(expr)
 		if err != nil {
@@ -749,17 +949,67 @@ func (r *pathResolver) identValues(name string) ([]pathValue, error) {
 		values = append(values, v...)
 	}
 	if len(values) == 0 {
-		return nil, fmt.Errorf("cannot resolve request path %s", name)
+		return nil, fmt.Errorf("cannot resolve request path %s", id.Name)
 	}
 	return values, nil
 }
 
-// In a path concatenation the base URL adds nothing and anything else
-// unresolvable is a runtime value. A cycle is not, since only a path variable
-// is built from its own value.
-func (r *pathResolver) operand(expr ast.Expr) ([]pathValue, error) {
+// assignments lists what fn assigns to obj. On a form that cannot be split
+// per variable it fails but still lists every right-hand side, which is all
+// paramsIn needs.
+func (r *pathResolver) assignments(obj types.Object) ([]ast.Expr, error) {
+	var exprs []ast.Expr
+	var err error
+	ast.Inspect(r.fn.Body, func(n ast.Node) bool {
+		switch s := n.(type) {
+		case *ast.AssignStmt:
+			for i, lhs := range s.Lhs {
+				if r.objectOf(lhs) != obj {
+					continue
+				}
+				if (s.Tok == token.ASSIGN || s.Tok == token.DEFINE) && len(s.Lhs) == len(s.Rhs) {
+					exprs = append(exprs, s.Rhs[i])
+					continue
+				}
+				exprs = append(exprs, s.Rhs...)
+				if err == nil {
+					err = fmt.Errorf("unsupported assignment %s", s.Tok)
+				}
+			}
+		case *ast.ValueSpec:
+			for i, id := range s.Names {
+				if r.info.Defs[id] != obj || len(s.Values) == 0 {
+					continue
+				}
+				if len(s.Values) == len(s.Names) {
+					exprs = append(exprs, s.Values[i])
+					continue
+				}
+				exprs = append(exprs, s.Values...)
+				if err == nil {
+					err = errors.New("unsupported declaration")
+				}
+			}
+		case *ast.RangeStmt:
+			if r.objectOf(s.Key) == obj || r.objectOf(s.Value) == obj {
+				exprs = append(exprs, s.X)
+				if err == nil {
+					err = errors.New("it is a range variable")
+				}
+			}
+		}
+		return true
+	})
+	return exprs, err
+}
+
+// In a path concatenation or format argument the base URL adds nothing and
+// anything else unresolvable is a runtime value computed from the parameters
+// it mentions. A cycle is not, since only a path variable is built from its
+// own value.
+func (r *pathResolver) operand(expr ast.Expr) ([]string, error) {
 	if sel, ok := expr.(*ast.SelectorExpr); ok && sel.Sel.Name == "BaseURL" {
-		return []pathValue{{}}, nil
+		return []string{""}, nil
 	}
 	values, err := r.values(expr)
 	if err == nil {
@@ -768,50 +1018,90 @@ func (r *pathResolver) operand(expr ast.Expr) ([]pathValue, error) {
 	if errors.Is(err, errPathCycle) {
 		return nil, err
 	}
-	return []pathValue{{pattern: "{}"}}, nil
+	return []string{placeholder(r.paramsIn(expr, map[types.Object]bool{}))}, nil
 }
 
-func concatPathValues(left, right pathValue) pathValue {
-	if left.param != "" && right == (pathValue{}) {
-		return left
-	}
-	if right.param != "" && left == (pathValue{}) {
-		return right
-	}
-	return pathValue{pattern: left.text() + right.text()}
-}
-
-func (v pathValue) text() string {
-	if v.param != "" {
-		return "{}"
-	}
-	return v.pattern
-}
-
-func formatPattern(format string) string {
-	return formatVerb.ReplaceAllStringFunc(format, func(verb string) string {
-		if verb == "%%" {
-			return "%"
+// paramsIn lists the parameters expr is computed from, following local
+// variables to what is assigned to them.
+func (r *pathResolver) paramsIn(expr ast.Expr, seen map[types.Object]bool) []int {
+	var params []int
+	ast.Inspect(expr, func(n ast.Node) bool {
+		id, ok := n.(*ast.Ident)
+		if !ok {
+			return true
 		}
-		return "{}"
+		obj := r.info.Uses[id]
+		if obj == nil || seen[obj] {
+			return true
+		}
+		seen[obj] = true
+		if i, ok := r.params[obj]; ok {
+			params = append(params, i)
+			return true
+		}
+		exprs, _ := r.assignments(obj)
+		for _, e := range exprs {
+			params = append(params, r.paramsIn(e, seen)...)
+		}
+		return true
 	})
+	return params
 }
 
-func paramIndex(fn *ast.FuncDecl, name string) int {
-	i := 0
-	for _, field := range fn.Type.Params.List {
-		if len(field.Names) == 0 {
-			i++
-			continue
-		}
-		for _, id := range field.Names {
-			if id.Name == name {
-				return i
-			}
-			i++
+func (r *pathResolver) paramOf(expr ast.Expr) (int, bool) {
+	id, ok := expr.(*ast.Ident)
+	if !ok {
+		return 0, false
+	}
+	i, ok := r.params[r.info.Uses[id]]
+	return i, ok
+}
+
+func (r *pathResolver) objectOf(expr ast.Expr) types.Object {
+	id, ok := expr.(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	if obj := r.info.Defs[id]; obj != nil {
+		return obj
+	}
+	return r.info.Uses[id]
+}
+
+func placeholder(params []int) string {
+	slices.Sort(params)
+	var b strings.Builder
+	b.WriteByte('{')
+	for _, i := range slices.Compact(params) {
+		fmt.Fprintf(&b, "#%d", i)
+	}
+	b.WriteByte('}')
+	return b.String()
+}
+
+func placeholderParams(pattern string) []int {
+	var params []int
+	for _, m := range pathPlaceholder.FindAllStringSubmatch(pattern, -1) {
+		for _, s := range strings.Split(m[1], "#")[1:] {
+			i, _ := strconv.Atoi(s)
+			params = append(params, i)
 		}
 	}
-	return -1
+	return params
+}
+
+func untagPath(pattern string) string {
+	return pathPlaceholder.ReplaceAllString(pattern, "{}")
+}
+
+func concatEach(left, right []string) []string {
+	var out []string
+	for _, l := range left {
+		for _, r := range right {
+			out = append(out, l+r)
+		}
+	}
+	return out
 }
 
 func isIdent(expr ast.Expr, name string) bool {
@@ -916,9 +1206,11 @@ func checkSchemaGolden(t *testing.T, goldenPath string, actual []string) {
 }
 
 func schemaGuardRegenerateHelp(testName, goldenPath string) string {
-	return fmt.Sprintf(`The golden changes when the served API changes or when internal/client starts
-or stops calling an endpoint. Regenerate it from the repository root against a
-fresh server of the supported Jellyfin version (down -v drops the volumes a
+	return fmt.Sprintf(`The golden records what the provider sends to or reads from the server, so it
+changes when the server changes any of that or when the provider starts or
+stops using part of it. Regenerate it from the repository root against a fresh
+server of the supported Jellyfin version, adding any environment variables
+.github/workflows/test.yml sets for %[1]s (down -v drops the volumes a
 previous run left behind):
 
   docker compose --env-file internal/provider/supported_jellyfin_version.env down -v
@@ -930,9 +1222,8 @@ A maintainer must review the resulting diff before it is committed:
 
   git diff internal/provider/%[2]s
 
-Every line is an endpoint the provider calls or a schema, or one field of a
-schema, that it sends or reads, so a change can break a resource even though
-this test passes again. Fix the affected resources in the same change.
+A changed line can break a resource even though the test passes again, so fix
+the affected resources in the same change.
 `, testName, goldenPath)
 }
 
@@ -1139,6 +1430,21 @@ func (c *Client) Calls(ctx context.Context, id string, existing bool) {
 	c.getConfig(ctx, "/System/Configuration/encoding")
 	c.send(ctx, http.MethodHead, "/System/Ping")
 	c.HTTPClient.Get(c.BaseURL + "/Health")
+	name := "Public"
+	c.getRaw(ctx, fmt.Sprintf("/System/Info/%s", name))
+	c.getItem(ctx, id)
+	c.createKey(ctx, "Terraform")
+}
+
+func (c *Client) Scoped(ctx context.Context, id string) {
+	{
+		path := "/Startup/User"
+		c.getRaw(ctx, path)
+	}
+	{
+		path := "/Plugins/" + id
+		c.delete(ctx, path)
+	}
 }
 `
 	wrappers := `package client
@@ -1155,6 +1461,14 @@ func (c *Client) getConfig(ctx context.Context, path string) (string, error) {
 func (c *Client) send(ctx context.Context, method, path string) error {
 	_, err := c.doRequest(ctx, method, path, nil)
 	return err
+}
+
+func (c *Client) getItem(ctx context.Context, itemID string) error {
+	return c.get(ctx, "/Items/"+url.PathEscape(itemID), nil)
+}
+
+func (c *Client) createKey(ctx context.Context, app string) error {
+	return c.postRaw(ctx, fmt.Sprintf("/Auth/Keys?app=%s", url.QueryEscape(app)), "")
 }
 `
 	fset, files := parseTestClient(t, calls, wrappers, testClientHelpersSource)
@@ -1177,6 +1491,11 @@ func (c *Client) send(ctx context.Context, method, path string) error {
 		{http.MethodGet, "/System/Configuration/encoding"},
 		{http.MethodHead, "/System/Ping"},
 		{http.MethodGet, "/Health"},
+		{http.MethodGet, "/System/Info/Public"},
+		{http.MethodGet, "/Startup/User"},
+		{http.MethodDelete, "/Plugins/{}"},
+		{http.MethodGet, "/Items/{}"},
+		{http.MethodPost, "/Auth/Keys"},
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("unexpected calls:\n%v\nwant:\n%v", got, want)
@@ -1227,6 +1546,57 @@ func (c *Client) GetRaw(ctx context.Context, path string) (string, error) {
 `,
 			wantErr: "GetRaw passes a parameter on as a request path",
 		},
+		"path text for a parameter built into a path": {
+			src: `package client
+
+func (c *Client) getItem(ctx context.Context, sub string) error {
+	return c.get(ctx, "/Items/"+sub, nil)
+}
+
+func (c *Client) Counts(ctx context.Context) error {
+	return c.getItem(ctx, "Counts")
+}
+`,
+			wantErr: `getItem builds argument 1 into a request path and the guard records it as a runtime value, so it cannot see which endpoint "Counts" selects`,
+		},
+		"path text passed on to a parameter built into a path": {
+			src: `package client
+
+func (c *Client) getItem(ctx context.Context, sub string) error {
+	return c.get(ctx, fmt.Sprintf("/Items/%s", url.PathEscape(sub)), nil)
+}
+
+func (c *Client) getNamed(ctx context.Context, name string) error {
+	lower := strings.ToLower(name)
+	return c.getItem(ctx, lower)
+}
+
+func (c *Client) Counts(ctx context.Context) error {
+	return c.getNamed(ctx, "Counts")
+}
+`,
+			wantErr: "getNamed builds argument 1 into a request path",
+		},
+		"request helper used as a value": {
+			src: `package client
+
+func (c *Client) Hidden(ctx context.Context) {
+	f := c.get
+	f(ctx, "/Hidden", nil)
+}
+`,
+			wantErr: "c.get sends requests but is used here as a value",
+		},
+		"net/http request function used as a value": {
+			src: `package client
+
+func (c *Client) Hidden(ctx context.Context) {
+	newRequest := http.NewRequestWithContext
+	newRequest(ctx, http.MethodGet, c.BaseURL+"/Hidden", nil)
+}
+`,
+			wantErr: "http.NewRequestWithContext sends requests but is used here as a value",
+		},
 	}
 
 	for name, tt := range tests {
@@ -1239,19 +1609,69 @@ func (c *Client) GetRaw(ctx context.Context, path string) (string, error) {
 	}
 }
 
-func TestUnitFormatPattern(t *testing.T) {
-	tests := map[string]string{
-		"/Users/%s":          "/Users/{}",
-		"/Users/%[1]s/%[1]s": "/Users/{}/{}",
-		"/Items/%5d":         "/Items/{}",
-		"/Items/%-5.2f":      "/Items/{}",
-		"/Items/%*d":         "/Items/{}",
-		"/Search/100%%":      "/Search/100%",
+func TestUnitFormatArgs(t *testing.T) {
+	tests := map[string][]int{
+		"/Users/%s/Items/%5d":   {0, 1},
+		"/Users/%[2]s/%[1]s/%s": {1, 0, 1},
+		"/Items/%-5.2f":         {0},
+		"/Items/%*d/%s":         {1, 2},
+		"/Items/%[3]*.[2]*[1]f": {0},
+		"/Search/100%%/%s":      {-1, 0},
 	}
 	for format, want := range tests {
-		if got := formatPattern(format); got != want {
-			t.Errorf("formatPattern(%q) = %q, want %q", format, got, want)
+		if got := formatArgs(format); !slices.Equal(got, want) {
+			t.Errorf("formatArgs(%q) = %v, want %v", format, got, want)
 		}
+	}
+}
+
+func TestUnitGoldenClientDrift(t *testing.T) {
+	golden := []string{
+		"op GET /System/Configuration/{key} | params=key:path:required=true | resp=string:binary",
+		"op GET /Users/{userId} | params=userId:path:required=true | resp=#UserDto",
+		"op POST /Startup/Complete",
+		"schema EncodingOptions.EnableAudioVbr: boolean",
+		"undocumented POST /Users/{}",
+	}
+	matching := []apiCall{
+		{http.MethodGet, "/System/Configuration/encoding"},
+		{http.MethodGet, "/Users/{}"},
+		{http.MethodPost, "/Users/{}"},
+		{http.MethodPost, "/Startup/Complete"},
+	}
+	if drift := goldenClientDrift(golden, matching); len(drift) > 0 {
+		t.Fatalf("expected no drift, got:\n%s", strings.Join(drift, "\n"))
+	}
+
+	changed := []apiCall{
+		{http.MethodGet, "/System/Configuration/encoding"},
+		{http.MethodGet, "/System/Configuration/network"},
+		{http.MethodGet, "/Users/{}"},
+		{http.MethodPost, "/Users/{}"},
+		{http.MethodPost, "/Environment/ValidatePath"},
+	}
+	want := []string{
+		`  + internal/client uses named configuration "network", whose schema NetworkConfiguration the golden does not list`,
+		"  + internal/client calls POST /Environment/ValidatePath, which the golden does not list",
+		"  - the golden lists op POST /Startup/Complete, which internal/client no longer calls",
+	}
+	if got := goldenClientDrift(golden, changed); !slices.Equal(got, want) {
+		t.Fatalf("unexpected drift:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestUnitJellyfinAPISchemaGoldenMatchesClientCalls(t *testing.T) {
+	calls, err := clientAPICalls(clientSourceDir)
+	if err != nil {
+		t.Fatalf("clientAPICalls: %v", err)
+	}
+	golden, err := os.ReadFile(jellyfinAPISchemaGolden)
+	if err != nil {
+		t.Fatalf("reading golden file: %v", err)
+	}
+
+	if drift := goldenClientDrift(strings.Split(strings.TrimSpace(string(golden)), "\n"), calls); len(drift) > 0 {
+		t.Fatalf("%s does not match the endpoints internal/client calls:\n\n%s\n\n%s", jellyfinAPISchemaGolden, strings.Join(drift, "\n"), schemaGuardRegenerateHelp("TestAccJellyfinAPISchemaGuard", jellyfinAPISchemaGolden))
 	}
 }
 
