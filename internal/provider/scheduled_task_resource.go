@@ -88,9 +88,9 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			// The trigger attributes are Optional without Computed because Jellyfin
-			// stores each trigger exactly as posted and never fills in fields, so an
-			// omitted attribute must plan as null rather than unknown.
+			// The optional trigger attributes are not Computed because Jellyfin stores
+			// each trigger exactly as posted and never fills in fields, so an omitted
+			// attribute must plan as null rather than unknown.
 			"triggers": schema.ListNestedAttribute{
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
@@ -127,8 +127,8 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 						},
 					},
 				},
-				Description:         "The task triggers.",
-				MarkdownDescription: "The task triggers.",
+				Description:         "The task triggers. This list replaces all of the task's triggers. Each trigger is sent exactly as configured, so an optional attribute left unset is removed from the server; declare every attribute an existing trigger should keep, such as the max_runtime_ticks some built-in tasks ship with.",
+				MarkdownDescription: "The task triggers. This list replaces all of the task's triggers. Each trigger is sent exactly as configured, so an optional attribute left unset is removed from the server; declare every attribute an existing trigger should keep, such as the `max_runtime_ticks` some built-in tasks ship with.",
 				Required:            true,
 			},
 		},
@@ -166,8 +166,9 @@ func (r *ScheduledTaskResource) ValidateConfig(ctx context.Context, req resource
 		}
 
 		var trigger ScheduledTaskTriggerModel
-		resp.Diagnostics.Append(obj.As(ctx, &trigger, basetypes.ObjectAsOptions{})...)
-		if resp.Diagnostics.HasError() {
+		diags := obj.As(ctx, &trigger, basetypes.ObjectAsOptions{})
+		resp.Diagnostics.Append(diags...)
+		if diags.HasError() {
 			return
 		}
 
@@ -246,8 +247,10 @@ func (r *ScheduledTaskResource) Read(ctx context.Context, req resource.ReadReque
 	}
 
 	data.Triggers = triggers
-	data.ID = types.StringValue(task.ID)
-	data.TaskID = types.StringValue(task.ID)
+	// task_id keeps the configured spelling: Jellyfin matches task IDs
+	// case-insensitively but returns them in lowercase, so copying task.ID would
+	// force a replacement on every plan for an uppercase task_id.
+	data.ID = data.TaskID
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -283,8 +286,7 @@ func (r *ScheduledTaskResource) Update(ctx context.Context, req resource.UpdateR
 	}
 
 	data.Triggers = triggers
-	data.ID = types.StringValue(task.ID)
-	data.TaskID = types.StringValue(task.ID)
+	data.ID = data.TaskID
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -297,7 +299,7 @@ func (r *ScheduledTaskResource) ImportState(ctx context.Context, req resource.Im
 	resource.ImportStatePassthroughID(ctx, path.Root("task_id"), req, resp)
 }
 
-// missingTriggerAttributes reports the attributes the trigger's type needs.
+// missingTriggerAttributes returns the attributes the trigger's type requires that are null.
 // Jellyfin rejects a trigger without them with a bare "Error processing request." 400.
 func missingTriggerAttributes(t ScheduledTaskTriggerModel) []string {
 	var missing []string

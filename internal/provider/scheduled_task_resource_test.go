@@ -101,3 +101,35 @@ resource "jellyfin_scheduled_task" "test" {
 		},
 	})
 }
+
+func TestAccScheduledTaskResourceUppercaseTaskID(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "jellyfin_scheduled_task" "test" {
+  task_id = "7738148FFCD07979C7CEB148E06B3AED"
+
+  triggers = [
+    {
+      type              = "DailyTrigger"
+      time_of_day_ticks = 72000000000
+    }
+  ]
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_scheduled_task.test", "id", "7738148FFCD07979C7CEB148E06B3AED"),
+					resource.TestCheckResourceAttr("jellyfin_scheduled_task.test", "task_id", "7738148FFCD07979C7CEB148E06B3AED"),
+				),
+			},
+			{
+				ResourceName:      "jellyfin_scheduled_task.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}

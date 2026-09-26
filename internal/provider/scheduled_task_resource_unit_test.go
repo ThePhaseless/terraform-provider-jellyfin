@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -232,22 +233,17 @@ func TestMissingTriggerAttributes(t *testing.T) {
 	}
 }
 
-func TestScheduledTaskValidateConfigReportsMissingAttributePath(t *testing.T) {
-	t.Parallel()
+func validateScheduledTaskConfig(t *testing.T, triggers ...ScheduledTaskTriggerModel) diag.Diagnostics {
+	t.Helper()
 
 	ctx := context.Background()
 	s := scheduledTaskSchema(t)
-
-	interval := newTrigger(triggerTypeInterval)
-	interval.IntervalTicks = types.Int64Value(1)
-	weekly := newTrigger(triggerTypeWeekly)
-	weekly.TimeOfDayTicks = types.Int64Value(1)
 
 	plan := tfsdk.Plan{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nil)}
 	if diags := plan.Set(ctx, &ScheduledTaskResourceModel{
 		ID:       types.StringNull(),
 		TaskID:   types.StringValue("7738148ffcd07979c7ceb148e06b3aed"),
-		Triggers: triggerList(t, interval, weekly),
+		Triggers: triggerList(t, triggers...),
 	}); diags.HasError() {
 		t.Fatalf("building config: %v", diags)
 	}
@@ -256,15 +252,48 @@ func TestScheduledTaskValidateConfigReportsMissingAttributePath(t *testing.T) {
 	(&ScheduledTaskResource{}).ValidateConfig(ctx, resource.ValidateConfigRequest{
 		Config: tfsdk.Config{Schema: s, Raw: plan.Raw},
 	}, &resp)
+	return resp.Diagnostics
+}
 
-	if got := resp.Diagnostics.ErrorsCount(); got != 1 {
-		t.Fatalf("ValidateConfig() error count = %d, want 1: %v", got, resp.Diagnostics)
+func errorPaths(t *testing.T, diags diag.Diagnostics) []string {
+	t.Helper()
+
+	var paths []string
+	for _, d := range diags.Errors() {
+		withPath, ok := d.(diag.DiagnosticWithPath)
+		if !ok {
+			t.Fatalf("diagnostic has no attribute path: %v", d)
+		}
+		paths = append(paths, withPath.Path().String())
 	}
-	d, ok := resp.Diagnostics.Errors()[0].(interface{ Path() path.Path })
-	if !ok {
-		t.Fatalf("ValidateConfig() error has no attribute path: %v", resp.Diagnostics)
+	return paths
+}
+
+func TestScheduledTaskValidateConfigReportsMissingAttributePath(t *testing.T) {
+	t.Parallel()
+
+	interval := newTrigger(triggerTypeInterval)
+	interval.IntervalTicks = types.Int64Value(1)
+	weekly := newTrigger(triggerTypeWeekly)
+	weekly.TimeOfDayTicks = types.Int64Value(1)
+
+	got := errorPaths(t, validateScheduledTaskConfig(t, interval, weekly))
+	want := []string{path.Root("triggers").AtListIndex(1).AtName("day_of_week").String()}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ValidateConfig() error paths = %v, want %v", got, want)
 	}
-	if want := path.Root("triggers").AtListIndex(1).AtName("day_of_week"); !d.Path().Equal(want) {
-		t.Fatalf("ValidateConfig() error path = %s, want %s", d.Path(), want)
+}
+
+func TestScheduledTaskValidateConfigReportsEveryInvalidTrigger(t *testing.T) {
+	t.Parallel()
+
+	got := errorPaths(t, validateScheduledTaskConfig(t, newTrigger(triggerTypeDaily), newTrigger(triggerTypeWeekly)))
+	want := []string{
+		path.Root("triggers").AtListIndex(0).AtName("time_of_day_ticks").String(),
+		path.Root("triggers").AtListIndex(1).AtName("time_of_day_ticks").String(),
+		path.Root("triggers").AtListIndex(1).AtName("day_of_week").String(),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ValidateConfig() error paths = %v, want %v", got, want)
 	}
 }

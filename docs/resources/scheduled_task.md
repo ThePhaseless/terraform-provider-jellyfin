@@ -31,7 +31,7 @@ resource "jellyfin_scheduled_task" "example" {
 ### Required
 
 - `task_id` (String) The unique identifier of the scheduled task.
-- `triggers` (Attributes List) The task triggers. (see [below for nested schema](#nestedatt--triggers))
+- `triggers` (Attributes List) The task triggers. This list replaces all of the task's triggers. Each trigger is sent exactly as configured, so an optional attribute left unset is removed from the server; declare every attribute an existing trigger should keep, such as the `max_runtime_ticks` some built-in tasks ship with. (see [below for nested schema](#nestedatt--triggers))
 
 ### Read-Only
 
