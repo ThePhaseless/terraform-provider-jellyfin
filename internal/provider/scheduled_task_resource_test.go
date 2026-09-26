@@ -53,6 +53,21 @@ resource "jellyfin_scheduled_task" "test" {
 `,
 				ExpectError: regexp.MustCompile(`day_of_week is required when type is "WeeklyTrigger"`),
 			},
+			{
+				Config: `
+resource "jellyfin_scheduled_task" "test" {
+  task_id = "7738148ffcd07979c7ceb148e06b3aed"
+
+  triggers = [
+    {
+      type              = "DailyTrigger"
+      time_of_day_ticks = 864000000000
+    }
+  ]
+}
+`,
+				ExpectError: regexp.MustCompile(`must be between 0 and\s+863999999999`),
+			},
 			// ImportState.
 			{
 				ResourceName:      "jellyfin_scheduled_task.test",

@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
@@ -68,6 +69,52 @@ func TestScheduledTaskTriggerAttributesAreNotComputed(t *testing.T) {
 		if a.IsComputed() {
 			t.Errorf("triggers.%s is computed; an omitted value would plan as unknown and never resolve", name)
 		}
+	}
+}
+
+func TestScheduledTaskTriggerTickValidators(t *testing.T) {
+	t.Parallel()
+
+	triggers, ok := scheduledTaskSchema(t).Attributes["triggers"].(rschema.ListNestedAttribute)
+	if !ok {
+		t.Fatalf("triggers attribute type = %T, want schema.ListNestedAttribute", scheduledTaskSchema(t).Attributes["triggers"])
+	}
+
+	tests := map[string]struct {
+		attribute string
+		value     int64
+		wantError bool
+	}{
+		"time_of_day_ticks at midnight":             {attribute: "time_of_day_ticks", value: 0},
+		"time_of_day_ticks at the last tick of day": {attribute: "time_of_day_ticks", value: 863999999999},
+		"time_of_day_ticks of one day":              {attribute: "time_of_day_ticks", value: 864000000000, wantError: true},
+		"negative time_of_day_ticks":                {attribute: "time_of_day_ticks", value: -1, wantError: true},
+		"zero interval_ticks":                       {attribute: "interval_ticks", value: 0},
+		"negative interval_ticks":                   {attribute: "interval_ticks", value: -1, wantError: true},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			a, ok := triggers.NestedObject.Attributes[tc.attribute].(rschema.Int64Attribute)
+			if !ok {
+				t.Fatalf("triggers.%s type = %T, want schema.Int64Attribute", tc.attribute, triggers.NestedObject.Attributes[tc.attribute])
+			}
+
+			var diags diag.Diagnostics
+			for _, v := range a.Int64Validators() {
+				var resp validator.Int64Response
+				v.ValidateInt64(context.Background(), validator.Int64Request{
+					Path:        path.Root("triggers").AtListIndex(0).AtName(tc.attribute),
+					ConfigValue: types.Int64Value(tc.value),
+				}, &resp)
+				diags.Append(resp.Diagnostics...)
+			}
+			if diags.HasError() != tc.wantError {
+				t.Fatalf("validating %s = %d: diagnostics %v, want error %t", tc.attribute, tc.value, diags, tc.wantError)
+			}
+		})
 	}
 }
 

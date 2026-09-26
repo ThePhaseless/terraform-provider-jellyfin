@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -34,6 +35,8 @@ const (
 	triggerTypeWeekly   = "WeeklyTrigger"
 	triggerTypeInterval = "IntervalTrigger"
 	triggerTypeStartup  = "StartupTrigger"
+
+	ticksPerDay = 864_000_000_000
 )
 
 // NewScheduledTaskResource creates a new scheduled task resource.
@@ -102,15 +105,24 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 								stringvalidator.OneOf(triggerTypeDaily, triggerTypeWeekly, triggerTypeInterval, triggerTypeStartup),
 							},
 						},
+						// Jellyfin saves a trigger before its timer checks the due time, so a
+						// negative or oversized tick value fails the request with a 400 yet
+						// stays on the server.
 						"time_of_day_ticks": schema.Int64Attribute{
-							Description:         "Time of day the task runs, in ticks (100 ns) after midnight. Required for DailyTrigger and WeeklyTrigger.",
-							MarkdownDescription: "Time of day the task runs, in ticks (100 ns) after midnight. Required for `DailyTrigger` and `WeeklyTrigger`.",
+							Description:         "Time of day the task runs, in ticks (100 ns) after midnight, from 0 to 863999999999. Required for DailyTrigger and WeeklyTrigger.",
+							MarkdownDescription: "Time of day the task runs, in ticks (100 ns) after midnight, from `0` to `863999999999`. Required for `DailyTrigger` and `WeeklyTrigger`.",
 							Optional:            true,
+							Validators: []validator.Int64{
+								int64validator.Between(0, ticksPerDay-1),
+							},
 						},
 						"interval_ticks": schema.Int64Attribute{
 							Description:         "Interval between runs, in ticks (100 ns). Required for IntervalTrigger.",
 							MarkdownDescription: "Interval between runs, in ticks (100 ns). Required for `IntervalTrigger`.",
 							Optional:            true,
+							Validators: []validator.Int64{
+								int64validator.AtLeast(0),
+							},
 						},
 						"day_of_week": schema.StringAttribute{
 							Description:         "Day of the week the task runs (Sunday through Saturday). Required for WeeklyTrigger.",
