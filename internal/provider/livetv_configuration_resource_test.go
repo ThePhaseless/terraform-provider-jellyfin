@@ -227,3 +227,78 @@ resource "jellyfin_livetv_configuration" "test" {
 		},
 	})
 }
+
+func TestAccLiveTVConfigurationResourceUnknownEntryValues(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "terraform_data" "entry" {
+  input = "a"
+}
+
+resource "jellyfin_livetv_configuration" "test" {
+  tuner_hosts = [
+    {
+      type        = "m3u"
+      url         = "http://127.0.0.1:9/tf-acc-a.m3u"
+      tuner_count = 2
+    },
+    {
+      type        = "m3u"
+      url         = "http://127.0.0.1:9/tf-acc-b.m3u"
+      tuner_count = 3
+    },
+  ]
+
+  listing_providers = [{
+    type        = "SchedulesDirect"
+    username    = "tf-acc"
+    listings_id = "USA-123"
+    password    = terraform_data.entry.output
+  }]
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.#", "2"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.password", "a"),
+				),
+			},
+			// The remaining tuner's url and the password are unknown until
+			// terraform_data applies. The url resolves to the second tuner's, so the
+			// entry keeps that tuner's tuner_count rather than the first tuner's,
+			// which its type alone would match.
+			{
+				Config: `
+resource "terraform_data" "entry" {
+  input = "b"
+}
+
+resource "jellyfin_livetv_configuration" "test" {
+  tuner_hosts = [{
+    type = "m3u"
+    url  = "http://127.0.0.1:9/tf-acc-${terraform_data.entry.output}.m3u"
+  }]
+
+  listing_providers = [{
+    type        = "SchedulesDirect"
+    username    = "tf-acc"
+    listings_id = "USA-123"
+    password    = terraform_data.entry.output
+  }]
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.#", "1"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.0.url", "http://127.0.0.1:9/tf-acc-b.m3u"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "tuner_hosts.0.tuner_count", "3"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.#", "1"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.listings_id", "USA-123"),
+					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.password", "b"),
+				),
+			},
+		},
+	})
+}

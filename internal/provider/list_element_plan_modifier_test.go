@@ -20,8 +20,13 @@ var testHostType = types.ObjectType{AttrTypes: map[string]attr.Type{
 
 func testHost(t *testing.T, url, typ string, count types.Int64) attr.Value {
 	t.Helper()
+	return testHostURL(t, types.StringValue(url), typ, count)
+}
+
+func testHostURL(t *testing.T, url types.String, typ string, count types.Int64) attr.Value {
+	t.Helper()
 	obj, d := types.ObjectValue(testHostType.AttrTypes, map[string]attr.Value{
-		"url":   types.StringValue(url),
+		"url":   url,
 		"type":  types.StringValue(typ),
 		"count": count,
 	})
@@ -44,35 +49,55 @@ func TestUseStateForUnknownByKey(t *testing.T) {
 	t.Parallel()
 
 	unknown := types.Int64Unknown()
+	omitted := types.Int64Null()
+	unknownURL := types.StringUnknown()
 	tests := map[string]struct {
-		state types.List
-		plan  types.List
-		want  types.List
+		state  types.List
+		config types.List
+		plan   types.List
+		want   types.List
 	}{
 		"appended element stays unknown": {
-			state: testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2))),
-			plan:  testHostList(t, testHost(t, "a", "m3u", unknown), testHost(t, "b", "hdhomerun", unknown)),
-			want:  testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2)), testHost(t, "b", "hdhomerun", unknown)),
+			state:  testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2))),
+			config: testHostList(t, testHost(t, "a", "m3u", omitted), testHost(t, "b", "hdhomerun", omitted)),
+			plan:   testHostList(t, testHost(t, "a", "m3u", unknown), testHost(t, "b", "hdhomerun", unknown)),
+			want:   testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2)), testHost(t, "b", "hdhomerun", unknown)),
 		},
 		"reordered elements follow their key, not their index": {
-			state: testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2)), testHost(t, "b", "m3u", types.Int64Value(3))),
-			plan:  testHostList(t, testHost(t, "b", "m3u", unknown), testHost(t, "a", "m3u", unknown)),
-			want:  testHostList(t, testHost(t, "b", "m3u", types.Int64Value(3)), testHost(t, "a", "m3u", types.Int64Value(2))),
+			state:  testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2)), testHost(t, "b", "m3u", types.Int64Value(3))),
+			config: testHostList(t, testHost(t, "b", "m3u", omitted), testHost(t, "a", "m3u", omitted)),
+			plan:   testHostList(t, testHost(t, "b", "m3u", unknown), testHost(t, "a", "m3u", unknown)),
+			want:   testHostList(t, testHost(t, "b", "m3u", types.Int64Value(3)), testHost(t, "a", "m3u", types.Int64Value(2))),
 		},
 		"exact key is claimed before an earlier element falls back": {
-			state: testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2))),
-			plan:  testHostList(t, testHost(t, "new", "m3u", unknown), testHost(t, "a", "m3u", unknown)),
-			want:  testHostList(t, testHost(t, "new", "m3u", unknown), testHost(t, "a", "m3u", types.Int64Value(2))),
+			state:  testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2))),
+			config: testHostList(t, testHost(t, "new", "m3u", omitted), testHost(t, "a", "m3u", omitted)),
+			plan:   testHostList(t, testHost(t, "new", "m3u", unknown), testHost(t, "a", "m3u", unknown)),
+			want:   testHostList(t, testHost(t, "new", "m3u", unknown), testHost(t, "a", "m3u", types.Int64Value(2))),
 		},
 		"fallback key matches an edited element": {
-			state: testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2))),
-			plan:  testHostList(t, testHost(t, "moved", "m3u", unknown)),
-			want:  testHostList(t, testHost(t, "moved", "m3u", types.Int64Value(2))),
+			state:  testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2))),
+			config: testHostList(t, testHost(t, "moved", "m3u", omitted)),
+			plan:   testHostList(t, testHost(t, "moved", "m3u", unknown)),
+			want:   testHostList(t, testHost(t, "moved", "m3u", types.Int64Value(2))),
 		},
 		"no prior state leaves the plan alone": {
-			state: types.ListNull(testHostType),
-			plan:  testHostList(t, testHost(t, "a", "m3u", unknown)),
-			want:  testHostList(t, testHost(t, "a", "m3u", unknown)),
+			state:  types.ListNull(testHostType),
+			config: testHostList(t, testHost(t, "a", "m3u", omitted)),
+			plan:   testHostList(t, testHost(t, "a", "m3u", unknown)),
+			want:   testHostList(t, testHost(t, "a", "m3u", unknown)),
+		},
+		"value unknown in config stays unknown": {
+			state:  testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2))),
+			config: testHostList(t, testHost(t, "a", "m3u", unknown)),
+			plan:   testHostList(t, testHost(t, "a", "m3u", unknown)),
+			want:   testHostList(t, testHost(t, "a", "m3u", unknown)),
+		},
+		"key unknown in config leaves every element unknown": {
+			state:  testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2)), testHost(t, "b", "m3u", types.Int64Value(3))),
+			config: testHostList(t, testHost(t, "a", "m3u", omitted), testHostURL(t, unknownURL, "m3u", omitted)),
+			plan:   testHostList(t, testHost(t, "a", "m3u", unknown), testHostURL(t, unknownURL, "m3u", unknown)),
+			want:   testHostList(t, testHost(t, "a", "m3u", unknown), testHostURL(t, unknownURL, "m3u", unknown)),
 		},
 	}
 
@@ -82,8 +107,9 @@ func TestUseStateForUnknownByKey(t *testing.T) {
 
 			resp := planmodifier.ListResponse{PlanValue: test.plan}
 			useStateForUnknownByKey([]string{"url"}, []string{"type"}).PlanModifyList(context.Background(), planmodifier.ListRequest{
-				StateValue: test.state,
-				PlanValue:  test.plan,
+				StateValue:  test.state,
+				ConfigValue: test.config,
+				PlanValue:   test.plan,
 			}, &resp)
 
 			if resp.Diagnostics.HasError() {

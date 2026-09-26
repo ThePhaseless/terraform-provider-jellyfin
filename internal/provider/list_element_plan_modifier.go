@@ -12,12 +12,18 @@ import (
 )
 
 // useStateForUnknownByKey returns a plan modifier for a list of objects that
-// fills each planned element's unknown attributes from the prior element it
-// matches. Key groups are tried in order: a planned element whose attributes in
-// a group are all known and non-null matches the first unclaimed prior element
-// with equal values in that group. A group is tried for every element before the
-// next group, so an exact key claims its element before a looser one can.
-// Unmatched elements keep their unknowns and take the server's values on apply.
+// fills the attributes each planned element leaves unset in config from the
+// prior element it matches. Key groups are tried in order: a planned element
+// whose attributes in a group are all known and non-null matches the first
+// unclaimed prior element with equal values in that group. A group is tried for
+// every element before the next group, so an exact key claims its element before
+// a looser one can. Unmatched elements keep their unknowns and take the server's
+// values on apply.
+//
+// A value unknown in config stays unknown. While any key or element is unknown
+// in config nothing is filled: once known at apply, that key could claim a
+// different prior element than the one this plan copied from, and the final plan
+// would contradict it. A value left unknown here may take any value then.
 //
 // It stands in for UseStateForUnknown on the nested attributes, which pairs
 // elements by index: an inserted or reordered element would take the values of
@@ -32,7 +38,7 @@ type useStateForUnknownByKeyModifier struct {
 }
 
 func (m useStateForUnknownByKeyModifier) Description(_ context.Context) string {
-	return "Unknown attributes of an element keep the value of the prior element with the same key."
+	return "Attributes an element does not configure keep the value of the prior element with the same key."
 }
 
 func (m useStateForUnknownByKeyModifier) MarkdownDescription(ctx context.Context) string {
@@ -40,12 +46,23 @@ func (m useStateForUnknownByKeyModifier) MarkdownDescription(ctx context.Context
 }
 
 func (m useStateForUnknownByKeyModifier) PlanModifyList(ctx context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
-	if req.StateValue.IsNull() || req.StateValue.IsUnknown() || req.PlanValue.IsNull() || req.PlanValue.IsUnknown() {
+	if req.StateValue.IsNull() || req.StateValue.IsUnknown() || req.PlanValue.IsNull() || req.PlanValue.IsUnknown() ||
+		req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
 		return
 	}
 	objType, ok := req.PlanValue.ElementType(ctx).(types.ObjectType)
 	if !ok {
 		return
+	}
+
+	configured := knownObjects(req.ConfigValue.Elements())
+	if len(configured) != len(req.PlanValue.Elements()) {
+		return
+	}
+	for i, e := range req.ConfigValue.Elements() {
+		if e.IsUnknown() || m.hasUnknownKey(configured[i]) {
+			return
+		}
 	}
 
 	planned := knownObjects(req.PlanValue.Elements())
@@ -80,7 +97,7 @@ func (m useStateForUnknownByKeyModifier) PlanModifyList(ctx context.Context, req
 		attrs := make(map[string]attr.Value, len(planned[i]))
 		for name, v := range planned[i] {
 			attrs[name] = v
-			if v.IsUnknown() {
+			if cv, ok := configured[i][name]; ok && cv.IsNull() && v.IsUnknown() {
 				if prev, ok := prior[j][name]; ok {
 					attrs[name] = prev
 					changed = true
@@ -118,6 +135,17 @@ func knownObjects(elements []attr.Value) []map[string]attr.Value {
 		out[i] = obj.Attributes()
 	}
 	return out
+}
+
+func (m useStateForUnknownByKeyModifier) hasUnknownKey(attrs map[string]attr.Value) bool {
+	for _, group := range m.keyGroups {
+		for _, name := range group {
+			if v, ok := attrs[name]; ok && v.IsUnknown() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func hasKnownValues(attrs map[string]attr.Value, names []string) bool {
