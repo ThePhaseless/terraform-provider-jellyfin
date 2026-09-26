@@ -44,8 +44,10 @@ resource "jellyfin_encoding_configuration" "example" {
   allow_hevc_encoding                                               = false
   allow_av1_encoding                                                = false
   enable_subtitle_extraction                                        = false
-  subtitle_extraction_timeout_minutes                               = 30
   hardware_decoding_codecs                                          = []
   allow_on_demand_metadata_based_keyframe_extraction_for_extensions = []
-  hls_audio_seek_strategy                                           = "TrimCopiedAudio"
+
+  # Requires Jellyfin 12.0 or later; remove both on older servers.
+  subtitle_extraction_timeout_minutes = 30
+  hls_audio_seek_strategy             = "TrimCopiedAudio"
 }

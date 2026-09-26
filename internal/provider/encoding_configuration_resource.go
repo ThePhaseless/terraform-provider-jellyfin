@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -237,6 +238,11 @@ func (r *EncodingConfigurationResource) apply(ctx context.Context, data *Encodin
 		return
 	}
 
+	if d := checkJellyfin12EncodingKeys(base, data); d.HasError() {
+		diags.Append(d...)
+		return
+	}
+
 	d := overlayEncodingConfiguration(ctx, base, data)
 	if d.HasError() {
 		diags.Append(d...)
@@ -275,6 +281,35 @@ func (r *EncodingConfigurationResource) read(ctx context.Context, data *Encoding
 	flattenEncodingConfiguration(ctx, current.RawJSON, data, diags)
 	data.ID = types.StringValue("encoding")
 	diags.Append(state.Set(ctx, data)...)
+}
+
+// checkJellyfin12EncodingKeys rejects configured Jellyfin 12.0+ fields that the
+// server's document lacks. Older servers accept the POST and silently drop
+// unknown keys, which would otherwise surface only as the framework's generic
+// "inconsistent result after apply" error, repeated on every apply.
+func checkJellyfin12EncodingKeys(m map[string]json.RawMessage, data *EncodingConfigurationResourceModel) diag.Diagnostics {
+	var diags diag.Diagnostics
+	for _, f := range []struct {
+		attribute string
+		key       string
+		value     attr.Value
+	}{
+		{"subtitle_extraction_timeout_minutes", "SubtitleExtractionTimeoutMinutes", data.SubtitleExtractionTimeoutMinutes},
+		{"hls_audio_seek_strategy", "HlsAudioSeekStrategy", data.HlsAudioSeekStrategy},
+	} {
+		if f.value.IsNull() || f.value.IsUnknown() {
+			continue
+		}
+		if _, ok := m[f.key]; ok {
+			continue
+		}
+		diags.AddAttributeError(
+			path.Root(f.attribute),
+			"Unsupported Jellyfin server version",
+			fmt.Sprintf("%s requires Jellyfin 12.0 or later: the server's encoding configuration has no %s field, so it would discard the value. Remove %s from the configuration or upgrade the server.", f.attribute, f.key, f.attribute),
+		)
+	}
+	return diags
 }
 
 func overlayEncodingConfiguration(ctx context.Context, m map[string]json.RawMessage, data *EncodingConfigurationResourceModel) diag.Diagnostics {

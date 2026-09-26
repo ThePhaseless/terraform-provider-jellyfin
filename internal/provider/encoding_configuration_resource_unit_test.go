@@ -120,3 +120,57 @@ func TestUnitEncodingConfigurationEnumValidators(t *testing.T) {
 		}
 	}
 }
+
+func TestUnitEncodingConfigurationJellyfin12FieldsCheckedAgainstServerKeys(t *testing.T) {
+	jellyfin1011 := `{"EnableSubtitleExtraction":true}`
+	jellyfin12 := `{"EnableSubtitleExtraction":true,"SubtitleExtractionTimeoutMinutes":30,"HlsAudioSeekStrategy":"TrimCopiedAudio"}`
+	configured := EncodingConfigurationResourceModel{
+		SubtitleExtractionTimeoutMinutes: types.Int64Value(45),
+		HlsAudioSeekStrategy:             types.StringValue("TranscodeAudio"),
+	}
+
+	for name, tc := range map[string]struct {
+		server    string
+		data      EncodingConfigurationResourceModel
+		wantPaths []path.Path
+	}{
+		"configured on 10.11": {
+			server:    jellyfin1011,
+			data:      configured,
+			wantPaths: []path.Path{path.Root("subtitle_extraction_timeout_minutes"), path.Root("hls_audio_seek_strategy")},
+		},
+		"configured on 12": {
+			server: jellyfin12,
+			data:   configured,
+		},
+		"unset on 10.11": {
+			server: jellyfin1011,
+			data: EncodingConfigurationResourceModel{
+				SubtitleExtractionTimeoutMinutes: types.Int64Null(),
+				HlsAudioSeekStrategy:             types.StringUnknown(),
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			base, err := parseJSONObject(tc.server)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+
+			diags := checkJellyfin12EncodingKeys(base, &tc.data)
+
+			if got := diags.ErrorsCount(); got != len(tc.wantPaths) {
+				t.Fatalf("got %d errors, want %d: %v", got, len(tc.wantPaths), diags)
+			}
+			for i, want := range tc.wantPaths {
+				withPath, ok := diags.Errors()[i].(diag.DiagnosticWithPath)
+				if !ok {
+					t.Fatalf("error %d has no attribute path: %v", i, diags.Errors()[i])
+				}
+				if !withPath.Path().Equal(want) {
+					t.Errorf("error %d path = %s, want %s", i, withPath.Path(), want)
+				}
+			}
+		})
+	}
+}
