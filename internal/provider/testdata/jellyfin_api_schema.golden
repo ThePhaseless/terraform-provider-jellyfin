@@ -1,0 +1,106 @@
+op DELETE /Auth/Keys/{key} | params=key:path:required=true
+op DELETE /Library/VirtualFolders | params=name:query:required=false,refreshLibrary:query:required=false
+op DELETE /Plugins/{pluginId} | params=pluginId:path:required=true
+op DELETE /Users/{userId} | params=userId:path:required=true
+op GET /Auth/Keys | resp=#AuthenticationInfoQueryResult
+op GET /Library/VirtualFolders | resp=[]#VirtualFolderInfo
+op GET /Packages | resp=[]#PackageInfo
+op GET /Plugins | resp=[]#PluginInfo
+op GET /Plugins/{pluginId}/Configuration | params=pluginId:path:required=true | resp=#BasePluginConfiguration
+op GET /Repositories | resp=[]#RepositoryInfo
+op GET /ScheduledTasks | params=isEnabled:query:required=false,isHidden:query:required=false | resp=[]#TaskInfo
+op GET /ScheduledTasks/{taskId} | params=taskId:path:required=true | resp=#TaskInfo
+op GET /Startup/Configuration | resp=#StartupConfigurationDto
+op GET /Startup/User | resp=#StartupUserDto
+op GET /System/Configuration | resp=#ServerConfiguration
+op GET /System/Configuration/{key} | params=key:path:required=true | resp=string:binary
+op GET /System/Info | resp=#SystemInfo
+op GET /System/Info/Public | resp=#PublicSystemInfo
+op GET /Users | params=isDisabled:query:required=false,isHidden:query:required=false | resp=[]#UserDto
+op GET /Users/{userId} | params=userId:path:required=true | resp=#UserDto
+op POST /Auth/Keys | params=app:query:required=true
+op POST /Library/VirtualFolders | params=collectionType:query:required=false,name:query:required=false,paths:query:required=false,refreshLibrary:query:required=false | body=#AddVirtualFolderDto
+op POST /Library/VirtualFolders/LibraryOptions | body=#UpdateLibraryOptionsDto
+op POST /Packages/Installed/{name} | params=assemblyGuid:query:required=false,name:path:required=true,repositoryUrl:query:required=false,version:query:required=false
+op POST /Plugins/{pluginId}/Configuration | params=pluginId:path:required=true
+op POST /Repositories | body=[]#RepositoryInfo
+op POST /ScheduledTasks/{taskId}/Triggers | params=taskId:path:required=true | body=[]#TaskTriggerInfo
+op POST /Startup/Complete
+op POST /Startup/Configuration | body=#StartupConfigurationDto
+op POST /Startup/User | body=#StartupUserDto
+op POST /System/Configuration | body=#ServerConfiguration
+op POST /System/Configuration/Branding | body=#BrandingOptionsDto
+op POST /System/Configuration/{key} | params=key:path:required=true | body=any
+op POST /System/Restart
+op POST /Users/AuthenticateByName | body=#AuthenticateUserByName | resp=#AuthenticationResult
+op POST /Users/New | body=#CreateUserByName | resp=#UserDto
+op POST /Users/{userId}/Policy | params=userId:path:required=true | body=#UserPolicy
+schema AccessSchedule: {object,DayOfWeek=#DynamicDayOfWeek,EndHour=number:double,Id=integer:int32,StartHour=number:double,UserId=string:uuid}
+schema AddVirtualFolderDto: {object,LibraryOptions=#LibraryOptions}
+schema AuthenticateUserByName: {object,Pw=string,Username=string}
+schema AuthenticationInfo: {object,AccessToken=string,AppName=string,AppVersion=string,DateCreated=string:date-time,DateLastActivity=string:date-time,DateRevoked=string:date-time,DeviceId=string,DeviceName=string,Id=integer:int64,IsActive=boolean,UserId=string:uuid,UserName=string}
+schema AuthenticationInfoQueryResult: {object,Items=[]#AuthenticationInfo,StartIndex=integer:int32,TotalRecordCount=integer:int32}
+schema AuthenticationResult: {object,AccessToken=string,ServerId=string,SessionInfo=#SessionInfoDto,User=#UserDto}
+schema BasePluginConfiguration: {object}
+schema BrandingOptionsDto: {object,CustomCss=string,LoginDisclaimer=string,SplashscreenEnabled=boolean}
+schema CastReceiverApplication: {object,Id=string,Name=string}
+schema CollectionTypeOptions: string enum(books|boxsets|homevideos|mixed|movies|music|musicvideos|tvshows)
+schema CreateUserByName: {object,Name=string,Password=string}
+schema DayOfWeek: string enum(Friday|Monday|Saturday|Sunday|Thursday|Tuesday|Wednesday)
+schema DeinterlaceMethod: string enum(bwdif|yadif)
+schema DownMixStereoAlgorithms: string enum(Ac4|Dave750|NightmodeDialogue|None|Rfc7845)
+schema DynamicDayOfWeek: string enum(Everyday|Friday|Monday|Saturday|Sunday|Thursday|Tuesday|Wednesday|Weekday|Weekend)
+schema EmbeddedSubtitleOptions: string enum(AllowAll|AllowImage|AllowNone|AllowText)
+schema EncoderPreset: string enum(auto|fast|faster|medium|placebo|slow|slower|superfast|ultrafast|veryfast|veryslow)
+schema EncodingOptions: {object,AllowAv1Encoding=boolean,AllowHevcEncoding=boolean,AllowOnDemandMetadataBasedKeyframeExtractionForExtensions=[]string,DeinterlaceDoubleRate=boolean,DeinterlaceMethod=#DeinterlaceMethod,DownMixAudioBoost=number:double,DownMixStereoAlgorithm=#DownMixStereoAlgorithms,EnableAudioVbr=boolean,EnableDecodingColorDepth10Hevc=boolean,EnableDecodingColorDepth10HevcRext=boolean,EnableDecodingColorDepth10Vp9=boolean,EnableDecodingColorDepth12HevcRext=boolean,EnableEnhancedNvdecDecoder=boolean,EnableFallbackFont=boolean,EnableHardwareEncoding=boolean,EnableIntelLowPowerH264HwEncoder=boolean,EnableIntelLowPowerHevcHwEncoder=boolean,EnableSegmentDeletion=boolean,EnableSubtitleExtraction=boolean,EnableThrottling=boolean,EnableTonemapping=boolean,EnableVideoToolboxTonemapping=boolean,EnableVppTonemapping=boolean,EncoderAppPath=string,EncoderAppPathDisplay=string,EncoderPreset=#EncoderPreset,EncodingThreadCount=integer:int32,FallbackFontPath=string,H264Crf=integer:int32,H265Crf=integer:int32,HardwareAccelerationType=#HardwareAccelerationType,HardwareDecodingCodecs=[]string,HlsAudioSeekStrategy=#HlsAudioSeekStrategy,MaxMuxingQueueSize=integer:int32,PreferSystemNativeHwDecoder=boolean,QsvDevice=string,SegmentKeepSeconds=integer:int32,SubtitleExtractionTimeoutMinutes=integer:int32,ThrottleDelaySeconds=integer:int32,TonemappingAlgorithm=#TonemappingAlgorithm,TonemappingDesat=number:double,TonemappingMode=#TonemappingMode,TonemappingParam=number:double,TonemappingPeak=number:double,TonemappingRange=#TonemappingRange,TranscodingTempPath=string,VaapiDevice=string,VppTonemappingBrightness=number:double,VppTonemappingContrast=number:double}
+schema HardwareAccelerationType: string enum(amf|none|nvenc|qsv|rkmpp|v4l2m2m|vaapi|videotoolbox)
+schema HlsAudioSeekStrategy: string enum(TranscodeAudio|TrimCopiedAudio)
+schema ImageOption: {object,Limit=integer:int32,MinWidth=integer:int32,Type=#ImageType}
+schema ImageResolution: string enum(MatchSource|P1080|P144|P1440|P2160|P240|P360|P480|P720)
+schema ImageSavingConvention: string enum(Compatible|Legacy)
+schema ImageType: string enum(Art|Backdrop|Banner|Box|BoxRear|Chapter|Disc|Logo|Menu|Primary|Profile|Screenshot|Thumb)
+schema InstallationInfo: {object,Changelog=string,Checksum=string,Guid=string:uuid,Name=string,PackageInfo=#PackageInfo,SourceUrl=string,Version=string}
+schema LibraryOptions: {object,AllowEmbeddedSubtitles=#EmbeddedSubtitleOptions,AutomaticRefreshIntervalDays=integer:int32,AutomaticallyAddToCollection=boolean,CustomTagDelimiters=[]string,DelimiterWhitelist=[]string,DisabledLocalMetadataReaders=[]string,DisabledLyricFetchers=[]string,DisabledMediaSegmentProviders=[]string,DisabledSubtitleFetchers=[]string,EnableAutomaticSeriesGrouping=boolean,EnableChapterImageExtraction=boolean,EnableEmbeddedEpisodeInfos=boolean,EnableEmbeddedExtrasTitles=boolean,EnableEmbeddedTitles=boolean,EnableInternetProviders=boolean,EnableLUFSScan=boolean,EnablePhotos=boolean,EnableRealtimeMonitor=boolean,EnableTrickplayImageExtraction=boolean,Enabled=boolean,ExtractChapterImagesDuringLibraryScan=boolean,ExtractTrickplayImagesDuringLibraryScan=boolean,LocalMetadataReaderOrder=[]string,LyricFetcherOrder=[]string,MediaSegmentProviderOrder=[]string,MetadataCountryCode=string,MetadataSavers=[]string,PathInfos=[]#MediaPathInfo,PreferNonstandardArtistsTag=boolean,PreferredMetadataLanguage=string,RequirePerfectSubtitleMatch=boolean,SaveLocalMetadata=boolean,SaveLyricsWithMedia=boolean,SaveSubtitlesWithMedia=boolean,SaveTrickplayWithMedia=boolean,SeasonZeroDisplayName=string,SkipSubtitlesIfAudioTrackMatches=boolean,SkipSubtitlesIfEmbeddedSubtitlesPresent=boolean,SubtitleDownloadLanguages=[]string,SubtitleFetcherOrder=[]string,TypeOptions=[]#TypeOptions,UseCustomTagDelimiters=boolean}
+schema ListingsProviderInfo: {object,ChannelMappings=[]#NameValuePair,Country=string,EnableAllTuners=boolean,EnabledTuners=[]string,Id=string,KidsCategories=[]string,ListingsId=string,MovieCategories=[]string,MoviePrefix=string,NewsCategories=[]string,Password=string,Path=string,PreferredLanguage=string,SportsCategories=[]string,Type=string,UserAgent=string,Username=string,ZipCode=string}
+schema LiveTvOptions: {object,EnableOriginalAudioWithEncodedRecordings=boolean,EnableRecordingSubfolders=boolean,GuideDays=integer:int32,ListingProviders=[]#ListingsProviderInfo,MediaLocationsCreated=[]string,MovieRecordingPath=string,PostPaddingSeconds=integer:int32,PrePaddingSeconds=integer:int32,RecordingPath=string,RecordingPostProcessor=string,RecordingPostProcessorArguments=string,SaveRecordingImages=boolean,SaveRecordingNFO=boolean,SeriesRecordingPath=string,TunerHosts=[]#TunerHostInfo}
+schema MediaPathInfo: {object,Path=string}
+schema MetadataConfiguration: {object,UseFileCreationTimeForDateAdded=boolean}
+schema MetadataOptions: {object,DisabledImageFetchers=[]string,DisabledMetadataFetchers=[]string,DisabledMetadataSavers=[]string,ImageFetcherOrder=[]string,ItemType=string,LocalMetadataReaderOrder=[]string,MetadataFetcherOrder=[]string}
+schema NameValuePair: {object,Name=string,Value=string}
+schema NetworkConfiguration: {object,AutoDiscovery=boolean,BaseUrl=string,CertificatePassword=string,CertificatePath=string,EnableHttps=boolean,EnableIPv4=boolean,EnableIPv6=boolean,EnablePublishedServerUriByRequest=boolean,EnableRemoteAccess=boolean,EnableUPnP=boolean,IgnoreVirtualInterfaces=boolean,InternalHttpPort=integer:int32,InternalHttpsPort=integer:int32,IsRemoteIPFilterBlacklist=boolean,KnownProxies=[]string,LocalNetworkAddresses=[]string,LocalNetworkSubnets=[]string,PublicHttpPort=integer:int32,PublicHttpsPort=integer:int32,PublishedServerUriBySubnet=[]string,RemoteIPFilter=[]string,RequireHttps=boolean,VirtualInterfaceNames=[]string}
+schema PackageInfo: {object,category=string,description=string,guid=string:uuid,imageUrl=string,name=string,overview=string,owner=string,versions=[]#VersionInfo}
+schema PathSubstitution: {object,From=string,To=string}
+schema PluginInfo: {object,CanUninstall=boolean,ConfigurationFileName=string,Description=string,HasImage=boolean,Id=string:uuid,Name=string,Status=#PluginStatus,Version=string}
+schema PluginStatus: string enum(Active|Deleted|Disabled|Malfunctioned|NotSupported|Restart|Superceded|Superseded)
+schema ProcessPriorityClass: string enum(AboveNormal|BelowNormal|High|Idle|Normal|RealTime)
+schema PublicSystemInfo: {object,Id=string,LocalAddress=string,OperatingSystem=string,ProductName=string,ServerName=string,StartupWizardCompleted=boolean,Version=string}
+schema RepositoryInfo: {object,Enabled=boolean,Name=string,Url=string}
+schema ServerConfiguration: {object,ActivityLogRetentionDays=integer:int32,AllowClientLogUpload=boolean,CachePath=string,CacheSize=integer:int32,CastReceiverApplications=[]#CastReceiverApplication,ChapterImageResolution=#ImageResolution,CodecsUsed=[]string,ContentTypes=[]#NameValuePair,CorsHosts=[]string,DisableLiveTvChannelUserDataName=boolean,DisplaySpecialsWithinSeasons=boolean,DummyChapterDuration=integer:int32,EnableCaseSensitiveItemIds=boolean,EnableExternalContentInSuggestions=boolean,EnableFolderView=boolean,EnableGroupingMoviesIntoCollections=boolean,EnableGroupingShowsIntoCollections=boolean,EnableLegacyAuthorization=boolean,EnableMetrics=boolean,EnableNormalizedItemByNameIds=boolean,EnableSlowResponseWarning=boolean,ImageExtractionTimeoutMs=integer:int32,ImageSavingConvention=#ImageSavingConvention,InactiveSessionThreshold=integer:int32,IsPortAuthorized=boolean,IsStartupWizardCompleted=boolean,LibraryMetadataRefreshConcurrency=integer:int32,LibraryMonitorDelay=integer:int32,LibraryScanFanoutConcurrency=integer:int32,LibraryUpdateDuration=integer:int32,LogFileRetentionDays=integer:int32,MaxAudiobookResume=integer:int32,MaxResumePct=integer:int32,MetadataCountryCode=string,MetadataOptions=[]#MetadataOptions,MetadataPath=string,MinAudiobookResume=integer:int32,MinResumeDurationSeconds=integer:int32,MinResumePct=integer:int32,ParallelImageEncodingLimit=integer:int32,PathSubstitutions=[]#PathSubstitution,PluginRepositories=[]#RepositoryInfo,PreferredMetadataLanguage=string,PreviousVersion=string,PreviousVersionStr=string,QuickConnectAvailable=boolean,RemoteClientBitrateLimit=integer:int32,SaveMetadataHidden=boolean,ServerName=string,SkipDeserializationForBasicTypes=boolean,SlowResponseThresholdMs=integer:int64,SortRemoveCharacters=[]string,SortRemoveWords=[]string,SortReplaceCharacters=[]string,TrickplayOptions=#TrickplayOptions,UICulture=string}
+schema StartupConfigurationDto: {object,MetadataCountryCode=string,PreferredMetadataLanguage=string,ServerName=string,UICulture=string}
+schema StartupUserDto: {object,Name=string,Password=string}
+schema SubtitlePlaybackMode: string enum(Always|Default|None|OnlyForced|Smart)
+schema SyncPlayUserAccessType: string enum(CreateAndJoinGroups|JoinGroups|None)
+schema SystemInfo: {object,CachePath=string,CanLaunchWebBrowser=boolean,CanSelfRestart=boolean,CastReceiverApplications=[]#CastReceiverApplication,CompletedInstallations=[]#InstallationInfo,EncoderLocation=string,HasPendingRestart=boolean,HasUpdateAvailable=boolean,Id=string,InternalMetadataPath=string,IsShuttingDown=boolean,ItemsByNamePath=string,LocalAddress=string,LogPath=string,OperatingSystem=string,OperatingSystemDisplayName=string,PackageName=string,ProductName=string,ProgramDataPath=string,ServerName=string,StartupWizardCompleted=boolean,SupportsLibraryMonitor=boolean,SystemArchitecture=string,TranscodingTempPath=string,Version=string,WebPath=string,WebSocketPortNumber=integer:int32}
+schema TaskCompletionStatus: string enum(Aborted|Cancelled|Completed|Failed)
+schema TaskInfo: {object,Category=string,CurrentProgressPercentage=number:double,Description=string,Id=string,IsHidden=boolean,Key=string,LastExecutionResult=#TaskResult,Name=string,State=#TaskState,Triggers=[]#TaskTriggerInfo}
+schema TaskResult: {object,EndTimeUtc=string:date-time,ErrorMessage=string,Id=string,Key=string,LongErrorMessage=string,Name=string,StartTimeUtc=string:date-time,Status=#TaskCompletionStatus}
+schema TaskState: string enum(Cancelling|Idle|Running)
+schema TaskTriggerInfo: {object,DayOfWeek=#DayOfWeek,IntervalTicks=integer:int64,MaxRuntimeTicks=integer:int64,TimeOfDayTicks=integer:int64,Type=#TaskTriggerInfoType}
+schema TaskTriggerInfoType: string enum(DailyTrigger|IntervalTrigger|StartupTrigger|WeeklyTrigger)
+schema TonemappingAlgorithm: string enum(bt2390|clip|gamma|hable|linear|mobius|none|reinhard)
+schema TonemappingMode: string enum(auto|itp|lum|max|rgb)
+schema TonemappingRange: string enum(auto|pc|tv)
+schema TrickplayOptions: {object,EnableHwAcceleration=boolean,EnableHwEncoding=boolean,EnableKeyFrameOnlyExtraction=boolean,Interval=integer:int32,JpegQuality=integer:int32,ProcessPriority=#ProcessPriorityClass,ProcessThreads=integer:int32,Qscale=integer:int32,ScanBehavior=#TrickplayScanBehavior,TileHeight=integer:int32,TileWidth=integer:int32,WidthResolutions=[]integer:int32}
+schema TrickplayScanBehavior: string enum(Blocking|NonBlocking)
+schema TunerHostInfo: {object,AllowFmp4TranscodingContainer=boolean,AllowHWTranscoding=boolean,AllowStreamSharing=boolean,DeviceId=string,EnableStreamLooping=boolean,FallbackMaxStreamingBitrate=integer:int32,FriendlyName=string,Id=string,IgnoreDts=boolean,ImportFavoritesOnly=boolean,ReadAtNativeFramerate=boolean,Source=string,TunerCount=integer:int32,Type=string,Url=string,UserAgent=string}
+schema TypeOptions: {object,ImageFetcherOrder=[]string,ImageFetchers=[]string,ImageOptions=[]#ImageOption,MetadataFetcherOrder=[]string,MetadataFetchers=[]string,SimilarItemProviderOrder=[]string,SimilarItemProviders=[]string,Type=string}
+schema UnratedItem: string enum(Book|ChannelContent|LiveTvChannel|LiveTvProgram|Movie|Music|Other|Series|Trailer)
+schema UpdateLibraryOptionsDto: {object,Id=string:uuid,LibraryOptions=#LibraryOptions}
+schema UserConfiguration: {object,AudioLanguagePreference=string,CastReceiverId=string,DisplayCollectionsView=boolean,DisplayMissingEpisodes=boolean,EnableLocalPassword=boolean,EnableNextEpisodeAutoPlay=boolean,GroupedFolders=[]string:uuid,HidePlayedInLatest=boolean,LatestItemsExcludes=[]string:uuid,MyMediaExcludes=[]string:uuid,OrderedViews=[]string:uuid,PlayDefaultAudioTrack=boolean,RememberAudioSelections=boolean,RememberSubtitleSelections=boolean,SubtitleLanguagePreference=string,SubtitleMode=#SubtitlePlaybackMode}
+schema UserDto: {object,Configuration=#UserConfiguration,EnableAutoLogin=boolean,HasConfiguredEasyPassword=boolean,HasConfiguredPassword=boolean,HasPassword=boolean,Id=string:uuid,LastActivityDate=string:date-time,LastLoginDate=string:date-time,Name=string,Policy=#UserPolicy,PrimaryImageAspectRatio=number:double,PrimaryImageTag=string,ServerId=string,ServerName=string}
+schema UserPolicy: {object,AccessSchedules=[]#AccessSchedule,AllowedTags=[]string,AuthenticationProviderId=string,BlockUnratedItems=[]#UnratedItem,BlockedChannels=[]string:uuid,BlockedMediaFolders=[]string:uuid,BlockedTags=[]string,EnableAllChannels=boolean,EnableAllDevices=boolean,EnableAllFolders=boolean,EnableAudioPlaybackTranscoding=boolean,EnableCollectionManagement=boolean,EnableContentDeletion=boolean,EnableContentDeletionFromFolders=[]string,EnableContentDownloading=boolean,EnableLiveTvAccess=boolean,EnableLiveTvManagement=boolean,EnableLyricManagement=boolean,EnableMediaConversion=boolean,EnableMediaPlayback=boolean,EnablePlaybackRemuxing=boolean,EnablePublicSharing=boolean,EnableRemoteAccess=boolean,EnableRemoteControlOfOtherUsers=boolean,EnableSharedDeviceControl=boolean,EnableSubtitleManagement=boolean,EnableSyncTranscoding=boolean,EnableUserPreferenceAccess=boolean,EnableVideoPlaybackTranscoding=boolean,EnabledChannels=[]string:uuid,EnabledDevices=[]string,EnabledFolders=[]string:uuid,ForceRemoteSourceTranscoding=boolean,InvalidLoginAttemptCount=integer:int32,IsAdministrator=boolean,IsDisabled=boolean,IsHidden=boolean,LoginAttemptsBeforeLockout=integer:int32,MaxActiveSessions=integer:int32,MaxParentalRating=integer:int32,MaxParentalSubRating=integer:int32,PasswordResetProviderId=string,RemoteClientBitrateLimit=integer:int32,SyncPlayAccess=#SyncPlayUserAccessType}
+schema VersionInfo: {object,VersionNumber=string,changelog=string,checksum=string,repositoryName=string,repositoryUrl=string,sourceUrl=string,targetAbi=string,timestamp=string,version=string}
+schema VirtualFolderInfo: {object,CollectionType=#CollectionTypeOptions,ItemId=string,LibraryOptions=#LibraryOptions,Locations=[]string,Name=string,PrimaryImageItemId=string,RefreshProgress=number:double,RefreshStatus=string}
+undocumented GET /api-docs/openapi.json
+undocumented POST /Users/{}
+undocumented POST /Users/{}/Password
