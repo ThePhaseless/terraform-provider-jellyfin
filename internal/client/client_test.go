@@ -125,6 +125,38 @@ func TestUserAndAuthResponsesUseJellyfinIDCasing(t *testing.T) {
 	}
 }
 
+func TestGetUserPolicyRawKeepsFieldsMissingFromUserPolicy(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, map[string]interface{}{
+			"Id":   "user-1",
+			"Name": "viewer",
+			"Policy": map[string]interface{}{
+				"MaxParentalRating":    10,
+				"MaxParentalSubRating": 2,
+			},
+		})
+	}))
+	defer server.Close()
+
+	raw, err := NewClient(server.URL, "test-key").GetUserPolicyRaw(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("GetUserPolicyRaw() error = %v", err)
+	}
+
+	var policy map[string]int
+	if err := json.Unmarshal([]byte(raw), &policy); err != nil {
+		t.Fatalf("parsing policy %s: %v", raw, err)
+	}
+	if got := policy["MaxParentalSubRating"]; got != 2 {
+		t.Fatalf("MaxParentalSubRating = %d, want 2 (policy %s)", got, raw)
+	}
+	if len(policy) != 2 {
+		t.Fatalf("policy = %s, want only the fields the server sent", raw)
+	}
+}
+
 func TestRestartServerPostsSystemRestart(t *testing.T) {
 	t.Parallel()
 
