@@ -560,8 +560,8 @@ func isNetHTTP(expr ast.Expr) bool {
 	return ok && (sel.Sel.Name == "HTTPClient" || sel.Sel.Name == "DefaultClient")
 }
 
-// requestsIn resolves the requests fn sends through known sites. A request
-// whose path is one of fn's parameters makes fn a site for its callers.
+// A request in fn whose path is one of fn's parameters is not an endpoint; it
+// makes fn a request site for its callers.
 func requestsIn(fset *token.FileSet, fn *ast.FuncDecl, sites map[string][]requestSite, reached map[string]bool) ([]apiCall, []requestSite, error) {
 	var calls []apiCall
 	var fnSites []requestSite
@@ -754,9 +754,9 @@ func (r *pathResolver) identValues(name string) ([]pathValue, error) {
 	return values, nil
 }
 
-// operand resolves one side of a path concatenation. The base URL adds nothing
-// to the path, and anything else unresolvable is a runtime value; a cycle is
-// not, since only a path variable is built from its own value.
+// In a path concatenation the base URL adds nothing and anything else
+// unresolvable is a runtime value. A cycle is not, since only a path variable
+// is built from its own value.
 func (r *pathResolver) operand(expr ast.Expr) ([]pathValue, error) {
 	if sel, ok := expr.(*ast.SelectorExpr); ok && sel.Sel.Name == "BaseURL" {
 		return []pathValue{{}}, nil
