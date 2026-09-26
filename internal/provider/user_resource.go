@@ -374,6 +374,13 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 
 	data.ID = types.StringValue(user.ID)
+	// Saved now so that a failure below leaves the user in state as tainted
+	// rather than orphaned on the server, where its name would make every
+	// later create fail.
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), data.ID)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	if err := r.applyPolicy(ctx, &data, user.ID, &resp.Diagnostics); err != nil {
 		resp.Diagnostics.AddError("Failed to update user policy", err.Error())

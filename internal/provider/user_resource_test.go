@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -146,6 +147,32 @@ func TestAccUserResourceParentalRating(t *testing.T) {
 				ImportState:             true,
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"password"},
+			},
+		},
+	})
+}
+
+func TestAccUserResourceRetryAfterFailedCreate(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "jellyfin_user" "test" {
+  name     = "retryuser"
+  password = "testpass123"
+
+  policy = {
+    sync_play_access = "Bogus"
+  }
+}
+`,
+				ExpectError: regexp.MustCompile(`Failed to update user policy`),
+			},
+			{
+				Config: testAccUserResourceConfig("retryuser"),
+				Check:  resource.TestCheckResourceAttr("jellyfin_user.test", "name", "retryuser"),
 			},
 		},
 	})
