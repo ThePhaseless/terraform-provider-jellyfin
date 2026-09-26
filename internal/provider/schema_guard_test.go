@@ -738,8 +738,7 @@ func (f *requestFinder) siteValues(fn *ast.FuncDecl) error {
 	return err
 }
 
-// pathResolver resolves the request path expressions of fn to patterns, as
-// described at pathPlaceholder.
+// pathResolver's patterns use the placeholders described at pathPlaceholder.
 type pathResolver struct {
 	fn       *ast.FuncDecl
 	info     *types.Info
@@ -1209,9 +1208,9 @@ func schemaGuardRegenerateHelp(testName, goldenPath string) string {
 	return fmt.Sprintf(`The golden records what the provider sends to or reads from the server, so it
 changes when the server changes any of that or when the provider starts or
 stops using part of it. Regenerate it from the repository root against a fresh
-server of the supported Jellyfin version, adding any environment variables
-.github/workflows/test.yml sets for %[1]s (down -v drops the volumes a
-previous run left behind):
+server of the supported Jellyfin version (down -v drops the volumes a previous
+run left behind), adding any environment variables .github/workflows/test.yml
+sets for %[1]s:
 
   docker compose --env-file internal/provider/supported_jellyfin_version.env down -v
   docker compose --env-file internal/provider/supported_jellyfin_version.env up -d
