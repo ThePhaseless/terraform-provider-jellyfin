@@ -53,6 +53,34 @@ func TestUnitUserPolicyOverlay(t *testing.T) {
 	}
 }
 
+func TestUnitUserPolicyOverlayWritesNullParentalRatings(t *testing.T) {
+	ctx := context.Background()
+	m, err := parseJSONObject(`{"MaxParentalRating": 10, "MaxParentalSubRating": 2, "IsHidden": true}`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	policy := &UserPolicyModel{
+		MaxParentalRating:    types.Int64Null(),
+		MaxParentalSubRating: types.Int64Value(3),
+		IsHidden:             types.BoolNull(),
+	}
+
+	if d := overlayPolicyIntoJSON(ctx, m, policy); d.HasError() {
+		t.Fatalf("overlay: %v", d)
+	}
+
+	if got := string(m["MaxParentalRating"]); got != "null" {
+		t.Errorf("MaxParentalRating = %s, want null", got)
+	}
+	if got := string(m["MaxParentalSubRating"]); got != "3" {
+		t.Errorf("MaxParentalSubRating = %s, want 3", got)
+	}
+	if got := string(m["IsHidden"]); got != "true" {
+		t.Errorf("IsHidden = %s, want the server value true kept", got)
+	}
+}
+
 func mustStringList(values []string) types.List {
 	v, _ := types.ListValueFrom(context.Background(), types.StringType, values)
 	return v
