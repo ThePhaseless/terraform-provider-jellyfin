@@ -168,7 +168,7 @@ func testAccSecurityPluginPreCheck(t *testing.T) {
 
 // testAccInstallSecurityPlugin installs the supported JellyfinSecurity build
 // this server accepts and restarts the server so it loads, the way
-// jellyfin_plugin and jellyfin_restart do. It returns at once when the plugin
+// jellyfin_plugin and jellyfin_restart do. It returns at once when that build
 // is already active.
 func testAccInstallSecurityPlugin(t *testing.T) *client.Client {
 	t.Helper()
@@ -179,9 +179,6 @@ func testAccInstallSecurityPlugin(t *testing.T) *client.Client {
 	installed, err := findSecurityPlugin(ctx, c)
 	if err != nil {
 		t.Fatalf("listing installed plugins: %v", err)
-	}
-	if installed != nil && installed.Status == "Active" {
-		return c
 	}
 
 	repos, err := c.GetPluginRepositories(ctx)
@@ -206,6 +203,9 @@ func testAccInstallSecurityPlugin(t *testing.T) *client.Client {
 	version, err := installer.resolvePluginVersion(ctx, securityPluginName, types.StringNull())
 	if err != nil {
 		t.Fatalf("resolving the supported JellyfinSecurity build: %v", err)
+	}
+	if installed != nil && installed.Status == "Active" && samePluginVersion(installed.Version, version) {
+		return c
 	}
 	if installed == nil || !samePluginVersion(installed.Version, version) {
 		if err := c.InstallPlugin(ctx, securityPluginName, version, securityPluginRepoURL); err != nil {
