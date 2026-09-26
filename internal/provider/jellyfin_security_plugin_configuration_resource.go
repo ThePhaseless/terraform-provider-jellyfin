@@ -7,8 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
+	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -19,6 +22,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -26,6 +30,8 @@ import (
 )
 
 const jellyfinSecurityPluginID = "94879a0c-da24-4eb1-aa06-f28b4b9333b1"
+
+var isoDateTimePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?$`)
 
 var (
 	_ resource.Resource                = &JellyfinSecurityPluginConfigurationResource{}
@@ -240,6 +246,12 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 		}
 	}
 
+	enrollmentDeadline := optionalString("2FA enrollment deadline as an ISO 8601 date-time, e.g. `2030-01-01T00:00:00Z`.")
+	enrollmentDeadline.Validators = []validator.String{
+		stringvalidator.RegexMatches(isoDateTimePattern, "must be an ISO 8601 date-time such as 2030-01-01T00:00:00Z"),
+	}
+	enrollmentDeadline.PlanModifiers = append(enrollmentDeadline.PlanModifiers, sameInstantPlanModifier{})
+
 	resp.Schema = schema.Schema{
 		Description:         "Manages the JellyfinSecurity plugin configuration with typed attributes.",
 		MarkdownDescription: "Manages the JellyfinSecurity plugin configuration with typed attributes.",
@@ -331,7 +343,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 			"trust_cookie_ttl_days":              optionalInt("Trust cookie TTL in days."),
 			"nat_hairpin_self_ip_bypass":         optionalBool("Enable NAT hairpin self-IP bypass."),
 			"default_max_concurrent_sessions":    optionalInt("Default max concurrent sessions per user (0 = unlimited)."),
-			"enrollment_deadline":                optionalString("2FA enrollment deadline (ISO-8601 or null)."),
+			"enrollment_deadline":                enrollmentDeadline,
 			"webhook_url":                        optionalString("Webhook notification URL."),
 			"webhook_secret":                     sensitiveString("Webhook signing secret."),
 			"webhook_headers":                    optionalStringList("Extra webhook headers, one \"Name: Value\" entry each."),
@@ -934,7 +946,7 @@ func flattenJellyfinSecurity(ctx context.Context, raw string, data *JellyfinSecu
 	data.TrustCookieTTLDays = getJSONInt64(m, "TrustCookieTtlDays")
 	data.NatHairpinSelfIPBypass = getJSONBool(m, "NatHairpinSelfIpBypass")
 	data.DefaultMaxConcurrentSessions = getJSONInt64(m, "DefaultMaxConcurrentSessions")
-	data.EnrollmentDeadline = getJSONString(m, "EnrollmentDeadline")
+	data.EnrollmentDeadline = keepSameInstant(data.EnrollmentDeadline, getJSONString(m, "EnrollmentDeadline"))
 	data.WebhookURL = getJSONString(m, "WebhookUrl")
 	data.WebhookSecret = getJSONString(m, "WebhookSecret")
 	data.GeoIPAsnDbPath = getJSONString(m, "GeoIpAsnDbPath")
@@ -977,6 +989,56 @@ func flattenJellyfinSecurity(ctx context.Context, raw string, data *JellyfinSecu
 
 	// OidcProviders
 	data.OidcProviders = flattenOidcProviders(ctx, m, diags)
+}
+
+// keepSameInstant returns prior when served names the same instant, so a
+// configured date-time survives the server rewriting it in .NET's round-trip
+// layout (2030-01-01T00:00:00Z comes back as 2030-01-01T00:00:00.0000000Z).
+func keepSameInstant(prior, served types.String) types.String {
+	if sameInstant(prior, served) {
+		return prior
+	}
+	return served
+}
+
+func sameInstant(a, b types.String) bool {
+	if a.IsNull() || a.IsUnknown() || b.IsNull() || b.IsUnknown() {
+		return false
+	}
+	at, ok := parseISODateTime(a.ValueString())
+	if !ok {
+		return false
+	}
+	bt, ok := parseISODateTime(b.ValueString())
+	return ok && at.Equal(bt)
+}
+
+// sameInstantPlanModifier plans the prior value when the configuration names
+// the same instant. An imported or server-side value is stored in .NET's
+// layout, which would otherwise show as a diff against the configured spelling.
+type sameInstantPlanModifier struct{}
+
+func (sameInstantPlanModifier) Description(context.Context) string {
+	return "Keeps the prior value when the configured date-time names the same instant."
+}
+
+func (m sameInstantPlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (sameInstantPlanModifier) PlanModifyString(_ context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if sameInstant(req.ConfigValue, req.StateValue) {
+		resp.PlanValue = req.StateValue
+	}
+}
+
+func parseISODateTime(v string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05.999999999"} {
+		if t, err := time.Parse(layout, v); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // flattenUserEmails reads the UserEmails array from the server response.

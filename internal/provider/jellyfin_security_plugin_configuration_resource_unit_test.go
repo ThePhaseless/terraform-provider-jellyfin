@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -91,5 +92,52 @@ func TestUnitOidcProviderRpInitiatedLogoutRoundTrip(t *testing.T) {
 	}
 	if got := string(out["RpInitiatedLogoutRedirectUri"]); got != `"https://example.com/bye"` {
 		t.Errorf("RpInitiatedLogoutRedirectUri = %s", got)
+	}
+}
+
+func TestUnitKeepSameInstant(t *testing.T) {
+	cases := []struct {
+		name   string
+		prior  types.String
+		served types.String
+		want   types.String
+	}{
+		{"dotnet layout of the configured instant", types.StringValue("2030-01-01T00:00:00Z"), types.StringValue("2030-01-01T00:00:00.0000000Z"), types.StringValue("2030-01-01T00:00:00Z")},
+		{"offset spelling of the same instant", types.StringValue("2030-01-01T02:00:00+02:00"), types.StringValue("2030-01-01T00:00:00.0000000Z"), types.StringValue("2030-01-01T02:00:00+02:00")},
+		{"different instant", types.StringValue("2030-01-01T00:00:00Z"), types.StringValue("2031-01-01T00:00:00.0000000Z"), types.StringValue("2031-01-01T00:00:00.0000000Z")},
+		{"nothing configured", types.StringNull(), types.StringValue("2030-01-01T00:00:00.0000000Z"), types.StringValue("2030-01-01T00:00:00.0000000Z")},
+		{"cleared on the server", types.StringValue("2030-01-01T00:00:00Z"), types.StringNull(), types.StringNull()},
+		{"unparseable prior", types.StringValue("soon"), types.StringValue("2030-01-01T00:00:00.0000000Z"), types.StringValue("2030-01-01T00:00:00.0000000Z")},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := keepSameInstant(c.prior, c.served); !got.Equal(c.want) {
+				t.Errorf("keepSameInstant(%v, %v) = %v, want %v", c.prior, c.served, got, c.want)
+			}
+		})
+	}
+}
+
+func TestUnitSameInstantPlanModifier(t *testing.T) {
+	ctx := context.Background()
+	state := types.StringValue("2030-01-01T00:00:00.0000000Z")
+
+	for _, c := range []struct {
+		name   string
+		config types.String
+		want   types.String
+	}{
+		{"same instant plans the state value", types.StringValue("2030-01-01T00:00:00Z"), state},
+		{"different instant plans the configured value", types.StringValue("2031-01-01T00:00:00Z"), types.StringValue("2031-01-01T00:00:00Z")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			req := planmodifier.StringRequest{ConfigValue: c.config, StateValue: state, PlanValue: c.config}
+			resp := &planmodifier.StringResponse{PlanValue: req.PlanValue}
+			sameInstantPlanModifier{}.PlanModifyString(ctx, req, resp)
+			if !resp.PlanValue.Equal(c.want) {
+				t.Errorf("plan = %v, want %v", resp.PlanValue, c.want)
+			}
+		})
 	}
 }
