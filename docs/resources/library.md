@@ -110,7 +110,7 @@ Optional:
 
 Optional:
 
-- `network_path` (String, Deprecated) Network path. Jellyfin 10.11 removed network paths, so current servers ignore this value.
+- `network_path` (String, Deprecated) Network path. Jellyfin 10.11 removed network paths, so setting it is an error on Jellyfin 10.11 and later.
 - `password` (String, Sensitive, Deprecated) Password. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `path` (String) Local path.
 - `username` (String, Deprecated) Username. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
@@ -137,7 +137,7 @@ Optional:
 
 - `limit` (Number) Image limit.
 - `min_width` (Number) Minimum image width in pixels.
-- `type` (String) Image type.
+- `type` (String) Image type: one of `Primary`, `Art`, `Backdrop`, `Banner`, `Logo`, `Thumb`, `Disc`, `Box`, `Screenshot`, `Menu`, `Chapter`, `BoxRear`, `Profile`.
 
 ## Import
 

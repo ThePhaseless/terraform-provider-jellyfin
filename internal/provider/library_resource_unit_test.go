@@ -6,11 +6,15 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -102,7 +106,7 @@ func TestUnitTypeOptionsOverlayKeepsUnsetServerValues(t *testing.T) {
 
 	movie := testUnitTypeOptions("movie")
 	movie.MetadataFetchers = testUnitStringList(t, "TheMovieDb")
-	backdrop := ImageOptionsModel{Type: types.StringValue("backdrop"), Limit: types.Int64Value(2), MinWidth: types.Int64Null()}
+	backdrop := ImageOptionsModel{Type: types.StringValue("Backdrop"), Limit: types.Int64Value(2), MinWidth: types.Int64Null()}
 	movie.ImageOptions = testUnitList(t, imageOptionsObjectType(), []ImageOptionsModel{backdrop})
 
 	if d := overlayTypeOptions(ctx, base, testUnitList(t, typeOptionsObjectType(), []TypeOptionsModel{movie})); d.HasError() {
@@ -115,7 +119,7 @@ func TestUnitTypeOptionsOverlayKeepsUnsetServerValues(t *testing.T) {
 		"MetadataFetcherOrder": ["TheMovieDb", "The Open Movie Database"],
 		"ImageFetchers": ["TheMovieDb"],
 		"ImageFetcherOrder": ["TheMovieDb"],
-		"ImageOptions": [{"Type": "backdrop", "Limit": 2, "MinWidth": 1280}],
+		"ImageOptions": [{"Type": "Backdrop", "Limit": 2, "MinWidth": 1280}],
 		"SimilarItemProviders": ["Local Genre/Tag"],
 		"SimilarItemProviderOrder": ["Local Genre/Tag", "TheMovieDb"]
 	}]`
@@ -254,6 +258,85 @@ func TestUnitCheckSimilarItemSettingsKeptReportsDroppedSettings(t *testing.T) {
 	for _, name := range []string{"type_options[0].similar_item_providers", "type_options[0].similar_item_provider_order"} {
 		if !strings.Contains(diags[0].Detail(), name) {
 			t.Errorf("error detail %q does not name %s", diags[0].Detail(), name)
+		}
+	}
+}
+
+func TestUnitImageOptionTypeAcceptsOnlyJellyfinSpelling(t *testing.T) {
+	typeAttr, ok := imageOptionsAttributes()["type"].(schema.StringAttribute)
+	if !ok {
+		t.Fatal("image_options type is not a string attribute")
+	}
+	for value, expectError := range map[string]bool{
+		"Backdrop": false,
+		"BoxRear":  false,
+		"backdrop": true,
+		"Boxrear":  true,
+		"Poster":   true,
+	} {
+		resp := validator.StringResponse{}
+		for _, v := range typeAttr.Validators {
+			v.ValidateString(context.Background(), validator.StringRequest{
+				Path:        path.Root("type"),
+				ConfigValue: types.StringValue(value),
+			}, &resp)
+		}
+		if resp.Diagnostics.HasError() != expectError {
+			t.Errorf("%q: expected error %t, got diagnostics: %v", value, expectError, resp.Diagnostics)
+		}
+	}
+}
+
+func TestUnitUnsupportedLibraryOptionsAreNotComputed(t *testing.T) {
+	attrs := map[string]schema.Attribute{}
+	maps.Copy(attrs, libraryOptionsAttributes())
+	for name, a := range pathInfoAttributes() {
+		attrs["path_infos."+name] = a
+	}
+
+	unsupported := 0
+	for name, a := range attrs {
+		if a.GetDeprecationMessage() != unsupportedLibraryOptionMessage {
+			continue
+		}
+		unsupported++
+		if a.IsComputed() {
+			t.Errorf("%s is computed, so create plans show it as known after apply although it always reads as null", name)
+		}
+	}
+	if unsupported == 0 {
+		t.Fatal("found no unsupported library options")
+	}
+}
+
+func TestUnitVersionedAttributeErrorsFollowServerVersion(t *testing.T) {
+	similarItems := path.Root("library_options").AtName("type_options").AtListIndex(0).AtName("similar_item_providers")
+	networkPath := path.Root("library_options").AtName("path_infos").AtListIndex(0).AtName("network_path")
+
+	tests := map[string]struct {
+		version      string
+		similarError bool
+		networkError bool
+	}{
+		"10.10":       {version: "10.10.7", similarError: true},
+		"10.11":       {version: "10.11.11", similarError: true, networkError: true},
+		"12.1":        {version: "12.1.0", networkError: true},
+		"unparseable": {version: "unknown"},
+	}
+	for name, test := range tests {
+		diags := versionedAttributeErrors(test.version, []path.Path{similarItems}, []path.Path{networkPath})
+		gotSimilar, gotNetwork := false, false
+		for _, d := range diags {
+			withPath, ok := d.(diag.DiagnosticWithPath)
+			if !ok {
+				t.Errorf("%s: diagnostic without a path: %v", name, d)
+				continue
+			}
+			gotSimilar = gotSimilar || withPath.Path().Equal(similarItems)
+			gotNetwork = gotNetwork || withPath.Path().Equal(networkPath)
+		}
+		if gotSimilar != test.similarError || gotNetwork != test.networkError {
+			t.Errorf("%s: similar item error %t, network path error %t; want %t, %t", name, gotSimilar, gotNetwork, test.similarError, test.networkError)
 		}
 	}
 }

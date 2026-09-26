@@ -26,6 +26,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
@@ -210,17 +211,6 @@ func libraryOptionsAttributes() map[string]schema.Attribute {
 			},
 		}
 	}
-	optionalInt := func(desc string) schema.Int64Attribute {
-		return schema.Int64Attribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.Int64{
-				int64planmodifier.UseStateForUnknown(),
-			},
-		}
-	}
 	optionalStringList := func(desc string) schema.ListAttribute {
 		return schema.ListAttribute{
 			ElementType:         types.StringType,
@@ -234,28 +224,41 @@ func libraryOptionsAttributes() map[string]schema.Attribute {
 		}
 	}
 	unsupportedBool := func(desc string) schema.BoolAttribute {
-		a := optionalBool(desc + " " + unsupportedLibraryOptionMessage)
-		a.DeprecationMessage = unsupportedLibraryOptionMessage
-		a.Validators = []validator.Bool{unsupportedLibraryOptionValidator{}}
-		return a
+		return schema.BoolAttribute{
+			Description:         desc + " " + unsupportedLibraryOptionMessage,
+			MarkdownDescription: desc + " " + unsupportedLibraryOptionMessage,
+			Optional:            true,
+			DeprecationMessage:  unsupportedLibraryOptionMessage,
+			Validators:          []validator.Bool{unsupportedLibraryOptionValidator{}},
+		}
 	}
 	unsupportedInt := func(desc string) schema.Int64Attribute {
-		a := optionalInt(desc + " " + unsupportedLibraryOptionMessage)
-		a.DeprecationMessage = unsupportedLibraryOptionMessage
-		a.Validators = []validator.Int64{unsupportedLibraryOptionValidator{}}
-		return a
+		return schema.Int64Attribute{
+			Description:         desc + " " + unsupportedLibraryOptionMessage,
+			MarkdownDescription: desc + " " + unsupportedLibraryOptionMessage,
+			Optional:            true,
+			DeprecationMessage:  unsupportedLibraryOptionMessage,
+			Validators:          []validator.Int64{unsupportedLibraryOptionValidator{}},
+		}
 	}
 	unsupportedString := func(desc string) schema.StringAttribute {
-		a := optionalString(desc + " " + unsupportedLibraryOptionMessage)
-		a.DeprecationMessage = unsupportedLibraryOptionMessage
-		a.Validators = []validator.String{unsupportedLibraryOptionValidator{}}
-		return a
+		return schema.StringAttribute{
+			Description:         desc + " " + unsupportedLibraryOptionMessage,
+			MarkdownDescription: desc + " " + unsupportedLibraryOptionMessage,
+			Optional:            true,
+			DeprecationMessage:  unsupportedLibraryOptionMessage,
+			Validators:          []validator.String{unsupportedLibraryOptionValidator{}},
+		}
 	}
 	unsupportedStringList := func(desc string) schema.ListAttribute {
-		a := optionalStringList(desc + " " + unsupportedLibraryOptionMessage)
-		a.DeprecationMessage = unsupportedLibraryOptionMessage
-		a.Validators = []validator.List{unsupportedLibraryOptionValidator{}}
-		return a
+		return schema.ListAttribute{
+			ElementType:         types.StringType,
+			Description:         desc + " " + unsupportedLibraryOptionMessage,
+			MarkdownDescription: desc + " " + unsupportedLibraryOptionMessage,
+			Optional:            true,
+			DeprecationMessage:  unsupportedLibraryOptionMessage,
+			Validators:          []validator.List{unsupportedLibraryOptionValidator{}},
+		}
 	}
 
 	return map[string]schema.Attribute{
@@ -326,30 +329,27 @@ func pathInfoAttributes() map[string]schema.Attribute {
 			},
 		}
 	}
-	const networkPathRemoved = "Jellyfin 10.11 removed network paths, so current servers ignore this value."
-	networkPath := optionalString("Network path. " + networkPathRemoved)
-	networkPath.DeprecationMessage = networkPathRemoved
-	username := optionalString("Username. " + unsupportedLibraryOptionMessage)
-	username.DeprecationMessage = unsupportedLibraryOptionMessage
-	username.Validators = []validator.String{unsupportedLibraryOptionValidator{}}
+	unsupportedString := func(desc string, sensitive bool) schema.StringAttribute {
+		return schema.StringAttribute{
+			Description:         desc + " " + unsupportedLibraryOptionMessage,
+			MarkdownDescription: desc + " " + unsupportedLibraryOptionMessage,
+			Optional:            true,
+			Sensitive:           sensitive,
+			DeprecationMessage:  unsupportedLibraryOptionMessage,
+			Validators:          []validator.String{unsupportedLibraryOptionValidator{}},
+		}
+	}
+	networkPath := optionalString("Network path. " + networkPathRemovedMessage)
+	networkPath.DeprecationMessage = networkPathRemovedMessage
 	return map[string]schema.Attribute{
 		"path":         optionalString("Local path."),
 		"network_path": networkPath,
-		"username":     username,
-		"password": schema.StringAttribute{
-			Description:         "Password. " + unsupportedLibraryOptionMessage,
-			MarkdownDescription: "Password. " + unsupportedLibraryOptionMessage,
-			Optional:            true,
-			Computed:            true,
-			Sensitive:           true,
-			DeprecationMessage:  unsupportedLibraryOptionMessage,
-			Validators:          []validator.String{unsupportedLibraryOptionValidator{}},
-			PlanModifiers: []planmodifier.String{
-				stringplanmodifier.UseStateForUnknown(),
-			},
-		},
+		"username":     unsupportedString("Username.", false),
+		"password":     unsupportedString("Password.", true),
 	}
 }
+
+const networkPathRemovedMessage = "Jellyfin 10.11 removed network paths, so setting it is an error on Jellyfin 10.11 and later."
 
 // Attributes with no Jellyfin library option behind them stay in the schema,
 // deprecated, so configurations that leave them unset keep working until
@@ -403,13 +403,21 @@ func typeOptionsAttributes() map[string]schema.Attribute {
 	}
 }
 
+// Jellyfin parses an image option's type case-insensitively but returns it in
+// this spelling, so any other spelling would read back as a different value.
+var imageTypes = []string{"Primary", "Art", "Backdrop", "Banner", "Logo", "Thumb", "Disc", "Box", "Screenshot", "Menu", "Chapter", "BoxRear", "Profile"}
+
 func imageOptionsAttributes() map[string]schema.Attribute {
+	typeDescription := "Image type: one of " + strings.Join(imageTypes, ", ") + "."
 	return map[string]schema.Attribute{
 		"type": schema.StringAttribute{
-			Description:         "Image type.",
-			MarkdownDescription: "Image type.",
+			Description:         typeDescription,
+			MarkdownDescription: "Image type: one of `" + strings.Join(imageTypes, "`, `") + "`.",
 			Optional:            true,
 			Computed:            true,
+			Validators: []validator.String{
+				stringvalidator.OneOf(imageTypes...),
+			},
 			PlanModifiers: []planmodifier.String{
 				stringplanmodifier.UseStateForUnknown(),
 			},
@@ -738,13 +746,18 @@ func (r *LibraryResource) ImportState(ctx context.Context, req resource.ImportSt
 	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
 }
 
-// ModifyPlan plans each type_options attribute left unset from the prior
-// entry with the same type, which is the server entry apply writes over.
+// ModifyPlan rejects attributes the server's Jellyfin version does not have,
+// and plans each type_options attribute left unset from the prior entry with
+// the same type, which is the server entry apply writes over.
 // UseStateForUnknown takes it from the prior entry at the same index instead,
 // so inserting or reordering entries would plan, and then write, another
 // type's values.
 func (r *LibraryResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	resp.Diagnostics.Append(r.checkServerVersion(ctx, req.Config)...)
+	if resp.Diagnostics.HasError() || req.State.Raw.IsNull() {
 		return
 	}
 
@@ -766,6 +779,76 @@ func (r *LibraryResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 		return
 	}
 	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, typeOptionsPath, planned)...)
+}
+
+// checkServerVersion runs at plan time because a server that lacks an option
+// drops it only after the library is created, so the failure would taint the
+// new library and every later apply would replace it before failing again.
+func (r *LibraryResource) checkServerVersion(ctx context.Context, config tfsdk.Config) diag.Diagnostics {
+	var diags diag.Diagnostics
+	similarItems, networkPaths := configuredVersionedAttributes(ctx, config)
+	if r.client == nil || (len(similarItems) == 0 && len(networkPaths) == 0) {
+		return diags
+	}
+	info, err := r.client.GetPublicSystemInfo(ctx)
+	if err != nil {
+		diags.AddError("Failed to read the Jellyfin version", err.Error())
+		return diags
+	}
+	return versionedAttributeErrors(info.Version, similarItems, networkPaths)
+}
+
+// configuredVersionedAttributes leaves out values unknown at plan time, which
+// may still turn out null.
+func configuredVersionedAttributes(ctx context.Context, config tfsdk.Config) (similarItems, networkPaths []path.Path) {
+	optionsPath := path.Root("library_options")
+	isSet := func(v attr.Value) bool { return !v.IsNull() && !v.IsUnknown() }
+
+	var typeOptions []TypeOptionsModel
+	var list types.List
+	if !config.GetAttribute(ctx, optionsPath.AtName("type_options"), &list).HasError() && isSet(list) &&
+		!list.ElementsAs(ctx, &typeOptions, false).HasError() {
+		for i, e := range typeOptions {
+			entry := optionsPath.AtName("type_options").AtListIndex(i)
+			if isSet(e.SimilarItemProviders) {
+				similarItems = append(similarItems, entry.AtName("similar_item_providers"))
+			}
+			if isSet(e.SimilarItemProviderOrder) {
+				similarItems = append(similarItems, entry.AtName("similar_item_provider_order"))
+			}
+		}
+	}
+
+	var pathInfos []PathInfoModel
+	if !config.GetAttribute(ctx, optionsPath.AtName("path_infos"), &list).HasError() && isSet(list) &&
+		!list.ElementsAs(ctx, &pathInfos, false).HasError() {
+		for i, e := range pathInfos {
+			if isSet(e.NetworkPath) {
+				networkPaths = append(networkPaths, optionsPath.AtName("path_infos").AtListIndex(i).AtName("network_path"))
+			}
+		}
+	}
+	return similarItems, networkPaths
+}
+
+func versionedAttributeErrors(version string, similarItems, networkPaths []path.Path) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if !hasLeadingDigit(version) {
+		return diags
+	}
+	if compareDottedVersions(version, "12") < 0 {
+		for _, p := range similarItems {
+			diags.AddAttributeError(p, "Similar item settings not supported",
+				fmt.Sprintf("The server runs Jellyfin %s, and similar item providers need Jellyfin 12 or later. Remove %s for this server.", version, p))
+		}
+	}
+	if compareDottedVersions(version, "10.11") >= 0 {
+		for _, p := range networkPaths {
+			diags.AddAttributeError(p, "Network paths not supported",
+				fmt.Sprintf("The server runs Jellyfin %s, and Jellyfin 10.11 removed network paths, so the server would drop the value. Remove %s from the configuration.", version, p))
+		}
+	}
+	return diags
 }
 
 func planTypeOptionsByType(ctx context.Context, config, plan, state types.List) (types.List, diag.Diagnostics) {
@@ -1182,6 +1265,8 @@ func keepPlannedNulls(ctx context.Context, planned, got *LibraryOptionsModel) *L
 // checkSimilarItemSettingsKept exists because Jellyfin 10.x has no similar
 // item settings and drops them, and Terraform's own inconsistent-result error
 // cannot name the attribute: library_options holds a sensitive value.
+// ModifyPlan rejects them earlier, but not values unknown at plan time or
+// planned from the prior state, such as after a server downgrade.
 func checkSimilarItemSettingsKept(ctx context.Context, planned, got *LibraryOptionsModel, diags *diag.Diagnostics) {
 	if planned == nil || got == nil || planned.TypeOptions.IsNull() || planned.TypeOptions.IsUnknown() || got.TypeOptions.IsNull() || got.TypeOptions.IsUnknown() {
 		return
@@ -1253,8 +1338,6 @@ func reconcilePathInfos(ctx context.Context, planned, got types.List) types.List
 	}
 	for i := range g {
 		nullIfPlannedNullString(p[i].NetworkPath, &g[i].NetworkPath)
-		nullIfPlannedNullString(p[i].Username, &g[i].Username)
-		nullIfPlannedNullString(p[i].Password, &g[i].Password)
 	}
 	out, diags := types.ListValueFrom(ctx, pathInfoObjectType(), g)
 	if diags.HasError() {

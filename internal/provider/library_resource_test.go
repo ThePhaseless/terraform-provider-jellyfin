@@ -108,12 +108,12 @@ resource "jellyfin_library" "test" {
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.type_options.1.image_options.#", "0"),
 				),
 			},
-			// Similar item providers exist on Jellyfin 12 and later only; an
-			// older server drops them.
+			// Similar item providers exist on Jellyfin 12 and later only; on an
+			// older server they are rejected at plan time.
 			{
 				SkipFunc:    func() (bool, error) { return similarItemsSupported, nil },
 				Config:      testAccLibrarySimilarItemsConfig,
-				ExpectError: regexp.MustCompile(`did\s+not\s+keep\s+type_options\[0\]\.similar_item_providers,\s+type_options\[0\]\.similar_item_provider_order`),
+				ExpectError: testAccLibrarySimilarItemsRejected,
 			},
 			{
 				SkipFunc: func() (bool, error) { return !similarItemsSupported, nil },
@@ -262,6 +262,9 @@ func TestAccLibraryResourceDocumentedExample(t *testing.T) {
 }
 
 func TestAccLibraryResourceMappedAndUnsupportedOptions(t *testing.T) {
+	testAccPreCheck(t)
+	similarItemsSupported := testAccLibrarySimilarItemsSupported(t)
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
@@ -281,6 +284,36 @@ resource "jellyfin_library" "test" {
 }
 `,
 				ExpectError: regexp.MustCompile(`Unsupported\s+library\s+option`),
+			},
+			// Jellyfin 10.11 removed network paths.
+			{
+				Config: `
+resource "jellyfin_library" "test" {
+  name            = "TestOptions"
+  collection_type = "movies"
+  paths           = ["/media/movies"]
+
+  library_options = {
+    path_infos = [{ path = "/media/movies", network_path = "smb://nas/movies" }]
+  }
+}
+`,
+				ExpectError: regexp.MustCompile(`Jellyfin\s+10\.11\s+removed\s+network\s+paths[\s\S]*Remove\s+library_options\.path_infos\[0\]\.network_path`),
+			},
+			{
+				SkipFunc: func() (bool, error) { return similarItemsSupported, nil },
+				Config: `
+resource "jellyfin_library" "test" {
+  name            = "TestOptions"
+  collection_type = "movies"
+  paths           = ["/media/movies"]
+
+  library_options = {
+    type_options = [{ type = "Movie", similar_item_providers = ["Local Genre/Tag"] }]
+  }
+}
+`,
+				ExpectError: testAccLibrarySimilarItemsRejected,
 			},
 			// disabled and extract_chapters_during_library_scan are stored as
 			// Jellyfin's Enabled and ExtractChapterImagesDuringLibraryScan.
@@ -330,6 +363,10 @@ resource "jellyfin_library" "test" {
   }
 }
 `
+
+// testAccLibrarySimilarItemsRejected matches the plan-time error only, not the
+// one reported after apply when the server drops the settings.
+var testAccLibrarySimilarItemsRejected = regexp.MustCompile(`similar\s+item\s+providers\s+need\s+Jellyfin\s+12\s+or\s+later\.\s+Remove\s+library_options\.type_options\[0\]\.similar_item_providers`)
 
 func testAccLibrarySimilarItemsSupported(t *testing.T) bool {
 	t.Helper()
