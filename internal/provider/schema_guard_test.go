@@ -26,7 +26,7 @@ import (
 
 const (
 	jellyfinAPISchemaGolden     = "testdata/jellyfin_api_schema.golden"
-	ssoPluginConfigSchemaGolden = "testdata/sso_plugin_config_schema.golden"
+	securityPluginPayloadGolden = "testdata/security_plugin_config_schema.golden"
 )
 
 const (
@@ -1238,8 +1238,11 @@ func dedupStrings(in []string) []string {
 	return out
 }
 
-func TestAccSSOPluginConfigSchemaGuard(t *testing.T) {
-	t.Skip("SSO plugin payload schema guard requires plugin installation; run manually with SCHEMA_GUARD_UPDATE=1 after installing the SSO-Auth plugin")
+func TestAccSecurityPluginConfigSchemaGuard(t *testing.T) {
+	testAccSecurityPluginPreCheck(t)
+	c := testAccInstallSecurityPlugin(t)
+
+	checkSchemaGolden(t, securityPluginPayloadGolden, testAccSecurityPluginPayloadShape(t, c))
 }
 
 func TestUnitReduceOpenAPISpec(t *testing.T) {

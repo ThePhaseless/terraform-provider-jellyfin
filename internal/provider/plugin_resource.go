@@ -6,6 +6,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -78,8 +79,8 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"version": schema.StringAttribute{
-				Description:         "The plugin version to install. Omit to install the latest available version from the repository.",
-				MarkdownDescription: "The plugin version to install. Omit to install the latest available version from the repository.",
+				Description:         "The plugin version to install. Omit to install the latest available version from the repository, or for Jellyfin Security the release this provider was tested against, in the build the server accepts.",
+				MarkdownDescription: "The plugin version to install. Omit to install the latest available version from the repository, or for Jellyfin Security the release this provider was tested against, in the build the server accepts.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -349,9 +350,10 @@ func (r *PluginResource) resolveRepositoryURL(ctx context.Context, name, version
 
 // resolvePluginVersion resolves the version for a plugin install.
 //
-//   - "supported" or unset for a known plugin → hardcoded supported version
+//   - "supported" or unset for a known plugin → hardcoded supported release,
+//     in the build this server is offered
 //   - "latest" → newest version from the repository manifest, with a warning
-//     if newer than the supported version (when one exists)
+//     if its release is newer than the supported one (when one exists)
 //   - Any other value (e.g. "2.5.20.0") → used as-is
 //   - Unset for unknown plugins → resolves latest from the repository.
 func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, version types.String) (string, error) {
@@ -361,7 +363,7 @@ func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, 
 	case version.IsNull() || version.IsUnknown() || version.ValueString() == "":
 		// Unset: use supported for known plugins, latest for others.
 		if supported != "" {
-			return supported, nil
+			return r.resolveSupportedBuild(ctx, name, supported), nil
 		}
 		return r.resolveLatestVersion(ctx, name)
 
@@ -369,7 +371,7 @@ func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, 
 		if supported == "" {
 			return "", fmt.Errorf("version %q is not available for plugin %q — no supported version is defined", "supported", name)
 		}
-		return supported, nil
+		return r.resolveSupportedBuild(ctx, name, supported), nil
 
 	case version.ValueString() == "latest":
 		latest, err := r.resolveLatestVersion(ctx, name)
@@ -377,7 +379,7 @@ func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, 
 			return "", err
 		}
 		if supported != "" && latest != "" {
-			if c := compareDottedVersions(latest, supported); c > 0 {
+			if c := compareDottedVersions(pluginRelease(latest), pluginRelease(supported)); c > 0 {
 				resp := "" // placeholder — warning is logged below
 				_ = resp
 				tflog.Warn(ctx, "Plugin version newer than supported", map[string]interface{}{
@@ -414,6 +416,53 @@ func (r *PluginResource) resolveLatestVersion(ctx context.Context, name string) 
 	}
 
 	return "", nil
+}
+
+// resolveSupportedBuild returns the build of the supported release that this
+// server is offered. JellyfinSecurity ships one build per server ABI under a
+// single release (2.6.3.0 for Jellyfin 10.11, 2.6.3.1 for 12.x) and Jellyfin
+// lists only the builds its ABI accepts, so the pinned build is not installable
+// on the other server line while its sibling is.
+func (r *PluginResource) resolveSupportedBuild(ctx context.Context, name, supported string) string {
+	pkgs, err := r.client.GetAvailablePackages(ctx)
+	if err != nil {
+		return supported
+	}
+	for _, pkg := range pkgs {
+		if pkg.Name == name {
+			return pickReleaseBuild(pkg.Versions, supported)
+		}
+	}
+	return supported
+}
+
+// pickReleaseBuild returns want when it is offered, otherwise the highest
+// offered build of the same release, otherwise want.
+func pickReleaseBuild(offered []client.VersionInfo, want string) string {
+	best := ""
+	for _, v := range offered {
+		if v.Version == want {
+			return want
+		}
+		if pluginRelease(v.Version) == pluginRelease(want) && (best == "" || compareDottedVersions(v.Version, best) > 0) {
+			best = v.Version
+		}
+	}
+	if best == "" {
+		return want
+	}
+	return best
+}
+
+// pluginRelease drops the build segment from a four-segment plugin version
+// (2.6.3.1 → 2.6.3). For JellyfinSecurity that segment selects the server ABI,
+// so builds of one release carry the same configuration schema.
+func pluginRelease(version string) string {
+	parts := strings.Split(strings.TrimSpace(version), ".")
+	if len(parts) > 3 {
+		parts = parts[:3]
+	}
+	return strings.Join(parts, ".")
 }
 
 // supportedVersionForPlugin returns the hardcoded supported version for a

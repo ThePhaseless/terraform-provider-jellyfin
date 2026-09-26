@@ -11,6 +11,9 @@ jobs:
   schema-check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -19,15 +22,20 @@ jobs:
       - name: Extract old and new plugin versions
         id: versions
         run: |
-          OLD_VERSION=$(git show origin/${{ github.base_ref }}:internal/provider/supported_security_plugin_version.env | grep -oP '(?<=SECURITY_PLUGIN_VERSION=).+')
-          NEW_VERSION=$(grep -oP '(?<=SECURITY_PLUGIN_VERSION=).+' internal/provider/supported_security_plugin_version.env)
-          # The env file carries the assembly version Jellyfin installs
-          # (2.5.22.0); releases are tagged with three segments (v2.5.22).
-          echo "old=${OLD_VERSION%.0}" >> $GITHUB_OUTPUT
-          echo "new=${NEW_VERSION%.0}" >> $GITHUB_OUTPUT
-          if [ "$OLD_VERSION" = "$NEW_VERSION" ]; then
+          # Digits and dots only: these outputs are expanded into later scripts,
+          # and the new value comes from the pull request.
+          OLD_VERSION=$(git show origin/${{ github.base_ref }}:internal/provider/supported_security_plugin_version.env | grep -oP '(?<=SECURITY_PLUGIN_VERSION=)[0-9]+(\.[0-9]+)*')
+          NEW_VERSION=$(grep -oP '(?<=SECURITY_PLUGIN_VERSION=)[0-9]+(\.[0-9]+)*' internal/provider/supported_security_plugin_version.env)
+          # The env file carries the four-segment version Jellyfin installs.
+          # The fourth segment picks the server ABI build of one release
+          # (2.6.3.0 for 10.11, 2.6.3.1 for 12.x); the tag is v2.6.3 for both.
+          OLD_RELEASE=$(echo "$OLD_VERSION" | cut -d. -f1-3)
+          NEW_RELEASE=$(echo "$NEW_VERSION" | cut -d. -f1-3)
+          echo "old=${OLD_RELEASE}" >> $GITHUB_OUTPUT
+          echo "new=${NEW_RELEASE}" >> $GITHUB_OUTPUT
+          if [ "$OLD_RELEASE" = "$NEW_RELEASE" ]; then
             echo "bumped=false" >> $GITHUB_OUTPUT
-            echo "Plugin version unchanged (${NEW_VERSION}); nothing to compare."
+            echo "Plugin release unchanged (${NEW_RELEASE}); nothing to compare."
           else
             echo "bumped=true" >> $GITHUB_OUTPUT
           fi
@@ -46,7 +54,7 @@ jobs:
         run: |
           # Extract public property signatures (type + name) from each file
           extract_props() {
-            grep -oP 'public\s+(?:virtual\s+)?(?:\w+(?:<[^>]+>)?(?:\[\])?)\s+\w+\s*\{\s*get;\s*set;' "$1" | \
+            grep -oP 'public\s+(?:virtual\s+)?(?:\w+(?:<[^>]+>)?(?:\[\])?\??)\s+\w+\s*\{\s*get;\s*set;' "$1" | \
               sed 's/public\s*//; s/\s*{\s*get;\s*set;.*//' | sort
           }
           extract_props /tmp/old_config.cs > /tmp/old_config_props.txt
@@ -57,28 +65,36 @@ jobs:
           CONFIG_DIFF=$(diff /tmp/old_config_props.txt /tmp/new_config_props.txt || true)
           OIDC_DIFF=$(diff /tmp/old_oidc_props.txt /tmp/new_oidc_props.txt || true)
 
-          if [ -n "$CONFIG_DIFF" ] || [ -n "$OIDC_DIFF" ]; then
-            echo "has_changes=true" >> $GITHUB_OUTPUT
-            echo "::error::JellyfinSecurity plugin schema changed between ${{ steps.versions.outputs.old }} and ${{ steps.versions.outputs.new }}"
-            echo "::error::The typed Terraform resource must be updated before this version can be merged."
-            echo ""
-            echo "PluginConfiguration.cs changes:"
-            echo '```diff'
-            echo "$CONFIG_DIFF"
-            echo '```'
-            echo ""
-            echo "OidcProvider.cs changes:"
-            echo '```diff'
-            echo "$OIDC_DIFF"
-            echo '```'
-            exit 1
-          else
+          if [ -z "$CONFIG_DIFF" ] && [ -z "$OIDC_DIFF" ]; then
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "No schema changes detected."
+            exit 0
           fi
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+
+          echo "PluginConfiguration.cs changes:"
+          echo '```diff'
+          echo "$CONFIG_DIFF"
+          echo '```'
+          echo ""
+          echo "OidcProvider.cs changes:"
+          echo '```diff'
+          echo "$OIDC_DIFF"
+          echo '```'
+
+          # A bump that arrives with its resource update is the fix, not the
+          # drift; testdata/security_plugin_config_schema.golden and the unit
+          # test reading it check the update against what the plugin serves.
+          RESOURCE=internal/provider/jellyfin_security_plugin_configuration_resource.go
+          if git diff --quiet "origin/${{ github.base_ref }}...HEAD" -- "$RESOURCE"; then
+            echo "::error::JellyfinSecurity plugin schema changed between ${{ steps.versions.outputs.old }} and ${{ steps.versions.outputs.new }}"
+            echo "::error::The typed Terraform resource must be updated before this version can be merged."
+            exit 1
+          fi
+          echo "::notice::JellyfinSecurity plugin schema changed between ${{ steps.versions.outputs.old }} and ${{ steps.versions.outputs.new }}; this PR also changes ${RESOURCE}. Check it mirrors the diff above."
 
       - name: Comment on PR if schema changed
-        if: failure()
+        if: failure() && steps.diff.outputs.has_changes == 'true'
         uses: actions/github-script@v9
         with:
           script: |
