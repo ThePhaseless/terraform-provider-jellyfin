@@ -41,7 +41,10 @@ jobs:
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_wrapper: false
-      - run: make generate
+      # go mod tidy raises tools/go.mod's go line past the provider's whenever
+      # a generator dependency needs a newer Go. Under the GOTOOLCHAIN=local
+      # that setup-go exports, go then fails instead of fetching the toolchain.
+      - run: GOTOOLCHAIN=auto make generate
       - name: git diff
         run: |
           git diff --compact-summary --exit-code || \
