@@ -265,7 +265,11 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 				Required:            true,
 				Validators:          requiredIdentifierValidators(),
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.RequiresReplaceIf(
+						requiresReplaceUnlessSameGUID,
+						"Replaces the resource when plugin_id names a different GUID; another spelling of the same GUID updates in place.",
+						"Replaces the resource when plugin_id names a different GUID; another spelling of the same GUID updates in place.",
+					),
 				},
 			},
 			"id": schema.StringAttribute{
@@ -273,7 +277,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 				MarkdownDescription: "The plugin configuration resource identifier.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
+					idFromPluginIDPlanModifier{},
 				},
 			},
 			"enabled":                            optionalBool("Whether the plugin is enabled."),
@@ -574,6 +578,14 @@ func (r *JellyfinSecurityPluginConfigurationResource) checkJellyfinSecurityVersi
 // compare IDs regardless of whether Jellyfin returns them as "D" or "N" format.
 func normalizeGUID(s string) string {
 	return strings.ToLower(strings.ReplaceAll(s, "-", ""))
+}
+
+// requiresReplaceUnlessSameGUID keeps a switch between the dashed and dash-free
+// spelling of one GUID in place. jellyfin_plugin's id is dash-free while an
+// import ID is often written with dashes, and replacing would re-create every
+// OIDC provider from the configuration alone, resetting settings it leaves out.
+func requiresReplaceUnlessSameGUID(_ context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
+	resp.RequiresReplace = req.PlanValue.IsUnknown() || normalizeGUID(req.PlanValue.ValueString()) != normalizeGUID(req.StateValue.ValueString())
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) apply(ctx context.Context, data *JellyfinSecurityPluginConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
@@ -1041,6 +1053,28 @@ func (sameInstantPlanModifier) PlanModifyString(_ context.Context, req planmodif
 	if sameInstant(req.ConfigValue, req.StateValue) {
 		resp.PlanValue = req.StateValue
 	}
+}
+
+// idFromPluginIDPlanModifier plans id as the plugin_id that apply stores in it.
+// Keeping the prior id instead would contradict apply when plugin_id changes to
+// another spelling of the same GUID, which updates in place.
+type idFromPluginIDPlanModifier struct{}
+
+func (idFromPluginIDPlanModifier) Description(context.Context) string {
+	return "Plans the identifier as the configured plugin_id."
+}
+
+func (m idFromPluginIDPlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (idFromPluginIDPlanModifier) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	var pluginID types.String
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("plugin_id"), &pluginID)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.PlanValue = pluginID
 }
 
 func parseISODateTime(v string) (time.Time, bool) {

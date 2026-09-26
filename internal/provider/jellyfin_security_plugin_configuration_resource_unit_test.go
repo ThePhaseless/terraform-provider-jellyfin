@@ -13,8 +13,13 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 func TestUnitJellyfinSecurityNotificationAuthRoundTrip(t *testing.T) {
@@ -212,6 +217,56 @@ func TestUnitSameInstantPlanModifier(t *testing.T) {
 				t.Errorf("plan = %v, want %v", resp.PlanValue, c.want)
 			}
 		})
+	}
+}
+
+func TestUnitRequiresReplaceUnlessSameGUID(t *testing.T) {
+	ctx := context.Background()
+	state := types.StringValue("94879a0c-da24-4eb1-aa06-f28b4b9333b1")
+
+	for _, c := range []struct {
+		name    string
+		plan    types.String
+		replace bool
+	}{
+		{"dash-free spelling of the same GUID", types.StringValue("94879a0cda244eb1aa06f28b4b9333b1"), false},
+		{"upper-case spelling of the same GUID", types.StringValue("94879A0C-DA24-4EB1-AA06-F28B4B9333B1"), false},
+		{"different GUID", types.StringValue("505ce9d1d91642fa86ca673ef241d7df"), true},
+		{"unknown until apply", types.StringUnknown(), true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			req := planmodifier.StringRequest{ConfigValue: c.plan, StateValue: state, PlanValue: c.plan}
+			resp := &stringplanmodifier.RequiresReplaceIfFuncResponse{}
+			requiresReplaceUnlessSameGUID(ctx, req, resp)
+			if resp.RequiresReplace != c.replace {
+				t.Errorf("RequiresReplace = %t, want %t", resp.RequiresReplace, c.replace)
+			}
+		})
+	}
+}
+
+func TestUnitIDPlannedAsPluginID(t *testing.T) {
+	ctx := context.Background()
+
+	var schemaResp resource.SchemaResponse
+	(&JellyfinSecurityPluginConfigurationResource{}).Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	plan := tfsdk.Plan{Schema: schemaResp.Schema, Raw: tftypes.NewValue(schemaResp.Schema.Type().TerraformType(ctx), nil)}
+	if d := plan.SetAttribute(ctx, path.Root("plugin_id"), "94879a0cda244eb1aa06f28b4b9333b1"); d.HasError() {
+		t.Fatalf("setting plugin_id: %v", d.Errors())
+	}
+
+	req := planmodifier.StringRequest{
+		Plan:       plan,
+		StateValue: types.StringValue("94879a0c-da24-4eb1-aa06-f28b4b9333b1"),
+		PlanValue:  types.StringValue("94879a0c-da24-4eb1-aa06-f28b4b9333b1"),
+	}
+	resp := &planmodifier.StringResponse{PlanValue: req.PlanValue}
+	idFromPluginIDPlanModifier{}.PlanModifyString(ctx, req, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("plan modifier: %v", resp.Diagnostics.Errors())
+	}
+	if want := types.StringValue("94879a0cda244eb1aa06f28b4b9333b1"); !resp.PlanValue.Equal(want) {
+		t.Errorf("id plan = %v, want %v", resp.PlanValue, want)
 	}
 }
 

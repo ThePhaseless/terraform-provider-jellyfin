@@ -12,6 +12,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
@@ -26,7 +27,10 @@ func TestAccSecurityPluginConfigurationResource(t *testing.T) {
 	testAccInstallSecurityPlugin(t)
 
 	const name = "jellyfin_security_plugin_configuration.test"
+	// jellyfin_plugin's id holds the dash-free spelling the server lists.
+	dashFreeID := normalizeGUID(jellyfinSecurityPluginID)
 	created := testAccSecurityPluginConfigurationConfig(securityPluginTestValues{
+		pluginID:           dashFreeID,
 		publicBaseURL:      "https://jellyfin.example.com",
 		pairDevice:         true,
 		stepUpWindow:       600,
@@ -35,6 +39,7 @@ func TestAccSecurityPluginConfigurationResource(t *testing.T) {
 		linkByUsername:     true,
 	})
 	updated := testAccSecurityPluginConfigurationConfig(securityPluginTestValues{
+		pluginID:           jellyfinSecurityPluginID,
 		publicBaseURL:      "https://media.example.com/jellyfin",
 		pairDevice:         false,
 		stepUpWindow:       300,
@@ -50,7 +55,7 @@ func TestAccSecurityPluginConfigurationResource(t *testing.T) {
 			{
 				Config: created,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(name, "id", jellyfinSecurityPluginID),
+					resource.TestCheckResourceAttr(name, "id", dashFreeID),
 					resource.TestCheckResourceAttr(name, "enabled", "true"),
 					resource.TestCheckResourceAttr(name, "public_base_url", "https://jellyfin.example.com"),
 					resource.TestCheckResourceAttr(name, "pair_device_on_second_screen_approval", "true"),
@@ -70,7 +75,7 @@ func TestAccSecurityPluginConfigurationResource(t *testing.T) {
 			{
 				ResourceName:      name,
 				ImportState:       true,
-				ImportStateId:     jellyfinSecurityPluginID,
+				ImportStateId:     dashFreeID,
 				ImportStateVerify: true,
 				// An import has no configured spelling to keep, so it holds the
 				// server's .NET layout of the same instant; the import block step
@@ -79,7 +84,13 @@ func TestAccSecurityPluginConfigurationResource(t *testing.T) {
 			},
 			{
 				Config: updated,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(name, plancheck.ResourceActionUpdate),
+					},
+				},
 				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(name, "id", jellyfinSecurityPluginID),
 					resource.TestCheckResourceAttr(name, "public_base_url", "https://media.example.com/jellyfin"),
 					resource.TestCheckResourceAttr(name, "pair_device_on_second_screen_approval", "false"),
 					resource.TestCheckResourceAttr(name, "step_up_window_seconds", "300"),
@@ -99,6 +110,7 @@ func TestAccSecurityPluginConfigurationResource(t *testing.T) {
 }
 
 type securityPluginTestValues struct {
+	pluginID           string
 	publicBaseURL      string
 	pairDevice         bool
 	stepUpWindow       int
@@ -139,7 +151,7 @@ resource "jellyfin_security_plugin_configuration" "test" {
     }]
   }]
 }
-`, jellyfinSecurityPluginID, v.publicBaseURL, v.pairDevice, v.stepUpWindow, v.enrollmentDeadline, v.displayName, v.linkByUsername)
+`, v.pluginID, v.publicBaseURL, v.pairDevice, v.stepUpWindow, v.enrollmentDeadline, v.displayName, v.linkByUsername)
 }
 
 // testAccSecurityPluginPreCheck gates the tests that install JellyfinSecurity:
