@@ -21,3 +21,24 @@ func requiredIdentifierValidators() []validator.String {
 		noPathSeparatorsValidator,
 	}
 }
+
+// Jellyfin keeps a library as a directory named after it and replaces these
+// characters with spaces, so a name containing one would come back as a
+// different library.
+var libraryNameCharactersValidator = stringvalidator.RegexMatches(
+	regexp.MustCompile(`^[^"<>|:*?\\/\x00-\x1f]*$`),
+	`must not contain " < > | : * ? \ / or control characters`,
+)
+
+var noSurroundingWhitespaceValidator = stringvalidator.RegexMatches(
+	regexp.MustCompile(`^\S(?:.*\S)?$`),
+	"must not start or end with whitespace",
+)
+
+func libraryNameValidators() []validator.String {
+	return []validator.String{
+		stringvalidator.LengthAtLeast(1),
+		noSurroundingWhitespaceValidator,
+		libraryNameCharactersValidator,
+	}
+}

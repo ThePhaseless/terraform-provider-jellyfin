@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -123,9 +126,7 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Description:         "The library name.",
 				MarkdownDescription: "The library name.",
 				Required:            true,
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
+				Validators:          libraryNameValidators(),
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -450,14 +451,44 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
+	// Jellyfin does not refuse a duplicate name: it adds the library as
+	// "<name>2", and the lookup by name below would then adopt the existing
+	// library while the new one is left unmanaged.
+	switch _, err := r.findFolder(ctx, data.Name.ValueString()); {
+	case err == nil:
+		resp.Diagnostics.AddError(
+			"Library already exists",
+			fmt.Sprintf("A library named %q already exists on the Jellyfin server. Import it into this resource with its name as the import ID, or choose another name.", data.Name.ValueString()),
+		)
+		return
+	case !errors.Is(err, errLibraryNotFound):
+		resp.Diagnostics.AddError("Failed to read libraries", err.Error())
+		return
+	}
+
 	if err := r.client.AddVirtualFolder(ctx, data.Name.ValueString(), data.CollectionType.ValueString(), paths, nil); err != nil {
-		resp.Diagnostics.AddError("Failed to create library", err.Error())
+		resp.Diagnostics.AddError("Failed to create library", err.Error()+r.missingPathsHint(ctx, err, paths))
 		return
 	}
 
 	folder, err := r.findFolder(ctx, data.Name.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read library after creation", err.Error())
+		return
+	}
+
+	// Track the library before its options are applied: a failure below then
+	// leaves it in state as tainted, to be replaced, rather than on the server
+	// unmanaged, where the next create would refuse the duplicate name.
+	resp.Diagnostics.Append(resp.State.Set(ctx, &LibraryResourceModel{
+		ID:             types.StringValue(folder.Name),
+		Name:           data.Name,
+		CollectionType: types.StringValue(folder.CollectionType),
+		Paths:          data.Paths,
+		LibraryOptions: flattenLibraryOptions(ctx, folder.GetLibraryOptions().RawJSON, &resp.Diagnostics),
+		ItemID:         types.StringValue(folder.ItemID),
+	})...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -618,6 +649,26 @@ func (r *LibraryResource) findFolder(ctx context.Context, name string) (*client.
 		}
 	}
 	return nil, fmt.Errorf("%w: %q", errLibraryNotFound, name)
+}
+
+// missingPathsHint names the paths the server cannot find when it rejected a
+// create with a 400. Jellyfin answers a missing path with only "Error
+// processing request." and writes the reason to its own log.
+func (r *LibraryResource) missingPathsHint(ctx context.Context, createErr error, paths []string) string {
+	var httpErr *client.HTTPError
+	if !errors.As(createErr, &httpErr) || httpErr.StatusCode != http.StatusBadRequest {
+		return ""
+	}
+	var missing []string
+	for _, p := range paths {
+		if exists, err := r.client.DirectoryExists(ctx, p); err == nil && !exists {
+			missing = append(missing, strconv.Quote(p))
+		}
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("\n\nThese paths do not exist on the Jellyfin server: %s. Paths are looked up by the server, so when Jellyfin runs in a container they must be the paths where the media is mounted inside the container.", strings.Join(missing, ", "))
 }
 
 func (r *LibraryResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {

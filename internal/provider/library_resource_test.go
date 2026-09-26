@@ -4,9 +4,14 @@
 package provider
 
 import (
+	"context"
+	"fmt"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccLibraryResource(t *testing.T) {
@@ -69,4 +74,69 @@ resource "jellyfin_library" "test" {
 			},
 		},
 	})
+}
+
+func TestAccLibraryResourceMissingPath(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckNoLibraryNamed(t, "TestMissingPath"),
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "jellyfin_library" "test" {
+  name            = "TestMissingPath"
+  collection_type = "movies"
+  paths           = ["/media/movies", "/media/does-not-exist"]
+}
+`,
+				ExpectError: regexp.MustCompile(`These\s+paths\s+do\s+not\s+exist\s+on\s+the\s+Jellyfin\s+server:\s+"/media/does-not-exist"\.`),
+			},
+		},
+	})
+}
+
+func TestAccLibraryResourceDuplicateName(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckNoLibraryNamed(t, "TestDuplicate"),
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "jellyfin_library" "first" {
+  name            = "TestDuplicate"
+  collection_type = "movies"
+  paths           = ["/media/movies"]
+}
+
+resource "jellyfin_library" "second" {
+  name            = "TestDuplicate"
+  collection_type = "tvshows"
+  paths           = ["/media/tvshows"]
+
+  depends_on = [jellyfin_library.first]
+}
+`,
+				ExpectError: regexp.MustCompile(`A\s+library\s+named\s+"TestDuplicate"\s+already\s+exists`),
+			},
+		},
+	})
+}
+
+// testAccCheckNoLibraryNamed also catches the numbered copies Jellyfin makes
+// of a duplicate name.
+func testAccCheckNoLibraryNamed(t *testing.T, prefix string) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		folders, err := testAccClient(t).GetVirtualFolders(context.Background())
+		if err != nil {
+			return err
+		}
+		for _, f := range folders {
+			if strings.HasPrefix(f.Name, prefix) {
+				return fmt.Errorf("library %q is still on the server", f.Name)
+			}
+		}
+		return nil
+	}
 }
