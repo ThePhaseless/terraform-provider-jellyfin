@@ -23,6 +23,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
@@ -422,10 +423,25 @@ func (r *LibraryResource) Configure(_ context.Context, req resource.ConfigureReq
 }
 
 func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	// library_options is computed, so a plan without it carries an unknown
+	// object, which the pointer field of the model cannot hold. Read the
+	// attributes one by one and convert the options only when they are known.
 	var data LibraryResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	var opts types.Object
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("name"), &data.Name)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("collection_type"), &data.CollectionType)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("paths"), &data.Paths)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("library_options"), &opts)...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+	if !opts.IsNull() && !opts.IsUnknown() {
+		var lo LibraryOptionsModel
+		resp.Diagnostics.Append(opts.As(ctx, &lo, basetypes.ObjectAsOptions{})...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		data.LibraryOptions = &lo
 	}
 
 	var paths []string
@@ -464,7 +480,7 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	if err := r.client.UpdateVirtualFolder(ctx, data.Name.ValueString(), &client.LibraryOptions{RawJSON: string(payload)}); err != nil {
+	if err := r.client.UpdateVirtualFolder(ctx, folder.ItemID, &client.LibraryOptions{RawJSON: string(payload)}); err != nil {
 		resp.Diagnostics.AddError("Failed to update library options", err.Error())
 		return
 	}
@@ -481,7 +497,7 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, updated.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues
-	data.LibraryOptions = flattenLibraryOptions(ctx, updated.GetLibraryOptions().RawJSON, &resp.Diagnostics)
+	data.LibraryOptions = keepPlannedNulls(ctx, data.LibraryOptions, flattenLibraryOptions(ctx, updated.GetLibraryOptions().RawJSON, &resp.Diagnostics))
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -552,7 +568,7 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	if err := r.client.UpdateVirtualFolder(ctx, state.Name.ValueString(), &client.LibraryOptions{RawJSON: string(payload)}); err != nil {
+	if err := r.client.UpdateVirtualFolder(ctx, folder.ItemID, &client.LibraryOptions{RawJSON: string(payload)}); err != nil {
 		resp.Diagnostics.AddError("Failed to update library options", err.Error())
 		return
 	}
@@ -569,7 +585,7 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, updated.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues
-	data.LibraryOptions = flattenLibraryOptions(ctx, updated.GetLibraryOptions().RawJSON, &resp.Diagnostics)
+	data.LibraryOptions = keepPlannedNulls(ctx, data.LibraryOptions, flattenLibraryOptions(ctx, updated.GetLibraryOptions().RawJSON, &resp.Diagnostics))
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -919,4 +935,71 @@ func flattenImageOptions(_ context.Context, m map[string]json.RawMessage, diags 
 		return types.ListNull(objType)
 	}
 	return list
+}
+
+// keepPlannedNulls returns got with, inside type_options and path_infos
+// elements, the attributes the plan left null set back to null where the
+// server returned an empty list or an empty string. The framework does not
+// mark computed attributes inside list elements unknown, so the value after
+// apply has to match the plan exactly.
+func keepPlannedNulls(ctx context.Context, planned, got *LibraryOptionsModel) *LibraryOptionsModel {
+	if planned == nil || got == nil {
+		return got
+	}
+	got.TypeOptions = reconcileTypeOptions(ctx, planned.TypeOptions, got.TypeOptions)
+	got.PathInfos = reconcilePathInfos(ctx, planned.PathInfos, got.PathInfos)
+	return got
+}
+
+func nullIfPlannedNullList(planned types.List, got *types.List) {
+	if planned.IsNull() && !got.IsNull() && !got.IsUnknown() && len(got.Elements()) == 0 {
+		*got = types.ListNull(got.ElementType(context.Background()))
+	}
+}
+
+func nullIfPlannedNullString(planned types.String, got *types.String) {
+	if planned.IsNull() && !got.IsNull() && !got.IsUnknown() && got.ValueString() == "" {
+		*got = types.StringNull()
+	}
+}
+
+func reconcileTypeOptions(ctx context.Context, planned, got types.List) types.List {
+	if planned.IsNull() || planned.IsUnknown() || got.IsNull() || got.IsUnknown() {
+		return got
+	}
+	var p, g []TypeOptionsModel
+	if planned.ElementsAs(ctx, &p, false).HasError() || got.ElementsAs(ctx, &g, false).HasError() || len(p) != len(g) {
+		return got
+	}
+	for i := range g {
+		nullIfPlannedNullList(p[i].MetadataFetchers, &g[i].MetadataFetchers)
+		nullIfPlannedNullList(p[i].ImageFetchers, &g[i].ImageFetchers)
+		nullIfPlannedNullList(p[i].ImageOptions, &g[i].ImageOptions)
+		nullIfPlannedNullList(p[i].ImageFetcherOrder, &g[i].ImageFetcherOrder)
+	}
+	out, diags := types.ListValueFrom(ctx, typeOptionsObjectType(), g)
+	if diags.HasError() {
+		return got
+	}
+	return out
+}
+
+func reconcilePathInfos(ctx context.Context, planned, got types.List) types.List {
+	if planned.IsNull() || planned.IsUnknown() || got.IsNull() || got.IsUnknown() {
+		return got
+	}
+	var p, g []PathInfoModel
+	if planned.ElementsAs(ctx, &p, false).HasError() || got.ElementsAs(ctx, &g, false).HasError() || len(p) != len(g) {
+		return got
+	}
+	for i := range g {
+		nullIfPlannedNullString(p[i].NetworkPath, &g[i].NetworkPath)
+		nullIfPlannedNullString(p[i].Username, &g[i].Username)
+		nullIfPlannedNullString(p[i].Password, &g[i].Password)
+	}
+	out, diags := types.ListValueFrom(ctx, pathInfoObjectType(), g)
+	if diags.HasError() {
+		return got
+	}
+	return out
 }

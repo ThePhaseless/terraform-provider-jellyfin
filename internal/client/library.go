@@ -97,32 +97,28 @@ func (c *Client) RemoveVirtualFolder(ctx context.Context, name string) error {
 }
 
 // UpdateVirtualFolder updates the library options for a virtual folder.
-func (c *Client) UpdateVirtualFolder(ctx context.Context, name string, libraryOptions *LibraryOptions) error {
-	// Build a JSON body that includes the Name field alongside the library options.
+func (c *Client) UpdateVirtualFolder(ctx context.Context, itemID string, libraryOptions *LibraryOptions) error {
+	// POST /Library/VirtualFolders/LibraryOptions takes UpdateLibraryOptionsDto:
+	// the library's item id and the options object. Sending the options flat
+	// left Id empty and the server refused it ("Guid can't be empty").
 	rawOpts := "{}"
 	if libraryOptions != nil && libraryOptions.RawJSON != "" {
 		rawOpts = libraryOptions.RawJSON
 	}
-
-	// Parse the library options, inject the Name field, and re-serialize.
-	var opts map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(rawOpts), &opts); err != nil {
-		return fmt.Errorf("parsing library options for virtual folder %s: %w", name, err)
+	if !json.Valid([]byte(rawOpts)) {
+		return fmt.Errorf("parsing library options for virtual folder %s: invalid JSON", itemID)
 	}
 
-	nameJSON, err := json.Marshal(name)
+	body, err := json.Marshal(map[string]json.RawMessage{
+		"Id":             json.RawMessage(fmt.Sprintf("%q", itemID)),
+		"LibraryOptions": json.RawMessage(rawOpts),
+	})
 	if err != nil {
-		return fmt.Errorf("marshaling name for virtual folder %s: %w", name, err)
-	}
-	opts["Name"] = json.RawMessage(nameJSON)
-
-	body, err := json.Marshal(opts)
-	if err != nil {
-		return fmt.Errorf("marshaling library options for virtual folder %s: %w", name, err)
+		return fmt.Errorf("marshaling library options for virtual folder %s: %w", itemID, err)
 	}
 
 	if err := c.postRaw(ctx, "/Library/VirtualFolders/LibraryOptions", string(body)); err != nil {
-		return fmt.Errorf("updating virtual folder %s: %w", name, err)
+		return fmt.Errorf("updating virtual folder %s: %w", itemID, err)
 	}
 	return nil
 }
