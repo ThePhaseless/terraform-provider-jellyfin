@@ -277,7 +277,7 @@ func TestUnitReduceSecurityPluginPayload(t *testing.T) {
 	}
 
 	want := []string{
-		"Cidrs: []string",
+		"Cidrs: array",
 		"Deadline: null",
 		"Empty: array",
 		"Enabled: boolean",
@@ -395,18 +395,17 @@ func reducePayloadObject(obj map[string]any, prefix string, out *[]string) {
 	}
 }
 
+// payloadArrayType names only lists of objects by their elements. The probe
+// leaves scalar lists at the plugin's defaults, and an empty default carries no
+// element type, so naming theirs would move the golden whenever a default list
+// gained or lost its entries.
 func payloadArrayType(v []any) string {
-	if len(v) == 0 {
-		return "array"
+	if len(v) > 0 {
+		if _, ok := v[0].(map[string]any); ok {
+			return "[]object"
+		}
 	}
-	switch v[0].(type) {
-	case map[string]any:
-		return "[]object"
-	case []any:
-		return "[]array"
-	default:
-		return "[]" + payloadScalarType(v[0])
-	}
+	return "array"
 }
 
 func payloadScalarType(v any) string {
@@ -480,8 +479,6 @@ func samplePayloadValue(typ string) any {
 		return []any{}
 	case "[]object":
 		return []any{map[string]any{}}
-	case "[]string", "[]number", "[]boolean":
-		return []any{samplePayloadValue(strings.TrimPrefix(typ, "[]"))}
 	default:
 		return nil
 	}

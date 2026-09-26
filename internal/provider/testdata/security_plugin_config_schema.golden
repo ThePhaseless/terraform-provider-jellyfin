@@ -33,7 +33,7 @@ IpBanEnabled: boolean
 IpBanExemptCidrs: array
 IpBanFailureThreshold: number
 IpBanFailureWindowMinutes: number
-LanBypassCidrs: []string
+LanBypassCidrs: array
 LanBypassEnabled: boolean
 LockoutDurationMinutes: number
 LoginLinksBelowQuickConnect: boolean
