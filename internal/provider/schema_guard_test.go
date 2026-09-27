@@ -34,6 +34,47 @@ const (
 	namedConfigurationPath = "/System/Configuration/{key}"
 )
 
+// schemaGuard is what a mismatch against one golden file has to tell the
+// maintainer: what the lines record, which acceptance test regenerates them
+// and with what environment, and what has to change along with them.
+type schemaGuard struct {
+	golden   string
+	test     string
+	ciStep   string
+	env      string
+	records  string
+	followUp string
+}
+
+var jellyfinAPISchemaGuard = schemaGuard{
+	golden: jellyfinAPISchemaGolden,
+	test:   "TestAccJellyfinAPISchemaGuard",
+	ciStep: "Run acceptance tests",
+	records: `Each line is an endpoint internal/client calls ("op", or "undocumented" when
+the server's OpenAPI document does not describe it) or a property of a schema
+those endpoints send or return ("schema"), as that document describes it. The
+golden changes when a Jellyfin release changes one of those, or when
+internal/client starts or stops calling an endpoint.`,
+	followUp: `A changed line can break a resource even though the test passes again, so fix
+the affected resources in the same change.`,
+}
+
+var securityPluginPayloadGuard = schemaGuard{
+	golden: securityPluginPayloadGolden,
+	test:   "TestAccSecurityPluginConfigSchemaGuard",
+	ciStep: "Run restart acceptance tests (isolated)",
+	env:    "JELLYFIN_RESTART_ACC=1",
+	records: `Each line is a key of the configuration that the JellyfinSecurity build pinned
+in internal/provider/supported_security_plugin_version.env serves, with its JSON
+type. The golden changes when a new pin adds, removes or retypes a key. The
+test installs the plugin and restarts the server to load it, which it does only
+with JELLYFIN_RESTART_ACC=1, so CI runs it in a step of its own.`,
+	followUp: `jellyfin_security_plugin_configuration maps each key by hand, so update it in
+the same change: TestUnitJellyfinSecurityWritesBackExactlyTheServedKeys fails
+until the resource writes back exactly the keys the golden lists, less those
+securityPluginUnmanagedKeys excuses.`,
+}
+
 // The spec types /System/Configuration/{key} as an opaque blob, so the schema
 // behind each key the client reads or writes has to be named by hand.
 var namedConfigurationSchemas = map[string]string{
@@ -102,7 +143,7 @@ func TestAccJellyfinAPISchemaGuard(t *testing.T) {
 		t.Fatalf("reducing OpenAPI spec: %v", err)
 	}
 
-	checkSchemaGolden(t, jellyfinAPISchemaGolden, lines)
+	checkSchemaGolden(t, jellyfinAPISchemaGuard, lines)
 }
 
 // reduceOpenAPISpec keeps only the operations the client calls and the schemas
@@ -1132,28 +1173,26 @@ func jsonBool(m map[string]json.RawMessage, key string) bool {
 	return b
 }
 
-func checkSchemaGolden(t *testing.T, goldenPath string, actual []string) {
+func checkSchemaGolden(t *testing.T, guard schemaGuard, actual []string) {
 	t.Helper()
 
 	sort.Strings(actual)
 	actual = dedupStrings(actual)
 
 	if os.Getenv("SCHEMA_GUARD_UPDATE") == "1" {
-		if err := os.MkdirAll(filepath.Dir(goldenPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(guard.golden), 0755); err != nil {
 			t.Fatalf("creating golden directory: %v", err)
 		}
-		if err := os.WriteFile(goldenPath, []byte(strings.Join(actual, "\n")+"\n"), 0600); err != nil {
+		if err := os.WriteFile(guard.golden, []byte(strings.Join(actual, "\n")+"\n"), 0600); err != nil {
 			t.Fatalf("writing golden file: %v", err)
 		}
-		t.Logf("updated golden file: %s", goldenPath)
+		t.Logf("updated golden file: %s", guard.golden)
 		return
 	}
 
-	regenerate := schemaGuardRegenerateHelp(t.Name(), goldenPath)
-
-	wantBytes, err := os.ReadFile(goldenPath)
+	wantBytes, err := os.ReadFile(guard.golden)
 	if err != nil {
-		t.Fatalf("reading golden file %s: %v\n\n%s", goldenPath, err, regenerate)
+		t.Fatalf("reading golden file %s: %v\n\n%s", guard.golden, err, guard.regenerateHelp())
 	}
 
 	want := strings.Split(strings.TrimSpace(string(wantBytes)), "\n")
@@ -1181,9 +1220,9 @@ func checkSchemaGolden(t *testing.T, goldenPath string, actual []string) {
 
 	if len(missing) > 0 || len(unexpected) > 0 {
 		var msg strings.Builder
-		msg.WriteString("schema guard mismatch against " + goldenPath + ":\n")
+		msg.WriteString("schema guard mismatch against " + guard.golden + ":\n")
 		if len(missing) > 0 {
-			msg.WriteString("\nremoved or renamed (in golden, not served):\n")
+			msg.WriteString("\nin the golden, not served now:\n")
 			for _, line := range missing {
 				msg.WriteString("  - ")
 				msg.WriteString(line)
@@ -1191,7 +1230,7 @@ func checkSchemaGolden(t *testing.T, goldenPath string, actual []string) {
 			}
 		}
 		if len(unexpected) > 0 {
-			msg.WriteString("\nadded (served, not in golden):\n")
+			msg.WriteString("\nserved now, not in the golden:\n")
 			for _, line := range unexpected {
 				msg.WriteString("  + ")
 				msg.WriteString(line)
@@ -1199,31 +1238,38 @@ func checkSchemaGolden(t *testing.T, goldenPath string, actual []string) {
 			}
 		}
 		msg.WriteString("\n")
-		msg.WriteString(regenerate)
+		msg.WriteString(guard.regenerateHelp())
 		t.Fatal(msg.String())
 	}
 }
 
-func schemaGuardRegenerateHelp(testName, goldenPath string) string {
-	return fmt.Sprintf(`The golden records what the provider sends to or reads from the server, so it
-changes when the server changes any of that or when the provider starts or
-stops using part of it. Regenerate it from the repository root against a fresh
-server of the supported Jellyfin version (down -v drops the volumes a previous
-run left behind), adding any environment variables .github/workflows/test.yml
-sets for %[1]s:
+func (g schemaGuard) regenerateHelp() string {
+	env := "SCHEMA_GUARD_UPDATE=1 TF_ACC=1"
+	if g.env != "" {
+		env += " " + g.env
+	}
+	return fmt.Sprintf(`%[1]s
+
+CI checks the golden in this step of .github/workflows/test.yml:
+
+  %[3]s
+
+To regenerate it, run from the repository root against a fresh server of the
+supported Jellyfin version (down -v drops the volumes a previous run left
+behind):
 
   docker compose --env-file internal/provider/supported_jellyfin_version.env down -v
   docker compose --env-file internal/provider/supported_jellyfin_version.env up -d
   eval "$(./scripts/setup_jellyfin.sh | grep '^export ')"
-  SCHEMA_GUARD_UPDATE=1 TF_ACC=1 go test -count=1 -run '^%[1]s$' ./internal/provider/
+  %[4]s \
+    go test -count=1 -run '^%[2]s$' ./internal/provider/
 
 A maintainer must review the resulting diff before it is committed:
 
-  git diff internal/provider/%[2]s
+  git diff internal/provider/%[5]s
 
-A changed line can break a resource even though the test passes again, so fix
-the affected resources in the same change.
-`, testName, goldenPath)
+%[6]s
+`, g.records, g.test, g.ciStep, env, g.golden, g.followUp)
 }
 
 func dedupStrings(in []string) []string {
@@ -1242,7 +1288,7 @@ func TestAccSecurityPluginConfigSchemaGuard(t *testing.T) {
 	testAccSecurityPluginPreCheck(t)
 	c := testAccInstallSecurityPlugin(t)
 
-	checkSchemaGolden(t, securityPluginPayloadGolden, testAccSecurityPluginPayloadShape(t, c))
+	checkSchemaGolden(t, securityPluginPayloadGuard, testAccSecurityPluginPayloadShape(t, c))
 }
 
 func TestUnitReduceOpenAPISpec(t *testing.T) {
@@ -1673,8 +1719,52 @@ func TestUnitJellyfinAPISchemaGoldenMatchesClientCalls(t *testing.T) {
 	}
 
 	if drift := goldenClientDrift(strings.Split(strings.TrimSpace(string(golden)), "\n"), calls); len(drift) > 0 {
-		t.Fatalf("%s does not match the endpoints internal/client calls:\n\n%s\n\n%s", jellyfinAPISchemaGolden, strings.Join(drift, "\n"), schemaGuardRegenerateHelp("TestAccJellyfinAPISchemaGuard", jellyfinAPISchemaGolden))
+		t.Fatalf("%s does not match the endpoints internal/client calls:\n\n%s\n\n%s", jellyfinAPISchemaGolden, strings.Join(drift, "\n"), jellyfinAPISchemaGuard.regenerateHelp())
 	}
+}
+
+func TestUnitSchemaGuardsRunInTheWorkflowStepTheyName(t *testing.T) {
+	raw, err := os.ReadFile("../../.github/workflows/test.yml")
+	if err != nil {
+		t.Fatalf("reading the workflow: %v", err)
+	}
+	runFilter := regexp.MustCompile(`go test .*-run '([^']+)'`)
+
+	for _, g := range []schemaGuard{jellyfinAPISchemaGuard, securityPluginPayloadGuard} {
+		step := workflowStep(string(raw), g.ciStep)
+		if step == "" {
+			t.Errorf("%s: .github/workflows/test.yml has no step named %q", g.test, g.ciStep)
+			continue
+		}
+		if !strings.Contains(step, "./internal/provider/") {
+			t.Errorf("%s: step %q does not test ./internal/provider/", g.test, g.ciStep)
+		}
+		if m := runFilter.FindStringSubmatch(step); m != nil && !regexp.MustCompile(m[1]).MatchString(g.test) {
+			t.Errorf("%s: step %q runs only -run '%s'", g.test, g.ciStep, m[1])
+		}
+		for _, kv := range strings.Fields("TF_ACC=1 " + g.env) {
+			key, value, _ := strings.Cut(kv, "=")
+			if !strings.Contains(step, fmt.Sprintf("%s: %q", key, value)) {
+				t.Errorf("%s: step %q does not set %s", g.test, g.ciStep, kv)
+			}
+		}
+	}
+}
+
+func workflowStep(workflow, name string) string {
+	lines := strings.Split(workflow, "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) != "- name: "+name {
+			continue
+		}
+		indent := line[:len(line)-len(strings.TrimLeft(line, " "))]
+		end := i + 1
+		for end < len(lines) && (strings.TrimSpace(lines[end]) == "" || strings.HasPrefix(lines[end], indent+"  ")) {
+			end++
+		}
+		return strings.Join(lines[i:end], "\n")
+	}
+	return ""
 }
 
 func TestUnitClientAPICallsNamedConfigurationsAreMapped(t *testing.T) {
