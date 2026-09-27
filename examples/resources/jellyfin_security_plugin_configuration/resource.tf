@@ -13,7 +13,7 @@ resource "jellyfin_plugin" "jellyfin_security" {
 
 resource "jellyfin_restart" "jellyfin_security" {
   triggers = {
-    plugin_version = jellyfin_plugin.jellyfin_security.version
+    plugin_version = jellyfin_plugin.jellyfin_security.installed_version
   }
 }
 

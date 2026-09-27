@@ -43,7 +43,7 @@ resource "jellyfin_plugin_configuration" "sso_auth" {
 ### Required
 
 - `configuration_json` (String) The plugin configuration as a JSON string. For SSO-Auth, this would include SAML/OIDC configuration. This allows universal configuration of any plugin.
-- `plugin_id` (String) The plugin ID (GUID).
+- `plugin_id` (String) The plugin ID (GUID), with or without dashes. Both spellings name the same plugin, so switching between them plans no change.
 
 ### Read-Only
 
@@ -56,5 +56,7 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-terraform import jellyfin_plugin_configuration.example <plugin-id>
+# A plugin configuration is imported by the plugin ID (GUID), with or without
+# dashes; jellyfin_plugin's id holds the dash-free spelling.
+terraform import jellyfin_plugin_configuration.sso_auth <plugin-id>
 ```

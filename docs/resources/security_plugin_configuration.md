@@ -28,7 +28,7 @@ resource "jellyfin_plugin" "jellyfin_security" {
 
 resource "jellyfin_restart" "jellyfin_security" {
   triggers = {
-    plugin_version = jellyfin_plugin.jellyfin_security.version
+    plugin_version = jellyfin_plugin.jellyfin_security.installed_version
   }
 }
 
@@ -70,7 +70,7 @@ variable "oidc_client_secret" {
 
 ### Required
 
-- `plugin_id` (String) The plugin ID (GUID).
+- `plugin_id` (String) The plugin ID (GUID), with or without dashes. Both spellings name the same plugin, so switching between them plans no change.
 
 ### Optional
 
@@ -232,6 +232,6 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 
 ```shell
 # The JellyfinSecurity plugin configuration is imported by the plugin ID (GUID),
-# spelled without dashes as jellyfin_plugin's id and GET /Plugins return it.
+# with or without dashes; jellyfin_plugin's id holds the dash-free spelling.
 terraform import jellyfin_security_plugin_configuration.example 94879a0cda244eb1aa06f28b4b9333b1
 ```
