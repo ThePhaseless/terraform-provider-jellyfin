@@ -338,3 +338,14 @@ func TestUnitPluginConcurrentUninstallsOfOnePluginSucceed(t *testing.T) {
 		t.Errorf("plugins left = %+v, want none", got)
 	}
 }
+
+func TestUnitPluginWaitIgnoresVersionPendingDeletion(t *testing.T) {
+	fake := &fakePluginServer{plugins: []client.InstalledPlugin{
+		{ID: bookshelfID, Name: "Bookshelf", Version: "13.0.0.0", Status: pluginStatusDeleted, CanUninstall: true},
+	}}
+	r := newFakePluginResource(t, fake)
+
+	if p, err := r.waitForPlugin(context.Background(), "Bookshelf", "13.0.0.0", time.Millisecond); err == nil {
+		t.Fatalf("waitForPlugin returned %+v, want an error while only a version pending deletion is listed", p)
+	}
+}

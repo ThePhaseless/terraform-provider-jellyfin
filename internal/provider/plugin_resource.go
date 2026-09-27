@@ -389,7 +389,9 @@ func (r *PluginResource) listedPlugins(ctx context.Context, id string) ([]client
 // lands, so a name-only match returns while the previous version is still the
 // only one on disk. Jellyfin registers the new version as soon as it is
 // written, with status "Restart" and the version it replaces "Superceded", so
-// this does not wait on a restart that has not happened yet.
+// this does not wait on a restart that has not happened yet. A version left
+// behind for deletion at the next restart is not the one this install put
+// down.
 func (r *PluginResource) waitForPlugin(ctx context.Context, name, version string, timeout time.Duration) (*client.InstalledPlugin, error) {
 	deadline := time.Now().Add(timeout)
 	var seen string
@@ -399,7 +401,7 @@ func (r *PluginResource) waitForPlugin(ctx context.Context, name, version string
 			return nil, err
 		}
 		for _, p := range plugins {
-			if p.Name != name {
+			if p.Name != name || p.Status == pluginStatusDeleted {
 				continue
 			}
 			if samePluginVersion(p.Version, version) {
