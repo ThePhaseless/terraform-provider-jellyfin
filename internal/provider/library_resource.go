@@ -373,12 +373,11 @@ func pathInfoAttributes() map[string]schema.Attribute {
 
 const networkPathRemovedMessage = "Jellyfin 10.10 removed network paths, so setting it is an error on Jellyfin 10.10 and later."
 
-// priorValueEvenIfNull plans an unset network_path with its prior value, null
-// included. Jellyfin before 10.10 keeps a network path set in its web UI, and
-// the prior value carries it into the options apply writes back. Where the
-// prior value is null, apply sends no network path and the server has none, so
-// planning it unknown, as UseStateForUnknown does, would only show it as known
-// after apply.
+// Jellyfin before 10.10 keeps a network path set in its web UI, which planning
+// the prior value carries into the options apply writes back. Unlike
+// UseStateForUnknown, a null prior value is planned too: apply then sends no
+// network path and the server has none, so leaving it unknown would only show
+// it as known after apply.
 type priorValueEvenIfNull struct{}
 
 func (priorValueEvenIfNull) Description(context.Context) string {
