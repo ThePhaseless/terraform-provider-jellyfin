@@ -92,17 +92,6 @@ func (c *Client) GetUsers(ctx context.Context) ([]User, error) {
 	return users, nil
 }
 
-// GetUserByID retrieves a user by their ID.
-func (c *Client) GetUserByID(ctx context.Context, id string) (*User, error) {
-	var user User
-	if err := c.get(ctx, fmt.Sprintf("/Users/%s", url.PathEscape(id)), func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&user)
-	}); err != nil {
-		return nil, fmt.Errorf("getting user %s: %w", id, err)
-	}
-	return &user, nil
-}
-
 // CreateUser creates a new user with the given name and password.
 func (c *Client) CreateUser(ctx context.Context, name, password string) (*User, error) {
 	body := map[string]string{
