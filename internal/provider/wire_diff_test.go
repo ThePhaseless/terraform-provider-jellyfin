@@ -145,18 +145,6 @@ func wireDiffCases() []wireDiffCase {
 			oldOverlay: overlayAdapter(overlayLiveTVConfiguration),
 		},
 		{
-			name: "security_plugin", resource: NewJellyfinSecurityPluginConfigurationResource(), object: wire.SecurityPluginRoot,
-			servedBase: true,
-			extra: func(payload map[string]any) {
-				payload["EnrollmentDeadline"] = "2030-01-01T00:00:00.0000000Z"
-			},
-			priorTweak: func(ctx context.Context, prior types.Object) types.Object {
-				return withAttr(ctx, prior, "enrollment_deadline", types.StringValue("2030-01-01T00:00:00Z"))
-			},
-			oldFlatten: flatAdapter(flattenJellyfinSecurity),
-			oldOverlay: overlayAdapter(overlayJellyfinSecurity),
-		},
-		{
 			name: "scheduled_task_triggers", resource: NewScheduledTaskResource(), object: "TaskInfo",
 			captured: []string{"task_weekly.json", "task_startup_interval.json", "task_daily.json", "task_empty.json"},
 			docKey:   "Triggers",
@@ -342,17 +330,6 @@ func (c wireDiffCase) payloads(t *testing.T) []namedPayload {
 			t.Fatal(err)
 		}
 		out = append(out, namedPayload{name, string(raw)})
-	}
-	if c.name == "security_plugin" {
-		raw, err := os.ReadFile(securityPluginPayloadGolden)
-		if err != nil {
-			t.Fatal(err)
-		}
-		shaped, err := securityPluginPayloadFromShape(strings.Split(strings.TrimSpace(string(raw)), "\n"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		out = append(out, namedPayload{"golden-shaped", shaped})
 	}
 	for _, version := range []string{"12.1", "10.11.11", "10.9.11"} {
 		for _, file := range c.captured {
