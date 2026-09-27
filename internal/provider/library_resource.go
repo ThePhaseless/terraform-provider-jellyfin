@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -31,12 +32,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 var (
 	_ resource.Resource                = &LibraryResource{}
 	_ resource.ResourceWithImportState = &LibraryResource{}
 	_ resource.ResourceWithModifyPlan  = &LibraryResource{}
+	_ wireBound                        = &LibraryResource{}
 )
 
 // NewLibraryResource creates a new library resource.
@@ -57,6 +60,56 @@ type LibraryResourceModel struct {
 	Paths          types.List           `tfsdk:"paths"`
 	LibraryOptions *LibraryOptionsModel `tfsdk:"library_options"`
 	ItemID         types.String         `tfsdk:"item_id"`
+}
+
+var libraryWire = sync.OnceValues(func() (*wire.Binding, error) {
+	opts := []wire.Option{
+		wire.Identity("id"),
+		wire.Document("LibraryOptions"),
+		wire.Key("paths", "Locations"),
+		wire.Key("library_options.extract_chapters_during_library_scan", "ExtractChapterImagesDuringLibraryScan"),
+		wire.Inverted("library_options.disabled", "Enabled"),
+		wire.Legacy("library_options.path_infos.network_path", "NetworkPath", "10.10", networkPathRemovedMessage),
+		wire.MergeByKey("library_options.type_options", "type"),
+		wire.MergeByKey("library_options.type_options.image_options", "type"),
+		wire.VersionMessage("library_options.type_options.similar_item_providers", similarItemsVersionMessage),
+		wire.VersionMessage("library_options.type_options.similar_item_provider_order", similarItemsVersionMessage),
+		wire.VersionMessage("library_options.path_infos.network_path", networkPathVersionMessage),
+	}
+	for prefix, attrs := range map[string]map[string]schema.Attribute{
+		"library_options.":            libraryOptionsAttributes(),
+		"library_options.path_infos.": pathInfoAttributes(),
+	} {
+		for name, a := range attrs {
+			if a.GetDeprecationMessage() == unsupportedLibraryOptionMessage {
+				opts = append(opts, wire.NeverSent(prefix+name, unsupportedLibraryOptionMessage))
+			}
+		}
+	}
+	return wire.Bind(schemaOf(&LibraryResource{}), "VirtualFolderInfo", opts...)
+})
+
+func (r *LibraryResource) Wire() (*wire.Binding, error) { return libraryWire() }
+
+// libraryOptionsWire writes POST /Library/VirtualFolders/LibraryOptions and
+// reads the options of the library listing; the rest of the library comes
+// from the typed folder.
+var libraryOptionsWire = sync.OnceValues(func() (*wire.Binding, error) {
+	b, err := libraryWire()
+	if err != nil {
+		return nil, err
+	}
+	return b.Document("LibraryOptions")
+})
+
+func similarItemsVersionMessage(g wire.VersionGap) (string, string) {
+	return "Similar item settings not supported",
+		fmt.Sprintf("The server runs Jellyfin %s, and similar item providers need Jellyfin 12 or later. Remove %s for this server.", g.ServerVersion, g.Path)
+}
+
+func networkPathVersionMessage(g wire.VersionGap) (string, string) {
+	return "Network paths not supported",
+		fmt.Sprintf("The server runs Jellyfin %s, and Jellyfin %s removed network paths, so the server would drop the value. Remove %s from the configuration.", g.ServerVersion, g.Until, g.Path)
 }
 
 // LibraryOptionsModel describes the typed library options.
@@ -545,6 +598,11 @@ func (r *LibraryResource) Configure(_ context.Context, req resource.ConfigureReq
 }
 
 func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	b := wireBinding(&resp.Diagnostics, libraryOptionsWire)
+	if b == nil {
+		return
+	}
+
 	// library_options is computed, so a plan without it carries an unknown
 	// object, which the pointer field of the model cannot hold. Read the
 	// attributes one by one and convert the options only when they are known.
@@ -601,14 +659,15 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 	// Track the library before its options are applied: a failure below then
 	// leaves it in state as tainted, to be replaced, rather than on the server
 	// unmanaged, where the next create would refuse the duplicate name.
-	resp.Diagnostics.Append(resp.State.Set(ctx, &LibraryResourceModel{
+	tracked := LibraryResourceModel{
 		ID:             types.StringValue(folder.Name),
 		Name:           data.Name,
 		CollectionType: flattenCollectionType(folder.CollectionType),
 		Paths:          data.Paths,
-		LibraryOptions: flattenLibraryOptions(ctx, folder.GetLibraryOptions().RawJSON, &resp.Diagnostics),
 		ItemID:         types.StringValue(folder.ItemID),
-	})...)
+	}
+	resp.Diagnostics.Append(b.FlattenInto(ctx, folder.GetLibraryOptions().RawJSON, &tracked)...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &tracked)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -619,11 +678,9 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	if data.LibraryOptions != nil {
-		if d := overlayLibraryOptions(ctx, base, data.LibraryOptions); d.HasError() {
-			resp.Diagnostics.Append(d...)
-			return
-		}
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
+		resp.Diagnostics.Append(d...)
+		return
 	}
 
 	payload, err := json.Marshal(base)
@@ -649,14 +706,17 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, updated.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues
-	got := flattenLibraryOptions(ctx, updated.GetLibraryOptions().RawJSON, &resp.Diagnostics)
-	checkSimilarItemSettingsKept(ctx, data.LibraryOptions, got, &resp.Diagnostics)
-	data.LibraryOptions = keepPlannedNulls(ctx, data.LibraryOptions, got)
+	resp.Diagnostics.Append(b.FlattenAfterApply(ctx, updated.GetLibraryOptions().RawJSON, &data)...)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *LibraryResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	b := wireBinding(&resp.Diagnostics, libraryOptionsWire)
+	if b == nil {
+		return
+	}
+
 	var data LibraryResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
@@ -679,12 +739,17 @@ func (r *LibraryResource) Read(ctx context.Context, req resource.ReadRequest, re
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, folder.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues
-	data.LibraryOptions = flattenLibraryOptions(ctx, folder.GetLibraryOptions().RawJSON, &resp.Diagnostics)
+	resp.Diagnostics.Append(b.FlattenInto(ctx, folder.GetLibraryOptions().RawJSON, &data)...)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	b := wireBinding(&resp.Diagnostics, libraryOptionsWire)
+	if b == nil {
+		return
+	}
+
 	var data LibraryResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
@@ -725,11 +790,9 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	if data.LibraryOptions != nil {
-		if d := overlayLibraryOptions(ctx, base, data.LibraryOptions); d.HasError() {
-			resp.Diagnostics.Append(d...)
-			return
-		}
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
+		resp.Diagnostics.Append(d...)
+		return
 	}
 
 	payload, err := json.Marshal(base)
@@ -755,9 +818,7 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, updated.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues
-	got := flattenLibraryOptions(ctx, updated.GetLibraryOptions().RawJSON, &resp.Diagnostics)
-	checkSimilarItemSettingsKept(ctx, data.LibraryOptions, got, &resp.Diagnostics)
-	data.LibraryOptions = keepPlannedNulls(ctx, data.LibraryOptions, got)
+	resp.Diagnostics.Append(b.FlattenAfterApply(ctx, updated.GetLibraryOptions().RawJSON, &data)...)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -826,7 +887,15 @@ func (r *LibraryResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	if req.Plan.Raw.IsNull() {
 		return
 	}
-	resp.Diagnostics.Append(r.checkServerVersion(ctx, req.Config)...)
+	b := wireBinding(&resp.Diagnostics, libraryWire)
+	if b == nil {
+		return
+	}
+	// The version check runs at plan time because a server that lacks an
+	// option drops it only after the library is created, so the failure would
+	// taint the new library and every later apply would replace it before
+	// failing again.
+	resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
 	if resp.Diagnostics.HasError() || req.State.Raw.IsNull() {
 		return
 	}
@@ -849,23 +918,6 @@ func (r *LibraryResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 		return
 	}
 	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, typeOptionsPath, planned)...)
-}
-
-// checkServerVersion runs at plan time because a server that lacks an option
-// drops it only after the library is created, so the failure would taint the
-// new library and every later apply would replace it before failing again.
-func (r *LibraryResource) checkServerVersion(ctx context.Context, config tfsdk.Config) diag.Diagnostics {
-	var diags diag.Diagnostics
-	similarItems, networkPaths := configuredVersionedAttributes(ctx, config)
-	if r.client == nil || (len(similarItems) == 0 && len(networkPaths) == 0) {
-		return diags
-	}
-	info, err := r.client.GetPublicSystemInfo(ctx)
-	if err != nil {
-		diags.AddError("Failed to read the Jellyfin version", err.Error())
-		return diags
-	}
-	return versionedAttributeErrors(info.Version, similarItems, networkPaths)
 }
 
 // configuredVersionedAttributes leaves out values unknown at plan time, which

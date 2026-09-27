@@ -41,37 +41,6 @@ var pendingWireMigration = map[string]func() (*wire.Binding, error){
 			// The typed client reads missing or null triggers as an empty list.
 			wire.ReadMissingAs("triggers", types.ListValueMust(scheduledTaskTriggerObjectType(), []attr.Value{})))
 	},
-	"jellyfin_library": func() (*wire.Binding, error) {
-		opts := []wire.Option{
-			wire.Identity("id"),
-			wire.Document("LibraryOptions"),
-			wire.Key("paths", "Locations"),
-			wire.Key("library_options.extract_chapters_during_library_scan", "ExtractChapterImagesDuringLibraryScan"),
-			wire.Inverted("library_options.disabled", "Enabled"),
-			wire.Legacy("library_options.path_infos.network_path", "NetworkPath", "10.10", networkPathRemovedMessage),
-			wire.NeverSent("library_options.path_infos.username", unsupportedLibraryOptionMessage),
-			wire.NeverSent("library_options.path_infos.password", unsupportedLibraryOptionMessage),
-			wire.MergeByKey("library_options.type_options", "type"),
-			wire.MergeByKey("library_options.type_options.image_options", "type"),
-			wire.VersionMessage("library_options.type_options.similar_item_providers", similarItemsVersionMessage),
-			wire.VersionMessage("library_options.type_options.similar_item_provider_order", similarItemsVersionMessage),
-			wire.VersionMessage("library_options.path_infos.network_path", func(g wire.VersionGap) (string, string) {
-				return "Network paths not supported",
-					fmt.Sprintf("The server runs Jellyfin %s, and Jellyfin %s removed network paths, so the server would drop the value. Remove %s from the configuration.", g.ServerVersion, g.Until, g.Path)
-			}),
-		}
-		for _, name := range []string{
-			"enable_emby_photos", "enable_photo_subtitle", "chapter_image_interval_seconds",
-			"extract_media_information_during_library_scan", "download_images_in_advance",
-			"cache_images_in_library", "enable_media_conversion", "disabled_metadata_savers",
-			"disabled_metadata_fetchers", "metadata_fetcher_order", "disabled_image_fetchers",
-			"image_fetcher_order", "save_local_thumbnail_sets", "import_missing_episodes",
-			"metadata_refresh_mode",
-		} {
-			opts = append(opts, wire.NeverSent("library_options."+name, unsupportedLibraryOptionMessage))
-		}
-		return wire.Bind(schemaOf(NewLibraryResource()), "VirtualFolderInfo", opts...)
-	},
 	"jellyfin_security_plugin_configuration": func() (*wire.Binding, error) {
 		opts := []wire.Option{
 			wire.Identity("id", "plugin_id"),
@@ -99,11 +68,6 @@ var pendingWireMigration = map[string]func() (*wire.Binding, error){
 func encodingVersionMessage(g wire.VersionGap) (string, string) {
 	return "Unsupported Jellyfin server version",
 		fmt.Sprintf("%s requires Jellyfin %s or later: the server's encoding configuration has no %s field, so it would discard the value. Remove %s from the configuration or upgrade the server.", g.Path, g.Since, g.Key, g.Path)
-}
-
-func similarItemsVersionMessage(g wire.VersionGap) (string, string) {
-	return "Similar item settings not supported",
-		fmt.Sprintf("The server runs Jellyfin %s, and similar item providers need Jellyfin 12 or later. Remove %s for this server.", g.ServerVersion, g.Path)
 }
 
 func scheduledTaskTriggerObjectType() types.ObjectType {
