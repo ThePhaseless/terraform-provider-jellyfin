@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
-	"slices"
 	"strings"
 	"testing"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
@@ -311,25 +311,62 @@ func testUnitAssertStringValidation(t *testing.T, a schema.StringAttribute, expe
 	}
 }
 
-func TestUnitDeprecatedLibraryOptionsAreNotComputed(t *testing.T) {
+func TestUnitUnsupportedLibraryOptionsAreNotComputed(t *testing.T) {
 	attrs := map[string]schema.Attribute{}
 	maps.Copy(attrs, libraryOptionsAttributes())
 	for name, a := range pathInfoAttributes() {
 		attrs["path_infos."+name] = a
 	}
 
-	var deprecated []string
+	unsupported := 0
 	for name, a := range attrs {
-		if a.GetDeprecationMessage() == "" {
+		if a.GetDeprecationMessage() != unsupportedLibraryOptionMessage {
 			continue
 		}
-		deprecated = append(deprecated, name)
+		unsupported++
 		if a.IsComputed() {
-			t.Errorf("%s is computed, so create plans show it as known after apply although Jellyfin 10.10 and later read it as null", name)
+			t.Errorf("%s is computed, so create plans show it as known after apply although it always reads as null", name)
 		}
 	}
-	if !slices.Contains(deprecated, "path_infos.network_path") || !slices.Contains(deprecated, "import_missing_episodes") {
-		t.Fatalf("deprecated attributes found: %q, want network_path and the unsupported options among them", deprecated)
+	if unsupported == 0 {
+		t.Fatal("found no unsupported library options")
+	}
+}
+
+func TestUnitNetworkPathPlansPriorValueWhenUnset(t *testing.T) {
+	a, ok := pathInfoAttributes()["network_path"].(schema.StringAttribute)
+	if !ok {
+		t.Fatal("network_path is not a string attribute")
+	}
+
+	tests := map[string]struct {
+		config, plan, state, want types.String
+	}{
+		"unset without a prior value": {
+			config: types.StringNull(), plan: types.StringUnknown(), state: types.StringNull(),
+			want: types.StringNull(),
+		},
+		"unset with a prior value": {
+			config: types.StringNull(), plan: types.StringUnknown(), state: types.StringValue("smb://nas/movies"),
+			want: types.StringValue("smb://nas/movies"),
+		},
+		"configured": {
+			config: types.StringValue("smb://nas/films"), plan: types.StringValue("smb://nas/films"), state: types.StringValue("smb://nas/movies"),
+			want: types.StringValue("smb://nas/films"),
+		},
+	}
+	for name, test := range tests {
+		resp := planmodifier.StringResponse{PlanValue: test.plan}
+		for _, m := range a.PlanModifiers {
+			m.PlanModifyString(context.Background(), planmodifier.StringRequest{
+				ConfigValue: test.config,
+				PlanValue:   resp.PlanValue,
+				StateValue:  test.state,
+			}, &resp)
+		}
+		if !resp.PlanValue.Equal(test.want) {
+			t.Errorf("%s: planned %v, want %v", name, resp.PlanValue, test.want)
+		}
 	}
 }
 

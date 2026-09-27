@@ -14,8 +14,10 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
@@ -102,6 +104,13 @@ resource "jellyfin_library" "test" {
   }
 }
 `,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectKnownValue("jellyfin_library.test",
+							tfjsonpath.New("library_options").AtMapKey("path_infos").AtSliceIndex(0).AtMapKey("network_path"),
+							knownvalue.Null()),
+					},
+				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.path_infos.0.path", "/media/movies"),
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.type_options.0.metadata_fetcher_order.1", "The Open Movie Database"),

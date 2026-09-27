@@ -356,14 +356,15 @@ func pathInfoAttributes() map[string]schema.Attribute {
 	}
 	return map[string]schema.Attribute{
 		"path": optionalString("Local path."),
-		// Not computed: Jellyfin 10.10 and later never return a network path,
-		// so on them a computed value would only show as known after apply in
-		// every plan that sets path_infos.
 		"network_path": schema.StringAttribute{
 			Description:         "Network path. " + networkPathRemovedMessage,
 			MarkdownDescription: "Network path. " + networkPathRemovedMessage,
 			Optional:            true,
+			Computed:            true,
 			DeprecationMessage:  networkPathRemovedMessage,
+			PlanModifiers: []planmodifier.String{
+				priorValueEvenIfNull{},
+			},
 		},
 		"username": unsupportedString("Username.", false),
 		"password": unsupportedString("Password.", true),
@@ -371,6 +372,28 @@ func pathInfoAttributes() map[string]schema.Attribute {
 }
 
 const networkPathRemovedMessage = "Jellyfin 10.10 removed network paths, so setting it is an error on Jellyfin 10.10 and later."
+
+// priorValueEvenIfNull plans an unset network_path with its prior value, null
+// included. Jellyfin before 10.10 keeps a network path set in its web UI, and
+// the prior value carries it into the options apply writes back. Where the
+// prior value is null, apply sends no network path and the server has none, so
+// planning it unknown, as UseStateForUnknown does, would only show it as known
+// after apply.
+type priorValueEvenIfNull struct{}
+
+func (priorValueEvenIfNull) Description(context.Context) string {
+	return "An unset value is planned as its prior value, null included."
+}
+
+func (m priorValueEvenIfNull) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (priorValueEvenIfNull) PlanModifyString(_ context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if req.ConfigValue.IsNull() && req.PlanValue.IsUnknown() {
+		resp.PlanValue = req.StateValue
+	}
+}
 
 // Attributes with no Jellyfin library option behind them stay in the schema,
 // deprecated, so configurations that leave them unset keep working until
