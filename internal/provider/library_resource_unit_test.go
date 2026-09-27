@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -398,22 +399,7 @@ func TestUnitLibraryVersionErrorsFollowServerVersion(t *testing.T) {
 	ctx := context.Background()
 	similarItems := path.Root("library_options").AtName("type_options").AtListIndex(0).AtName("similar_item_providers")
 	networkPath := path.Root("library_options").AtName("path_infos").AtListIndex(0).AtName("network_path")
-
-	root, err := libraryWire()
-	if err != nil {
-		t.Fatal(err)
-	}
-	data := testUnitLibraryRead(t, testUnitLibraryOptionsWire(t),
-		`{"TypeOptions": [{"Type": "Movie", "SimilarItemProviders": ["Local Genre/Tag"]}], "PathInfos": [{"Path": "/media", "NetworkPath": "//nas/media"}]}`)
-	obj, d := types.ObjectValueFrom(ctx, root.AttrTypes, &data)
-	if d.HasError() {
-		t.Fatal(d)
-	}
-	raw, err := obj.ToTerraformValue(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	config := tfsdk.Config{Schema: schemaOf(NewLibraryResource()), Raw: raw}
+	root, config := testUnitLibraryGatedConfig(t)
 
 	tests := map[string]struct {
 		version      string
@@ -442,6 +428,52 @@ func TestUnitLibraryVersionErrorsFollowServerVersion(t *testing.T) {
 			t.Errorf("%s: similar item error %t, network path error %t; want %t, %t", name, gotSimilar, gotNetwork, test.similarError, test.networkError)
 		}
 	}
+}
+
+// CI runs the acceptance tests on Jellyfin 12, which never reports the similar
+// item error, so no other test there sees its wording.
+func TestUnitLibraryVersionErrorWording(t *testing.T) {
+	root, config := testUnitLibraryGatedConfig(t)
+
+	diags := root.VersionErrors(context.Background(), config, func() (string, error) { return "10.11.11", nil })
+	var got []string
+	for _, d := range diags {
+		withPath, ok := d.(diag.DiagnosticWithPath)
+		if !ok {
+			t.Fatalf("diagnostic without a path: %v", d)
+		}
+		got = append(got, withPath.Path().String()+" | "+d.Summary()+" | "+d.Detail())
+	}
+	slices.Sort(got)
+	want := []string{
+		"library_options.path_infos[0].network_path | Network paths not supported | The server runs Jellyfin 10.11.11, and Jellyfin 10.10 removed network paths, so the server would drop the value. Remove library_options.path_infos[0].network_path from the configuration.",
+		"library_options.type_options[0].similar_item_providers | Similar item settings not supported | The server runs Jellyfin 10.11.11, and similar item providers need Jellyfin 12 or later. Remove library_options.type_options[0].similar_item_providers for this server.",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("version errors:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// testUnitLibraryGatedConfig configures a similar item provider and a network
+// path, which some Jellyfin versions lack.
+func testUnitLibraryGatedConfig(t *testing.T) (*wire.Binding, tfsdk.Config) {
+	t.Helper()
+	ctx := context.Background()
+	root, err := libraryWire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := testUnitLibraryRead(t, testUnitLibraryOptionsWire(t),
+		`{"TypeOptions": [{"Type": "Movie", "SimilarItemProviders": ["Local Genre/Tag"]}], "PathInfos": [{"Path": "/media", "NetworkPath": "//nas/media"}]}`)
+	obj, d := types.ObjectValueFrom(ctx, root.AttrTypes, &data)
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	raw, err := obj.ToTerraformValue(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root, tfsdk.Config{Schema: schemaOf(NewLibraryResource()), Raw: raw}
 }
 
 func testUnitTypeOptions(typ string) TypeOptionsModel {
