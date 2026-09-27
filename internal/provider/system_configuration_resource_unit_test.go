@@ -20,8 +20,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
-func TestUnitSystemConfigurationOverlay(t *testing.T) {
+func TestUnitSystemConfigurationRoundTrip(t *testing.T) {
 	ctx := context.Background()
+	b, err := systemWire()
+	if err != nil {
+		t.Fatal(err)
+	}
 	fixture := `{
 		"EnableMetrics": true,
 		"EnableNormalizedItemByNameIds": false,
@@ -106,33 +110,12 @@ func TestUnitSystemConfigurationOverlay(t *testing.T) {
 		"ServerName": "My Jellyfin Server"
 	}`
 
-	var data SystemConfigurationResourceModel
-	flattenSystemConfiguration(ctx, fixture, &data, nil)
-
+	data := readWire[SystemConfigurationResourceModel](t, b, fixture)
 	base := map[string]json.RawMessage{}
-	if d := overlaySystemConfiguration(ctx, base, &data); d.HasError() {
-		t.Fatalf("overlay: %v", d)
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
+		t.Fatalf("write: %v", d)
 	}
-
-	result, err := json.Marshal(base)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	var got map[string]interface{}
-	if err := json.Unmarshal(result, &got); err != nil {
-		t.Fatalf("unmarshal result: %v", err)
-	}
-	var want map[string]interface{}
-	if err := json.Unmarshal([]byte(fixture), &want); err != nil {
-		t.Fatalf("unmarshal fixture: %v", err)
-	}
-
-	gotJSON, _ := json.Marshal(got)
-	wantJSON, _ := json.Marshal(want)
-	if string(gotJSON) != string(wantJSON) {
-		t.Fatalf("round-trip mismatch\n got: %s\nwant: %s", gotJSON, wantJSON)
-	}
+	checkSameJSON(t, base, fixture)
 }
 
 func TestUnitSystemConfigurationEnumValidators(t *testing.T) {
