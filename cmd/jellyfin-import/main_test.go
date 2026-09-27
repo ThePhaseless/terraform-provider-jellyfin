@@ -786,9 +786,52 @@ func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
 		t.Errorf("expected 1 import block, got %d", len(imports))
 	}
 
-	// repository_url should be empty string (graceful degradation)
-	if !strings.Contains(resources[0], `repository_url = ""`) {
-		t.Errorf("expected empty repository_url: %s", resources[0])
+	if strings.Contains(resources[0], "repository_url") {
+		t.Errorf("expected no repository_url when packages are unavailable: %s", resources[0])
+	}
+}
+
+func TestGeneratePluginsResolvesOnlyTheInstalledVersion(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]interface{}{
+			{"Name": "Bundled", "Version": "12.1.0.0", "Id": "bundled-id"},
+			{"Name": "Listed", "Version": "2.0.0.0", "Id": "listed-id"},
+		})
+	})
+	mux.HandleFunc("/Packages", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]interface{}{
+			{"name": "Bundled", "versions": []map[string]interface{}{
+				{"version": "11.0.0.0", "repositoryUrl": "https://repo.example/bundled.json"},
+			}},
+			{"name": "Listed", "versions": []map[string]interface{}{
+				{"version": "3.0.0.0", "repositoryUrl": "https://repo.example/newer.json"},
+				{"version": "2.0.0.0", "repositoryUrl": "https://repo.example/listed.json"},
+			}},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	g := &generator{
+		client:    client.NewClient(server.URL, "test-key"),
+		outputDir: t.TempDir(),
+		usedNames: make(map[string]int),
+	}
+
+	_, resources, err := g.generatePlugins()
+	if err != nil {
+		t.Fatalf("generatePlugins() error: %v", err)
+	}
+	if len(resources) != 2 {
+		t.Fatalf("expected 2 resource blocks, got %d", len(resources))
+	}
+
+	if strings.Contains(resources[0], "repository_url") {
+		t.Errorf("expected no repository_url for a version the repository does not list: %s", resources[0])
+	}
+	if !strings.Contains(resources[1], `repository_url = "https://repo.example/listed.json"`) {
+		t.Errorf("expected the installed version's repository_url: %s", resources[1])
 	}
 }
 

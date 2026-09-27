@@ -290,12 +290,14 @@ func (g *generator) generatePlugins() ([]string, []string, error) {
 		name := g.uniqueName("jellyfin_plugin", sanitizeName(plugin.Name))
 		imports = append(imports, importBlock("jellyfin_plugin", name, plugin.ID))
 
-		repoURL := repoURLs[plugin.ID]
-
 		attrs := map[string]string{
-			"name":           hclString(plugin.Name),
-			"version":        hclString(plugin.Version),
-			"repository_url": hclString(repoURL),
+			"name":    hclString(plugin.Name),
+			"version": hclString(plugin.Version),
+		}
+		// Left out when unresolved: the attribute rejects an empty string,
+		// and the imported state holds null.
+		if repoURL := repoURLs[plugin.ID]; repoURL != "" {
+			attrs["repository_url"] = hclString(repoURL)
 		}
 		resources = append(resources, resourceBlock("jellyfin_plugin", name, attrs))
 	}
@@ -303,17 +305,14 @@ func (g *generator) generatePlugins() ([]string, []string, error) {
 	return imports, resources, nil
 }
 
-// resolvePluginRepoURLs tries to find the repository URL for each installed plugin
-// by cross-referencing with available packages from configured repositories.
+// resolvePluginRepoURLs finds each installed plugin's repository URL the way
+// jellyfin_plugin's Read does, so that repository_url matches the imported
+// state: only the first package with the plugin's name counts, and only its
+// entry for the installed version. Any other URL would plan a replacement.
 func (g *generator) resolvePluginRepoURLs(plugins []client.InstalledPlugin) map[string]string {
 	result := make(map[string]string)
-	for _, p := range plugins {
-		result[p.ID] = ""
-	}
-
 	packages, err := g.client.GetAvailablePackages(g.context())
 	if err != nil {
-		// Non-fatal: we'll use empty repository URLs.
 		return result
 	}
 
@@ -323,17 +322,10 @@ func (g *generator) resolvePluginRepoURLs(plugins []client.InstalledPlugin) map[
 				continue
 			}
 			for _, v := range pkg.Versions {
-				if v.Version == p.Version {
+				if v.Version == p.Version && v.RepositoryURL != "" {
 					result[p.ID] = v.RepositoryURL
 					break
 				}
-			}
-			if result[p.ID] != "" {
-				break
-			}
-			// Fallback: use a version's repository URL for this package.
-			if len(pkg.Versions) > 0 {
-				result[p.ID] = pkg.Versions[0].RepositoryURL
 			}
 			break
 		}
