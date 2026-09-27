@@ -279,10 +279,7 @@ func findWireDiffCase(t *testing.T, name string) wireDiffCase {
 
 func (c wireDiffCase) binding(t *testing.T) *wire.Binding {
 	t.Helper()
-	root, err := pendingWireMigration["jellyfin_"+c.resourceName()]()
-	if err != nil {
-		t.Fatalf("binding: %v", err)
-	}
+	root := wireOf(t, c.resource)
 	if c.document == "" {
 		return root
 	}
@@ -293,10 +290,25 @@ func (c wireDiffCase) binding(t *testing.T) *wire.Binding {
 	return b
 }
 
-func (c wireDiffCase) resourceName() string {
+// wireOf returns the binding a resource declares once it has switched to it,
+// so its old functions are compared with what it runs, and its pending
+// binding until then.
+func wireOf(t *testing.T, r resource.Resource) *wire.Binding {
+	t.Helper()
 	var meta resource.MetadataResponse
-	c.resource.Metadata(context.Background(), resource.MetadataRequest{ProviderTypeName: "jellyfin"}, &meta)
-	return strings.TrimPrefix(meta.TypeName, "jellyfin_")
+	r.Metadata(context.Background(), resource.MetadataRequest{ProviderTypeName: "jellyfin"}, &meta)
+	bind := pendingWireMigration[meta.TypeName]
+	if bound, ok := r.(wireBound); ok {
+		bind = bound.Wire
+	}
+	if bind == nil {
+		t.Fatalf("%s has no binding", meta.TypeName)
+	}
+	b, err := bind()
+	if err != nil {
+		t.Fatalf("%s binding: %v", meta.TypeName, err)
+	}
+	return b
 }
 
 func fnvInt(s string) int64 {
@@ -801,10 +813,7 @@ func diagLines(diags diag.Diagnostics) []string {
 func TestUnitWireVersionErrorsMatchTheHandWrittenChecks(t *testing.T) {
 	ctx := context.Background()
 	lib := findWireDiffCase(t, "library_options")
-	libRoot, err := pendingWireMigration["jellyfin_library"]()
-	if err != nil {
-		t.Fatal(err)
-	}
+	libRoot := wireOf(t, NewLibraryResource())
 	libDoc := lib.binding(t)
 	full := synthesize(wire.Pinned(), "LibraryOptions", lib.name, 0)
 	lib.extra(full)
@@ -868,10 +877,7 @@ func TestUnitWireVersionErrorsMatchTheHandWrittenChecks(t *testing.T) {
 // write, so the rename selects name alone.
 func TestUnitWireSelectingNameWritesLikeRenameUser(t *testing.T) {
 	ctx := context.Background()
-	root, err := pendingWireMigration["jellyfin_user"]()
-	if err != nil {
-		t.Fatal(err)
-	}
+	root := wireOf(t, NewUserResource())
 	rename, err := root.Select("name")
 	if err != nil {
 		t.Fatal(err)
