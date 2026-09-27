@@ -87,7 +87,7 @@ jobs:
         env:
           TF_ACC: "1"
         # Disable Go test caching because these tests depend on fresh Jellyfin container state.
-        run: go test -count=1 -v -cover -timeout 10m ./internal/provider/
+        run: go test -count=1 -v -cover -timeout 10m ./internal/provider/ ./internal/wire/
 
       - name: Run import tool e2e tests
         # JELLYFIN_ENDPOINT, JELLYFIN_USERNAME, and JELLYFIN_PASSWORD are set via $GITHUB_ENV in "Setup Jellyfin" step.
