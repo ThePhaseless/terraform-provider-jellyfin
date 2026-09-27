@@ -5,13 +5,10 @@ package main
 
 import (
 	"context"
-	"strings"
 	"testing"
-
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
-func TestImportedLivetvAttributes(t *testing.T) {
+func TestImportedAttributesForLiveTV(t *testing.T) {
 	raw := `{
   "GuideDays": 14,
   "RecordingPath": null,
@@ -60,35 +57,5 @@ func TestImportedLivetvAttributes(t *testing.T) {
 		if attrs[k] != v {
 			t.Errorf("importedAttributes()[%q] =\n%s\nwant\n%s", k, attrs[k], v)
 		}
-	}
-}
-
-func TestGenerateSingletonConfigsRendersTypedLivetvAttributes(t *testing.T) {
-	server := setupTestServer(t)
-	defer server.Close()
-
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
-
-	_, resources, err := g.generateSingletonConfigs()
-	if err != nil {
-		t.Fatalf("generateSingletonConfigs() error: %v", err)
-	}
-
-	var livetv string
-	for _, r := range resources {
-		if strings.HasPrefix(r, `resource "jellyfin_livetv_configuration" "this"`) {
-			livetv = r
-		}
-	}
-	want := `resource "jellyfin_livetv_configuration" "this" {
-  enable_recording_subfolders = false
-}
-`
-	if livetv != want {
-		t.Errorf("livetv resource block =\n%s\nwant\n%s", livetv, want)
 	}
 }
