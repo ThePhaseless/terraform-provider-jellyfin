@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -21,11 +22,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 var (
 	_ resource.Resource                = &NetworkingConfigurationResource{}
 	_ resource.ResourceWithImportState = &NetworkingConfigurationResource{}
+	_ resource.ResourceWithModifyPlan  = &NetworkingConfigurationResource{}
+	_ wireBound                        = &NetworkingConfigurationResource{}
 )
 
 // NewNetworkingConfigurationResource creates a new networking configuration resource.
@@ -65,6 +69,12 @@ type NetworkingConfigurationResourceModel struct {
 	RemoteIPFilter                    types.List   `tfsdk:"remote_ip_filter"`
 	IsRemoteIPFilterBlacklist         types.Bool   `tfsdk:"is_remote_ip_filter_blacklist"`
 }
+
+var networkingWire = sync.OnceValues(func() (*wire.Binding, error) {
+	return wire.Bind(schemaOf(&NetworkingConfigurationResource{}), "NetworkConfiguration", wire.Identity("id"))
+})
+
+func (r *NetworkingConfigurationResource) Wire() (*wire.Binding, error) { return networkingWire() }
 
 func (r *NetworkingConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_networking_configuration"
@@ -169,7 +179,23 @@ func (r *NetworkingConfigurationResource) ImportState(ctx context.Context, _ res
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("networking"))...)
 }
 
+// ModifyPlan gates each configured field on the Jellyfin version it needs, so
+// a field a later pin adds is checked without a change here.
+func (r *NetworkingConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	if b := wireBinding(&resp.Diagnostics, networkingWire); b != nil {
+		resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
+	}
+}
+
 func (r *NetworkingConfigurationResource) apply(ctx context.Context, data *NetworkingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+	b := wireBinding(diags, networkingWire)
+	if b == nil {
+		return
+	}
+
 	current, err := r.client.GetNetworkConfiguration(ctx)
 	if err != nil {
 		diags.AddError("Failed to read current networking configuration", err.Error())
@@ -182,8 +208,7 @@ func (r *NetworkingConfigurationResource) apply(ctx context.Context, data *Netwo
 		return
 	}
 
-	d := overlayNetworkingConfiguration(ctx, base, data)
-	if d.HasError() {
+	if d := b.OverlayModel(ctx, base, data); d.HasError() {
 		diags.Append(d...)
 		return
 	}
@@ -205,19 +230,24 @@ func (r *NetworkingConfigurationResource) apply(ctx context.Context, data *Netwo
 		return
 	}
 
-	flattenNetworkingConfiguration(ctx, updated.RawJSON, data, diags)
+	diags.Append(b.FlattenAfterApply(ctx, updated.RawJSON, data)...)
 	data.ID = types.StringValue("networking")
 	diags.Append(state.Set(ctx, data)...)
 }
 
 func (r *NetworkingConfigurationResource) read(ctx context.Context, data *NetworkingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+	b := wireBinding(diags, networkingWire)
+	if b == nil {
+		return
+	}
+
 	current, err := r.client.GetNetworkConfiguration(ctx)
 	if err != nil {
 		diags.AddError("Failed to read networking configuration", err.Error())
 		return
 	}
 
-	flattenNetworkingConfiguration(ctx, current.RawJSON, data, diags)
+	diags.Append(b.FlattenInto(ctx, current.RawJSON, data)...)
 	data.ID = types.StringValue("networking")
 	diags.Append(state.Set(ctx, data)...)
 }
