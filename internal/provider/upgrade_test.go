@@ -4,6 +4,9 @@
 package provider
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -11,8 +14,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
-// v038 is the last release that spelled every Jellyfin key by hand, before
-// the resources read and wrote through their wire bindings.
 var v038 = map[string]resource.ExternalProvider{
 	"jellyfin": {Source: providerSource, VersionConstraint: "0.3.8"},
 }
@@ -21,43 +22,82 @@ const providerSource = "ThePhaseless/jellyfin"
 
 // testAccUpgradeFromV038 applies config with provider 0.3.8 and then plans it
 // with this provider, which must find nothing to change in the state 0.3.8
-// saved or in what 0.3.8 sent Jellyfin. cleanup, when set, is applied last to
-// put back what later tests expect.
-func testAccUpgradeFromV038(t *testing.T, config, cleanup string) {
+// saved or in what 0.3.8 sent Jellyfin.
+func testAccUpgradeFromV038(t *testing.T, config string) {
 	t.Helper()
 
 	// The state 0.3.8 saves names the registry address; the in-process
 	// provider must answer to the same one for Terraform to plan it.
 	namespace, _, _ := strings.Cut(providerSource, "/")
 	t.Setenv(resource.EnvTfAccProviderNamespace, namespace)
-	steps := []resource.TestStep{
-		{
-			ExternalProviders: v038,
-			Config:            config,
-		},
-		{
-			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-			Config:                   config,
-			ConfigPlanChecks: resource.ConfigPlanChecks{
-				PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
-			},
-		},
-	}
-	if cleanup != "" {
-		steps = append(steps, resource.TestStep{
-			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-			Config:                   cleanup,
-		})
-	}
 	resource.Test(t, resource.TestCase{
 		PreCheck: func() { testAccPreCheck(t) },
-		Steps:    steps,
+		Steps: []resource.TestStep{
+			{
+				ExternalProviders: v038,
+				Config:            config,
+			},
+			{
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+				Config:                   config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+		},
+	})
+}
+
+// testAccPutBackServerConfiguration posts back, once the test ends, the
+// configuration documents and the triggers of scheduled task taskID as the
+// server serves them now. Destroying a configuration resource or a scheduled
+// task only forgets it, so without this the tests that follow would run
+// against the values this one applied.
+func testAccPutBackServerConfiguration(t *testing.T, taskID string) {
+	t.Helper()
+
+	c, ctx := testAccClient(t), t.Context()
+	system, errSystem := c.GetSystemConfiguration(ctx)
+	network, errNetwork := c.GetNetworkConfiguration(ctx)
+	encoding, errEncoding := c.GetEncodingOptions(ctx)
+	branding, errBranding := c.GetBrandingConfiguration(ctx)
+	metadata, errMetadata := c.GetMetadataConfiguration(ctx)
+	livetv, errLivetv := c.GetLiveTVConfiguration(ctx)
+	task, errTask := c.GetScheduledTask(ctx, taskID)
+	if err := errors.Join(errSystem, errNetwork, errEncoding, errBranding, errMetadata, errLivetv, errTask); err != nil {
+		t.Fatalf("reading the server configuration: %v", err)
+	}
+	triggers := []byte("[]")
+	if task.Triggers != nil {
+		var err error
+		if triggers, err = json.Marshal(task.Triggers); err != nil {
+			t.Fatalf("encoding the triggers of task %s: %v", taskID, err)
+		}
+	}
+
+	t.Cleanup(func() {
+		// t.Context() is done by now, and the provider's sign-in has signed c
+		// out, since both share a device ID.
+		c, ctx := testAccClient(t), context.Background()
+		if err := errors.Join(
+			c.UpdateSystemConfiguration(ctx, system),
+			c.UpdateNetworkConfiguration(ctx, network),
+			c.UpdateEncodingOptions(ctx, encoding),
+			c.UpdateBrandingConfiguration(ctx, branding),
+			c.UpdateMetadataConfiguration(ctx, metadata),
+			c.UpdateLiveTVConfiguration(ctx, livetv),
+			c.UpdateScheduledTaskTriggers(ctx, taskID, string(triggers)),
+		); err != nil {
+			t.Errorf("putting back the server configuration: %v", err)
+		}
 	})
 }
 
 func TestAccUpgradeFromV038(t *testing.T) {
 	testAccPreCheck(t)
 	jellyfin12 := testAccJellyfinVersionAtLeast(t, "12")
+	const taskID = "7738148ffcd07979c7ceb148e06b3aed"
+	testAccPutBackServerConfiguration(t, taskID)
 
 	encoding12, similarItems := "", ""
 	if jellyfin12 {
@@ -70,20 +110,16 @@ func TestAccUpgradeFromV038(t *testing.T) {
 	}
 
 	for _, c := range []struct {
-		name, config, cleanup string
+		name, config string
 	}{
 		{name: "branding", config: `
 resource "jellyfin_branding_configuration" "test" {
   login_disclaimer     = "tf-acc upgrade"
   custom_css           = ".skinHeader { opacity: 0.9; }"
-  splashscreen_enabled = false
+  splashscreen_enabled = true
 }
 `},
 		{name: "metadata", config: `
-resource "jellyfin_metadata_configuration" "test" {
-  use_file_creation_time_for_date_added = true
-}
-`, cleanup: `
 resource "jellyfin_metadata_configuration" "test" {
   use_file_creation_time_for_date_added = false
 }
@@ -105,7 +141,7 @@ resource "jellyfin_encoding_configuration" "test" {
 resource "jellyfin_networking_configuration" "test" {
   known_proxies                  = ["10.1.2.3"]
   remote_ip_filter               = []
-  is_remote_ip_filter_blacklist  = false
+  is_remote_ip_filter_blacklist  = true
   enable_upnp                    = false
   ignore_virtual_interfaces      = true
   virtual_interface_names        = ["veth", "docker"]
@@ -115,25 +151,21 @@ resource "jellyfin_networking_configuration" "test" {
 		{name: "system", config: `
 resource "jellyfin_system_configuration" "test" {
   server_name                        = "tf-acc-upgrade"
-  enable_normalized_item_by_name_ids = true
-  enable_case_sensitive_item_ids     = true
-  image_saving_convention            = "Legacy"
-  chapter_image_resolution           = "MatchSource"
-  sort_remove_words                  = ["the", "a", "an"]
+  enable_normalized_item_by_name_ids = false
+  enable_case_sensitive_item_ids     = false
+  image_saving_convention            = "Compatible"
+  chapter_image_resolution           = "P720"
+  sort_remove_words                  = ["the", "a"]
 
   trickplay_options = {
-    scan_behavior     = "NonBlocking"
-    process_priority  = "BelowNormal"
-    interval          = 10000
-    width_resolutions = [320]
+    scan_behavior     = "Blocking"
+    process_priority  = "Idle"
+    interval          = 5000
+    width_resolutions = [320, 640]
   }
 
-  cast_receiver_applications = [{ id = "F007D354", name = "Stable" }, { id = "6F511C87", name = "Unstable" }]
+  cast_receiver_applications = [{ id = "F007D354", name = "Stable" }]
   path_substitutions         = [{ from = "/mnt/upgrade", to = "/media/upgrade" }]
-}
-`, cleanup: `
-resource "jellyfin_system_configuration" "test" {
-  path_substitutions = []
 }
 `},
 		{name: "livetv", config: `
@@ -141,7 +173,7 @@ resource "jellyfin_livetv_configuration" "test" {
   guide_days                         = 7
   recording_path                     = "/config/tf-acc-upgrade-recordings"
   pre_padding_seconds                = 60
-  recording_post_processor_arguments = "\"{path}\""
+  recording_post_processor_arguments = "-i \"{path}\""
 
   tuner_hosts = [{
     type                 = "m3u"
@@ -159,15 +191,10 @@ resource "jellyfin_livetv_configuration" "test" {
     channel_mappings  = [{ name = "1", value = "one" }]
   }]
 }
-`, cleanup: `
-resource "jellyfin_livetv_configuration" "test" {
-  tuner_hosts       = []
-  listing_providers = []
-}
 `},
 		{name: "scheduled_task", config: `
 resource "jellyfin_scheduled_task" "test" {
-  task_id = "7738148ffcd07979c7ceb148e06b3aed"
+  task_id = "` + taskID + `"
 
   triggers = [
     {
@@ -230,7 +257,7 @@ resource "jellyfin_library" "test" {
 `},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			testAccUpgradeFromV038(t, c.config, c.cleanup)
+			testAccUpgradeFromV038(t, c.config)
 		})
 	}
 }
@@ -239,7 +266,16 @@ resource "jellyfin_library" "test" {
 // tests rather than in TestAccUpgradeFromV038.
 func TestAccSecurityPluginUpgradeFromV038(t *testing.T) {
 	testAccSecurityPluginPreCheck(t)
-	testAccInstallSecurityPlugin(t)
+	c := testAccInstallSecurityPlugin(t)
+	original, err := c.GetPluginConfiguration(t.Context(), jellyfinSecurityPluginID)
+	if err != nil {
+		t.Fatalf("reading the JellyfinSecurity configuration: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := testAccClient(t).UpdatePluginConfiguration(context.Background(), jellyfinSecurityPluginID, original); err != nil {
+			t.Errorf("putting back the JellyfinSecurity configuration: %v", err)
+		}
+	})
 
 	testAccUpgradeFromV038(t, testAccSecurityPluginConfigurationConfig(securityPluginTestValues{
 		pluginID:           jellyfinSecurityPluginID,
@@ -249,5 +285,5 @@ func TestAccSecurityPluginUpgradeFromV038(t *testing.T) {
 		enrollmentDeadline: "2032-03-04T05:06:07Z",
 		displayName:        "Upgrade IdP",
 		linkByUsername:     true,
-	}), "")
+	}))
 }
