@@ -7,12 +7,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 func TestAccUserResource(t *testing.T) {
@@ -110,6 +113,26 @@ resource "jellyfin_user" "test" {
 	})
 }
 
+func TestAccUserResourcePasswordChange(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccUserResourcePasswordConfig("firstpass123"),
+				Check:  testAccCheckUserSignIn("pwuser", "firstpass123", true),
+			},
+			{
+				Config: testAccUserResourcePasswordConfig("secondpass123"),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckUserSignIn("pwuser", "secondpass123", true),
+					testAccCheckUserSignIn("pwuser", "firstpass123", false),
+				),
+			},
+		},
+	})
+}
+
 func TestAccUserResourceParentalRating(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -199,6 +222,15 @@ resource "jellyfin_user" "test" {
   password = "testpass123"
 }
 `, name)
+}
+
+func testAccUserResourcePasswordConfig(password string) string {
+	return fmt.Sprintf(`
+resource "jellyfin_user" "test" {
+  name     = "pwuser"
+  password = %[1]q
+}
+`, password)
 }
 
 func testAccUserResourceParentalRatingConfig(rating, subRating string) string {
@@ -303,6 +335,19 @@ func testAccCheckUserSubtitleLanguage(t *testing.T, want string) resource.TestCh
 		}
 		if got := user.Configuration.SubtitleLanguagePreference; got != want {
 			return fmt.Errorf("SubtitleLanguagePreference = %q, want %q (user configuration was reset)", got, want)
+		}
+		return nil
+	}
+}
+
+func testAccCheckUserSignIn(name, password string, wantAccepted bool) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		_, err := client.NewClient(os.Getenv("JELLYFIN_ENDPOINT"), "").AuthenticateByName(context.Background(), name, password)
+		switch {
+		case wantAccepted && err != nil:
+			return fmt.Errorf("signing in as %s with password %q: %w", name, password, err)
+		case !wantAccepted && err == nil:
+			return fmt.Errorf("signing in as %s with password %q succeeded, want it rejected", name, password)
 		}
 		return nil
 	}
