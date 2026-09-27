@@ -8,7 +8,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -19,6 +21,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -158,6 +161,11 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			},
 		}
 	}
+	optionalEnum := func(desc string, values ...string) schema.StringAttribute {
+		a := optionalString(desc + " One of `" + strings.Join(values, "`, `") + "`.")
+		a.Validators = []validator.String{stringvalidator.OneOf(values...)}
+		return a
+	}
 	optionalBool := func(desc string) schema.BoolAttribute {
 		return schema.BoolAttribute{
 			Description:         desc,
@@ -234,8 +242,8 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 		"enable_hw_acceleration":           optionalBool("Enable hardware acceleration."),
 		"enable_hw_encoding":               optionalBool("Enable hardware encoding."),
 		"enable_key_frame_only_extraction": optionalBool("Enable key frame only extraction."),
-		"scan_behavior":                    optionalString("Scan behavior."),
-		"process_priority":                 optionalString("Process priority class."),
+		"scan_behavior":                    optionalEnum("Scan behavior.", "Blocking", "NonBlocking"),
+		"process_priority":                 optionalEnum("Process priority class.", "Normal", "Idle", "High", "RealTime", "BelowNormal", "AboveNormal"),
 		"interval":                         optionalInt("Interval."),
 		"width_resolutions":                optionalIntList("Width resolutions."),
 		"tile_width":                       optionalInt("Tile width."),
@@ -278,7 +286,7 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			"library_monitor_delay":                  optionalInt("Library monitor delay."),
 			"library_update_duration":                optionalInt("Library update duration."),
 			"cache_size":                             optionalInt("Cache size."),
-			"image_saving_convention":                optionalString("Image saving convention."),
+			"image_saving_convention":                optionalEnum("Image saving convention.", "Legacy", "Compatible"),
 			"metadata_options": schema.ListNestedAttribute{
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: metadataOptionsAttributes,
@@ -334,7 +342,7 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			"library_metadata_refresh_concurrency": optionalInt("Library metadata refresh concurrency."),
 			"allow_client_log_upload":              optionalBool("Allow client log upload."),
 			"dummy_chapter_duration":               optionalInt("Dummy chapter duration."),
-			"chapter_image_resolution":             optionalString("Chapter image resolution."),
+			"chapter_image_resolution":             optionalEnum("Chapter image resolution.", "MatchSource", "P144", "P240", "P360", "P480", "P720", "P1080", "P1440", "P2160"),
 			"parallel_image_encoding_limit":        optionalInt("Parallel image encoding limit."),
 			"cast_receiver_applications": schema.ListNestedAttribute{
 				NestedObject: schema.NestedAttributeObject{

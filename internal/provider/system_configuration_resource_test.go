@@ -4,6 +4,7 @@
 package provider
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -14,6 +15,16 @@ func TestAccSystemConfigurationResource(t *testing.T) {
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "jellyfin_system_configuration" "test" {
+  trickplay_options = {
+    process_priority = "idle"
+  }
+}
+`,
+				ExpectError: regexp.MustCompile(`trickplay_options\.process_priority\s+value\s+must\s+be\s+one\s+of`),
+			},
 			// Create and Read.
 			{
 				Config: testAccSystemConfigurationResourceConfig("TestServer", systemConfigurationTestValues{

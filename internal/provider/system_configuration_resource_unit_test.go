@@ -7,6 +7,13 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 func TestUnitSystemConfigurationOverlay(t *testing.T) {
@@ -70,7 +77,7 @@ func TestUnitSystemConfigurationOverlay(t *testing.T) {
 		"LibraryMetadataRefreshConcurrency": 1,
 		"AllowClientLogUpload": false,
 		"DummyChapterDuration": 0,
-		"ChapterImageResolution": "Standard",
+		"ChapterImageResolution": "MatchSource",
 		"ParallelImageEncodingLimit": 0,
 		"CastReceiverApplications": [
 			{"Id": "ABCDEF", "Name": "Example"}
@@ -79,7 +86,7 @@ func TestUnitSystemConfigurationOverlay(t *testing.T) {
 			"EnableHwAcceleration": false,
 			"EnableHwEncoding": false,
 			"EnableKeyFrameOnlyExtraction": false,
-			"ScanBehavior": "Job",
+			"ScanBehavior": "NonBlocking",
 			"ProcessPriority": "BelowNormal",
 			"Interval": 10000,
 			"WidthResolutions": [320],
@@ -121,5 +128,49 @@ func TestUnitSystemConfigurationOverlay(t *testing.T) {
 	wantJSON, _ := json.Marshal(want)
 	if string(gotJSON) != string(wantJSON) {
 		t.Fatalf("round-trip mismatch\n got: %s\nwant: %s", gotJSON, wantJSON)
+	}
+}
+
+func TestUnitSystemConfigurationEnumValidators(t *testing.T) {
+	ctx := context.Background()
+
+	var resp resource.SchemaResponse
+	(&SystemConfigurationResource{}).Schema(ctx, resource.SchemaRequest{}, &resp)
+	trickplay, ok := resp.Schema.Attributes["trickplay_options"].(rschema.SingleNestedAttribute)
+	if !ok {
+		t.Fatalf("trickplay_options attribute type = %T, want schema.SingleNestedAttribute", resp.Schema.Attributes["trickplay_options"])
+	}
+
+	for _, tc := range []struct {
+		path      path.Path
+		attribute rschema.Attribute
+		valid     string
+		wrongCase string
+	}{
+		{path.Root("image_saving_convention"), resp.Schema.Attributes["image_saving_convention"], "Compatible", "compatible"},
+		{path.Root("chapter_image_resolution"), resp.Schema.Attributes["chapter_image_resolution"], "P720", "p720"},
+		{path.Root("trickplay_options").AtName("scan_behavior"), trickplay.Attributes["scan_behavior"], "Blocking", "blocking"},
+		{path.Root("trickplay_options").AtName("process_priority"), trickplay.Attributes["process_priority"], "Idle", "idle"},
+	} {
+		attr, ok := tc.attribute.(rschema.StringAttribute)
+		if !ok {
+			t.Fatalf("%s attribute type = %T, want schema.StringAttribute", tc.path, tc.attribute)
+		}
+
+		for value, wantError := range map[string]bool{tc.valid: false, "": true, tc.wrongCase: true} {
+			var diags diag.Diagnostics
+			for _, v := range attr.Validators {
+				vresp := validator.StringResponse{}
+				v.ValidateString(ctx, validator.StringRequest{
+					Path:        tc.path,
+					ConfigValue: types.StringValue(value),
+				}, &vresp)
+				diags.Append(vresp.Diagnostics...)
+			}
+
+			if diags.HasError() != wantError {
+				t.Errorf("%s = %q: got error %t, want %t: %v", tc.path, value, diags.HasError(), wantError, diags)
+			}
+		}
 	}
 }
