@@ -31,6 +31,7 @@ const bookshelfID = "9c4e63f1031b4f25988b4f7d78a8b53e"
 type fakePluginServer struct {
 	mu          sync.Mutex
 	plugins     []client.InstalledPlugin
+	packages    []client.PackageInfo
 	inFlight    int
 	maxInFlight int
 	deletes     int
@@ -47,6 +48,12 @@ func (f *fakePluginServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		if err := json.NewEncoder(w).Encode(f.plugins); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	case r.Method == http.MethodGet && r.URL.Path == "/Packages":
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if err := json.NewEncoder(w).Encode(f.packages); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/Plugins/"),

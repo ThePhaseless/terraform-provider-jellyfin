@@ -42,6 +42,7 @@ const (
 var (
 	_ resource.Resource                = &PluginResource{}
 	_ resource.ResourceWithImportState = &PluginResource{}
+	_ resource.ResourceWithModifyPlan  = &PluginResource{}
 )
 
 // NewPluginResource creates a new plugin resource.
@@ -96,13 +97,12 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"version": schema.StringAttribute{
-				Description:         "The plugin version to install, as the repository lists it (e.g. 13.0.0.0), or a keyword: latest installs the newest version the repositories offer, and supported installs the Jellyfin Security release this provider was tested against, in the build the server accepts. A keyword is resolved only when the plugin is installed and stays in state as written; installed_version holds the result. Omitted, it installs as supported does for Jellyfin Security and as latest does for any other plugin, and then holds the installed version. Changing the value reinstalls the plugin.",
-				MarkdownDescription: "The plugin version to install, as the repository lists it (e.g. `13.0.0.0`), or a keyword: `latest` installs the newest version the repositories offer, and `supported` installs the Jellyfin Security release this provider was tested against, in the build the server accepts. A keyword is resolved only when the plugin is installed and stays in state as written; `installed_version` holds the result. Omitted, it installs as `supported` does for Jellyfin Security and as `latest` does for any other plugin, and then holds the installed version. Changing the value reinstalls the plugin.",
+				Description:         "The plugin version to install, as the repository lists it (e.g. 13.0.0.0), or a keyword: latest installs the newest version the repositories offer, and supported installs the Jellyfin Security release this provider was tested against, in the build the server accepts. A keyword is resolved only when the plugin is installed, or when it replaces another value, and stays in state as written; installed_version holds the result. Omitted, it installs as supported does for Jellyfin Security and as latest does for any other plugin, and then holds the installed version. Changing the value reinstalls the plugin, unless the new value names the installed version, as a keyword set on an imported plugin usually does; then only state changes.",
+				MarkdownDescription: "The plugin version to install, as the repository lists it (e.g. `13.0.0.0`), or a keyword: `latest` installs the newest version the repositories offer, and `supported` installs the Jellyfin Security release this provider was tested against, in the build the server accepts. A keyword is resolved only when the plugin is installed, or when it replaces another value, and stays in state as written; `installed_version` holds the result. Omitted, it installs as `supported` does for Jellyfin Security and as `latest` does for any other plugin, and then holds the installed version. Changing the value reinstalls the plugin, unless the new value names the installed version, as a keyword set on an imported plugin usually does; then only state changes.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
-					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"installed_version": schema.StringAttribute{
@@ -121,9 +121,12 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Validators: []validator.String{
 					stringvalidator.LengthAtLeast(1),
 				},
+				// An unset value is planned unknown when version changes in
+				// place and state holds no repository, which must not replace
+				// the plugin.
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplaceIfConfigured(),
 				},
 			},
 		},
@@ -261,9 +264,79 @@ func (r *PluginResource) Read(ctx context.Context, req resource.ReadRequest, res
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func (r *PluginResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
-	// All attributes require replace, so Update should never be called.
-	resp.Diagnostics.AddError("Update not supported", "Plugin updates require replacement.")
+// ModifyPlan decides whether a change of version reinstalls the plugin, which
+// needs the client to resolve a keyword.
+func (r *PluginResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
+		return
+	}
+	var plan, state PluginResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() || plan.Version.Equal(state.Version) {
+		return
+	}
+	installed := state.InstalledVersion.ValueString()
+	if state.InstalledVersion.IsNull() && !isPluginVersionKeyword(state.Version.ValueString()) {
+		installed = state.Version.ValueString()
+	}
+	keeps, err := r.versionNamesInstalled(ctx, plan.Name.ValueString(), plan.Version, installed)
+	if err != nil {
+		resp.Diagnostics.AddAttributeError(path.Root("version"), "Failed to resolve plugin version", err.Error())
+		return
+	}
+	if !keeps {
+		resp.RequiresReplace = append(resp.RequiresReplace, path.Root("version"))
+	}
+}
+
+// versionNamesInstalled reports whether version, planned to replace another
+// value, names the installed version, in which case the plugin stays as it is
+// and only state changes. A keyword is resolved as an install would resolve
+// it, so importing a plugin into a configuration that asks for the latest
+// version, when that is the version installed, does not reinstall it.
+func (r *PluginResource) versionNamesInstalled(ctx context.Context, name string, version types.String, installed string) (bool, error) {
+	if version.IsUnknown() || version.IsNull() || installed == "" {
+		return false, nil
+	}
+	want := version.ValueString()
+	if isPluginVersionKeyword(want) {
+		if r.client == nil {
+			return false, nil
+		}
+		resolved, err := r.resolvePluginVersion(ctx, name, version)
+		if err != nil {
+			return false, err
+		}
+		if resolved == "" {
+			return false, fmt.Errorf("no package named %q found in configured repositories, so %q cannot be resolved; register the plugin repository first", name, want)
+		}
+		want = resolved
+	}
+	return samePluginVersion(installed, want), nil
+}
+
+// Update only runs for a change ModifyPlan found to name the installed
+// version, so Jellyfin has nothing to change.
+func (r *PluginResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan, state PluginResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if plan.ID.IsUnknown() {
+		plan.ID = state.ID
+	}
+	if plan.InstalledVersion.IsUnknown() {
+		plan.InstalledVersion = state.InstalledVersion
+	}
+	if plan.RepositoryURL.IsUnknown() {
+		plan.RepositoryURL = state.RepositoryURL
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *PluginResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {

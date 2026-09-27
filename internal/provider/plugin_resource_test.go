@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
@@ -148,31 +151,68 @@ resource "jellyfin_plugin" "test" {
 
 func TestAccPluginResourceLatestVersion(t *testing.T) {
 	pluginName, latest := testAccFindInstallablePlugin(t, stableRepoURL)
+	config := func(version string) string {
+		return fmt.Sprintf(`
+resource "jellyfin_plugin" "test" {
+  name           = %q
+  version        = %q
+  repository_url = %q
+}
+`, pluginName, version, stableRepoURL)
+	}
+	inPlace := resource.ConfigPlanChecks{
+		PreApply: []plancheck.PlanCheck{
+			plancheck.ExpectResourceAction("jellyfin_plugin.test", plancheck.ResourceActionUpdate),
+		},
+	}
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: fmt.Sprintf(`
-resource "jellyfin_plugin" "test" {
-  name           = %q
-  version        = "latest"
-  repository_url = %q
-}
-`, pluginName, stableRepoURL),
+				Config: config("latest"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", "latest"),
 					resource.TestCheckResourceAttr("jellyfin_plugin.test", "installed_version", latest),
 				),
 			},
 			// An import has no keyword to keep, so version holds the installed
-			// version instead.
+			// version, and the keyword in the configuration, which resolves to
+			// that version, only needs to be written to state.
+			{
+				ResourceName:       "jellyfin_plugin.test",
+				ImportState:        true,
+				ImportStateKind:    resource.ImportBlockWithID,
+				ImportStateId:      pluginName,
+				ExpectNonEmptyPlan: true,
+				ImportPlanChecks: resource.ImportPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("jellyfin_plugin.test", plancheck.ResourceActionUpdate),
+						plancheck.ExpectKnownValue("jellyfin_plugin.test", tfjsonpath.New("version"), knownvalue.StringExact("latest")),
+					},
+				},
+			},
 			{
 				ResourceName:            "jellyfin_plugin.test",
 				ImportState:             true,
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"version"},
+			},
+			// Naming the installed version in place of the keyword, or the
+			// other way round, leaves the plugin installed.
+			{
+				Config:           config(latest),
+				ConfigPlanChecks: inPlace,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", latest),
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "installed_version", latest),
+				),
+			},
+			{
+				Config:           config("latest"),
+				ConfigPlanChecks: inPlace,
+				Check:            resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", "latest"),
 			},
 		},
 	})
