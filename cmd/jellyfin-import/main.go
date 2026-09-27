@@ -252,13 +252,14 @@ func (g *generator) generateUsers() ([]string, []string, error) {
 
 // libraryCollectionTypes are the collection types jellyfin_library accepts.
 var libraryCollectionTypes = map[string]bool{
-	"movies":     true,
-	"tvshows":    true,
-	"music":      true,
-	"books":      true,
-	"homevideos": true,
-	"boxsets":    true,
-	"mixed":      true,
+	"movies":      true,
+	"tvshows":     true,
+	"music":       true,
+	"musicvideos": true,
+	"books":       true,
+	"homevideos":  true,
+	"boxsets":     true,
+	"mixed":       true,
 }
 
 func (g *generator) generateLibraries() ([]string, []string, error) {
@@ -269,14 +270,16 @@ func (g *generator) generateLibraries() ([]string, []string, error) {
 
 	var imports, resources []string
 	for _, folder := range folders {
-		// collection_type is required, checked against a fixed list and
-		// replaces the library when it changes, so for these libraries no
-		// configuration both passes validation and matches the imported state.
-		switch {
-		case folder.CollectionType == "":
-			g.warnf("skipping library %q: Jellyfin lists it without a collection type, which is how the web UI creates \"Mixed Movies and Shows\" libraries, and jellyfin_library cannot import a library without one", folder.Name)
-			continue
-		case !libraryCollectionTypes[folder.CollectionType]:
+		// Jellyfin's web UI creates a mixed library without a collection type;
+		// the provider reads that as mixed and rejects "".
+		collectionType := folder.CollectionType
+		if collectionType == "" {
+			collectionType = "mixed"
+		}
+		// collection_type is checked against a fixed list and replaces the
+		// library when it changes, so for any other type no configuration both
+		// passes validation and matches the imported state.
+		if !libraryCollectionTypes[collectionType] {
 			g.warnf("skipping library %q: jellyfin_library does not accept its collection type %q", folder.Name, folder.CollectionType)
 			continue
 		}
@@ -287,13 +290,6 @@ func (g *generator) generateLibraries() ([]string, []string, error) {
 		paths := make([]string, len(folder.Locations))
 		for i, loc := range folder.Locations {
 			paths[i] = hclString(loc)
-		}
-
-		// Jellyfin's web UI creates a mixed library without a collection type;
-		// the provider reads that as mixed and rejects "".
-		collectionType := folder.CollectionType
-		if collectionType == "" {
-			collectionType = "mixed"
 		}
 
 		attrs := map[string]string{
