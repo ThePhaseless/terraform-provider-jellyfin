@@ -260,29 +260,38 @@ func TestUnitOverlayWritesTheConfiguredValues(t *testing.T) {
 	}
 }
 
-func TestUnitOverlayLeavesAnObjectsAttributesOutWhenItIsNull(t *testing.T) {
-	ctx := context.Background()
+func subDocument(t *testing.T) (*Binding, types.Object) {
+	t.Helper()
 	b := testBinding(t)
 	sub, err := b.Document("Sub")
 	if err != nil {
 		t.Fatal(err)
 	}
-	model, d := b.Flatten(ctx, doc(t, testServed), types.ObjectNull(b.AttrTypes))
+	model, d := b.Flatten(context.Background(), doc(t, testServed), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
 		t.Fatal(d)
 	}
-	subType, _ := b.AttrTypes["sub"].(types.ObjectType)
+	return sub, model
+}
+
+func TestUnitDocumentWriteLeavesTheAttributesOfANullObjectOut(t *testing.T) {
+	sub, model := subDocument(t)
+	subType, _ := sub.AttrTypes["sub"].(types.ObjectType)
 	m := with(t, model, "sub", types.ObjectNull(subType.AttrTypes))
 	m = with(t, m, "hoisted", types.BoolValue(true))
 	served := doc(t, `{"Flag": false, "Limit": 9}`)
-	if d := sub.Overlay(ctx, served, object(t, m)); d.HasError() {
+	if d := sub.Overlay(context.Background(), served, object(t, m)); d.HasError() {
 		t.Fatal(d)
 	}
 	if got, want := canonical(t, served), `{"Flag":false,"Limit":9,"Other":true}`; got != want {
 		t.Errorf("overlay wrote %s, want %s", got, want)
 	}
+}
 
-	read, d := sub.Flatten(ctx, doc(t, `{"Flag": true, "Other": false, "Limit": 1}`), object(t, with(t, m, "name", types.StringValue("kept"))))
+func TestUnitDocumentReadKeepsTheAttributesOutsideIt(t *testing.T) {
+	sub, model := subDocument(t)
+	prior := object(t, with(t, model, "name", types.StringValue("kept")))
+	read, d := sub.Flatten(context.Background(), doc(t, `{"Flag": true, "Other": false, "Limit": 1}`), prior)
 	if d.HasError() {
 		t.Fatal(d)
 	}
@@ -293,7 +302,7 @@ func TestUnitOverlayLeavesAnObjectsAttributesOutWhenItIsNull(t *testing.T) {
 	}
 }
 
-func TestUnitOverlayRejectsAnUnreadableServedList(t *testing.T) {
+func TestUnitAnUnreadableServedListFailsAMergeButNotACarry(t *testing.T) {
 	ctx := context.Background()
 	b := testBinding(t)
 	model, _ := b.Flatten(ctx, doc(t, testServed), types.ObjectNull(b.AttrTypes))
