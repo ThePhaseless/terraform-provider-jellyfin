@@ -835,6 +835,46 @@ func TestGeneratePluginsResolvesOnlyTheInstalledVersion(t *testing.T) {
 	}
 }
 
+func TestGenerateLibrariesSkipsLibrariesWithoutCollectionType(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]interface{}{
+			{"Name": "Untyped", "Locations": []string{"/media/untyped"}},
+			{"Name": "Films ${x}", "CollectionType": "movies", "Locations": []string{"/media/films"}},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	var warnings strings.Builder
+	g := &generator{
+		client:    client.NewClient(server.URL, "test-key"),
+		outputDir: t.TempDir(),
+		usedNames: make(map[string]int),
+		warnings:  &warnings,
+	}
+
+	imports, resources, err := g.generateLibraries()
+	if err != nil {
+		t.Fatalf("generateLibraries() error: %v", err)
+	}
+	if len(imports) != 1 || len(resources) != 1 {
+		t.Fatalf("expected 1 import and 1 resource block, got %d and %d", len(imports), len(resources))
+	}
+
+	wantImport := `import {
+  to = jellyfin_library.films_x
+  id = "Films $${x}"
+}
+`
+	if imports[0] != wantImport {
+		t.Errorf("import block = %q, want %q", imports[0], wantImport)
+	}
+	if !strings.Contains(warnings.String(), `"Untyped"`) {
+		t.Errorf("expected a warning naming the skipped library, got %q", warnings.String())
+	}
+}
+
 func TestImportClientUsesAPIKeyWhenProvided(t *testing.T) {
 	t.Parallel()
 

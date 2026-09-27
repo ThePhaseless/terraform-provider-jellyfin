@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -86,6 +87,7 @@ type generator struct {
 	ctx       context.Context
 	outputDir string
 	usedNames map[string]int // tracks used resource addresses to avoid collisions
+	warnings  io.Writer
 }
 
 func (g *generator) context() context.Context {
@@ -93,6 +95,14 @@ func (g *generator) context() context.Context {
 		return g.ctx
 	}
 	return context.Background()
+}
+
+func (g *generator) warnf(format string, args ...any) {
+	w := g.warnings
+	if w == nil {
+		w = os.Stderr
+	}
+	fmt.Fprintf(w, "Warning: "+format+"\n", args...)
 }
 
 // uniqueName returns a unique Terraform resource name, appending a numeric suffix on collision.
@@ -215,6 +225,14 @@ func (g *generator) generateLibraries() ([]string, []string, error) {
 
 	var imports, resources []string
 	for _, folder := range folders {
+		// jellyfin_library requires a collection type and cannot change one
+		// in place, so no configuration both passes validation and matches
+		// the imported state.
+		if folder.CollectionType == "" {
+			g.warnf("skipping library %q: it has no collection type, which jellyfin_library cannot represent", folder.Name)
+			continue
+		}
+
 		name := g.uniqueName("jellyfin_library", sanitizeName(folder.Name))
 		imports = append(imports, importBlock("jellyfin_library", name, folder.Name))
 
