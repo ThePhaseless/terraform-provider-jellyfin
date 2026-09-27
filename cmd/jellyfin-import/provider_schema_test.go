@@ -9,11 +9,15 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/provider"
@@ -88,6 +92,41 @@ func TestSingletonFieldsMatchProviderSchemas(t *testing.T) {
 				t.Error(err)
 			}
 		})
+	}
+}
+
+// TestLibraryCollectionTypesMatchProviderValidator runs every collection type
+// Jellyfin offers through jellyfin_library's validators, so the importer skips
+// exactly the libraries the provider would reject.
+func TestLibraryCollectionTypesMatchProviderValidator(t *testing.T) {
+	ctx := context.Background()
+	s, ok := providerSchemas(t)["jellyfin_library"]
+	if !ok {
+		t.Fatal("the provider has no jellyfin_library resource")
+	}
+	attr, ok := s.Attributes["collection_type"].(schema.StringAttribute)
+	if !ok {
+		t.Fatalf("jellyfin_library.collection_type is %T, want a string attribute", s.Attributes["collection_type"])
+	}
+
+	// CollectionTypeOptions in the Jellyfin 12.1 API.
+	jellyfinTypes := []string{"movies", "tvshows", "music", "musicvideos", "homevideos", "boxsets", "books", "mixed"}
+	for _, collectionType := range jellyfinTypes {
+		var resp validator.StringResponse
+		for _, v := range attr.Validators {
+			v.ValidateString(ctx, validator.StringRequest{
+				Path:        path.Root("collection_type"),
+				ConfigValue: types.StringValue(collectionType),
+			}, &resp)
+		}
+		if accepted := !resp.Diagnostics.HasError(); accepted != libraryCollectionTypes[collectionType] {
+			t.Errorf("jellyfin_library accepts %q: %t, but libraryCollectionTypes says %t", collectionType, accepted, libraryCollectionTypes[collectionType])
+		}
+	}
+	for collectionType := range libraryCollectionTypes {
+		if !slices.Contains(jellyfinTypes, collectionType) {
+			t.Errorf("libraryCollectionTypes has %q, which Jellyfin does not offer", collectionType)
+		}
 	}
 }
 

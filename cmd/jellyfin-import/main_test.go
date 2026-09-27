@@ -904,11 +904,12 @@ func TestGeneratePluginsResolvesOnlyTheInstalledVersion(t *testing.T) {
 	}
 }
 
-func TestGenerateLibrariesSkipsLibrariesWithoutCollectionType(t *testing.T) {
+func TestGenerateLibrariesSkipsCollectionTypesTheProviderRejects(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, []map[string]interface{}{
 			{"Name": "Untyped", "Locations": []string{"/media/untyped"}},
+			{"Name": "Clips", "CollectionType": "musicvideos", "Locations": []string{"/media/clips"}},
 			{"Name": "Films ${x}", "CollectionType": "movies", "Locations": []string{"/media/films"}},
 		})
 	})
@@ -939,8 +940,10 @@ func TestGenerateLibrariesSkipsLibrariesWithoutCollectionType(t *testing.T) {
 	if imports[0] != wantImport {
 		t.Errorf("import block = %q, want %q", imports[0], wantImport)
 	}
-	if !strings.Contains(warnings.String(), `"Untyped"`) {
-		t.Errorf("expected a warning naming the skipped library, got %q", warnings.String())
+	for _, skipped := range []string{`"Untyped"`, `"Clips"`} {
+		if !strings.Contains(warnings.String(), skipped) {
+			t.Errorf("expected a warning naming the skipped library %s, got %q", skipped, warnings.String())
+		}
 	}
 }
 
