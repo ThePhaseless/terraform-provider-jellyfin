@@ -12,10 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `jellyfin_encoding_configuration`: `hls_audio_seek_strategy` and `subtitle_extraction_timeout_minutes`, new in Jellyfin 12. Setting them against an older server fails with an error naming the Jellyfin 12 requirement.
 - `jellyfin_library`: `type_options[].similar_item_providers` and `similar_item_provider_order` (Jellyfin 12), and `type_options[].image_options[].min_width`. A configured `type_options` entry is now overlaid onto the server's entry for that type, so values the provider does not manage survive an apply.
 - `jellyfin_security_plugin_configuration`: `pair_device_on_second_screen_approval`, `public_base_url` and `oidc_providers[].link_existing_users_by_username`. The last existed in the plugin already, and every apply used to reset it to false.
+- `jellyfin_plugin`: computed `installed_version`, the version Jellyfin lists for the plugin.
 
 ### Changed
 
 - JellyfinSecurity support moves to the 2.6.3.1 build, which targets the Jellyfin 12 ABI. `jellyfin_plugin` resolves `supported` to the build the server can load.
+- `jellyfin_plugin`: a `latest` or `supported` keyword now stays in `version` and is resolved only when the plugin is installed; `installed_version` reports the result. Switching between a keyword and the version it names updates state in place instead of reinstalling. A keyword the repositories cannot resolve fails the plan.
+- `jellyfin_plugin_configuration` and `jellyfin_security_plugin_configuration`: `plugin_id` accepts the GUID with or without dashes, so importing with the other spelling no longer plans a replacement.
 - Enum attributes are validated at plan time against the values Jellyfin accepts: the encoding configuration's seven enums, library image option types, scheduled task trigger types and days, and the system configuration's enums. Jellyfin 12 answers an invalid or empty enum value with a 500, and older servers silently rewrite it.
 - `jellyfin_user`: `policy.max_parental_rating` and `policy.max_parental_sub_rating` are no longer computed. Setting one to null removes the limit, and in a configured `policy` block leaving one out also removes a limit set outside Terraform. Without a `policy` block the policy is still read from the server.
 - `jellyfin_user` updates users and passwords through the documented `POST /Users?userId=` and `POST /Users/Password?userId=` routes; Jellyfin 12 no longer documents the `/Users/{id}` forms.
@@ -38,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `jellyfin_scheduled_task`: omitted trigger attributes stayed unknown after apply, and changing a trigger's type re-sent the previous type's values.
 - `jellyfin_livetv_configuration`: adding, inserting or removing a tuner host or listing provider applied the neighbouring entry's settings, and pointing the recording path at an existing directory failed with an inconsistent result.
 - `jellyfin_security_plugin_configuration`: `enrollment_deadline` always failed with an inconsistent result, because the plugin rewrites the timestamp's layout.
+- `jellyfin_plugin`: `version = "latest"` or `"supported"` failed every apply with an inconsistent result. Destroying a plugin left behind a second version Jellyfin's update task had installed next to it; under `create_before_destroy` a version change removed the replacement too. Destroying a plugin Jellyfin bundles and does not let users uninstall (TMDb, OMDb, MusicBrainz and others) now succeeds with a warning instead of failing. Concurrent installs and uninstalls are serialised.
 - `jellyfin_system_configuration`: `enable_normalized_item_by_name_ids`, `enable_case_sensitive_item_ids` and `trickplay_options.process_priority` read keys Jellyfin does not send, so they were always null.
 
 ## [0.3.7] - 2026-09-15
