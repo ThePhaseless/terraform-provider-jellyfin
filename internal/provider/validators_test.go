@@ -6,6 +6,8 @@ package provider
 import (
 	"context"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -90,6 +92,38 @@ func TestUnsupportedLibraryOptionValidatorRejectsOnlySetValues(t *testing.T) {
 	for name, test := range tests {
 		if test.diags.HasError() != test.expectError {
 			t.Errorf("%s: expected error %t, got diagnostics: %v", name, test.expectError, test.diags)
+		}
+	}
+}
+
+// Jellyfin's check uses .NET's \s, which matches exactly the runes
+// unicode.IsSpace reports.
+func TestNoSurroundingWhitespaceValidatorMatchesUnicodeIsSpace(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	rejects := func(value string) bool {
+		resp := validator.StringResponse{}
+		noSurroundingWhitespaceValidator.ValidateString(ctx, validator.StringRequest{
+			Path:        path.Root("name"),
+			ConfigValue: types.StringValue(value),
+		}, &resp)
+		return resp.Diagnostics.HasError()
+	}
+
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if !utf8.ValidRune(r) {
+			continue
+		}
+		want := unicode.IsSpace(r)
+		for _, value := range []string{string(r), string(r) + "a", "a" + string(r)} {
+			if got := rejects(value); got != want {
+				t.Errorf("%+q: rejected %t, want %t", value, got, want)
+			}
+		}
+		// .NET's . does not match \n, so Jellyfin rejects it inside a name too.
+		if got := rejects("a" + string(r) + "a"); got != (r == '\n') {
+			t.Errorf("%+q: rejected %t, want %t", "a"+string(r)+"a", got, r == '\n')
 		}
 	}
 }
