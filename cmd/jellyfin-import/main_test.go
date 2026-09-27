@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -72,14 +73,13 @@ func TestResourceBlock(t *testing.T) {
 		"count": "5",
 	}
 	result := resourceBlock("jellyfin_user", "test", attrs)
-	if !strings.Contains(result, `resource "jellyfin_user" "test"`) {
-		t.Errorf("resourceBlock() missing resource header: %s", result)
-	}
-	if !strings.Contains(result, `name = "test"`) {
-		t.Errorf("resourceBlock() missing name attr: %s", result)
-	}
-	if !strings.Contains(result, "count = 5") {
-		t.Errorf("resourceBlock() missing count attr: %s", result)
+	want := `resource "jellyfin_user" "test" {
+  count = 5
+  name  = "test"
+}
+`
+	if result != want {
+		t.Errorf("resourceBlock() = %q, want %q", result, want)
 	}
 }
 
@@ -294,7 +294,7 @@ func TestGenerateUsers(t *testing.T) {
 	}
 
 	// Check admin user resource
-	if !strings.Contains(resources[0], "is_administrator = true") {
+	if !strings.Contains(resources[0], "is_administrator   = true") {
 		t.Errorf("expected admin to be administrator: %s", resources[0])
 	}
 }
@@ -386,8 +386,8 @@ func TestGenerateScheduledTasks(t *testing.T) {
   task_id = "task-id-1"
   triggers = [
     {
-      type = "IntervalTrigger"
       interval_ticks = 432000000000
+      type           = "IntervalTrigger"
     },
   ]
 }
@@ -397,58 +397,89 @@ func TestGenerateScheduledTasks(t *testing.T) {
 	}
 }
 
-func TestTriggersHCL(t *testing.T) {
+func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		raw  []string
-		want string
+		triggers string
+		want     string
 	}{
-		"no triggers": {want: "[]"},
+		"no triggers": {
+			triggers: `[]`,
+			want: `resource "jellyfin_scheduled_task" "task" {
+  task_id  = "task-id"
+  triggers = []
+}
+`,
+		},
+		"null triggers": {
+			triggers: `null`,
+			want: `resource "jellyfin_scheduled_task" "task" {
+  task_id  = "task-id"
+  triggers = []
+}
+`,
+		},
 		"interval trigger without day_of_week": {
-			raw: []string{`{"Type":"IntervalTrigger","IntervalTicks":864000000000}`},
-			want: `[
+			triggers: `[{"Type":"IntervalTrigger","IntervalTicks":864000000000}]`,
+			want: `resource "jellyfin_scheduled_task" "task" {
+  task_id = "task-id"
+  triggers = [
     {
-      type = "IntervalTrigger"
       interval_ticks = 864000000000
+      type           = "IntervalTrigger"
     },
-  ]`,
+  ]
+}
+`,
 		},
 		"daily trigger keeps max_runtime_ticks": {
-			raw: []string{`{"Type":"DailyTrigger","TimeOfDayTicks":72000000000,"MaxRuntimeTicks":144000000000}`},
-			want: `[
+			triggers: `[{"Type":"DailyTrigger","TimeOfDayTicks":72000000000,"MaxRuntimeTicks":144000000000}]`,
+			want: `resource "jellyfin_scheduled_task" "task" {
+  task_id = "task-id"
+  triggers = [
     {
-      type = "DailyTrigger"
-      time_of_day_ticks = 72000000000
       max_runtime_ticks = 144000000000
+      time_of_day_ticks = 72000000000
+      type              = "DailyTrigger"
     },
-  ]`,
+  ]
+}
+`,
 		},
 		"weekly trigger and startup trigger": {
-			raw: []string{
-				`{"Type":"WeeklyTrigger","TimeOfDayTicks":36000000000,"DayOfWeek":"Tuesday"}`,
-				`{"Type":"StartupTrigger"}`,
-			},
-			want: `[
+			triggers: `[
+				{"Type":"WeeklyTrigger","TimeOfDayTicks":36000000000,"DayOfWeek":"Tuesday"},
+				{"Type":"StartupTrigger"}
+			]`,
+			want: `resource "jellyfin_scheduled_task" "task" {
+  task_id = "task-id"
+  triggers = [
     {
-      type = "WeeklyTrigger"
+      day_of_week       = "Tuesday"
       time_of_day_ticks = 36000000000
-      day_of_week = "Tuesday"
+      type              = "WeeklyTrigger"
     },
     {
       type = "StartupTrigger"
     },
-  ]`,
+  ]
+}
+`,
 		},
 		"explicit nulls and zero ticks": {
-			raw: []string{`{"Type":"IntervalTrigger","IntervalTicks":0,"TimeOfDayTicks":null,"DayOfWeek":null,"MaxRuntimeTicks":0}`},
-			want: `[
+			triggers: `[{"Type":"IntervalTrigger","IntervalTicks":0,"TimeOfDayTicks":null,"DayOfWeek":null,"MaxRuntimeTicks":0}]`,
+			want: `resource "jellyfin_scheduled_task" "task" {
+  task_id = "task-id"
+  triggers = [
     {
-      type = "IntervalTrigger"
-      interval_ticks = 0
+      interval_ticks    = 0
       max_runtime_ticks = 0
+      type              = "IntervalTrigger"
     },
-  ]`,
+  ]
+}
+`,
 		},
 	}
 
@@ -456,17 +487,24 @@ func TestTriggersHCL(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			raw := make([]json.RawMessage, len(tc.raw))
-			for i, r := range tc.raw {
-				raw[i] = json.RawMessage(r)
-			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprintf(w, `[{"Name": "Task", "Id": "task-id", "Triggers": %s}]`, tc.triggers)
+			}))
+			defer server.Close()
 
-			got, err := triggersHCL(raw)
-			if err != nil {
-				t.Fatalf("triggersHCL() error: %v", err)
+			g := &generator{
+				client:    client.NewClient(server.URL, "test-key"),
+				usedNames: make(map[string]bool),
 			}
-			if got != tc.want {
-				t.Errorf("triggersHCL() = %q, want %q", got, tc.want)
+			_, resources, err := g.generateScheduledTasks()
+			if err != nil {
+				t.Fatalf("generateScheduledTasks() error: %v", err)
+			}
+			if len(resources) != 1 {
+				t.Fatalf("expected 1 resource block, got %d", len(resources))
+			}
+			if resources[0] != tc.want {
+				t.Errorf("resource block =\n%s\nwant\n%s", resources[0], tc.want)
 			}
 		})
 	}
@@ -503,13 +541,13 @@ func TestGenerateSingletonConfigs(t *testing.T) {
   metadata_options = [
     {
       disabled_metadata_fetchers = ["OMDb"]
-      item_type = "Movie"
+      item_type                  = "Movie"
     },
   ]
-  server_name = "Test Server"
+  server_name       = "Test Server"
   sort_remove_words = ["the", "a"]
   trickplay_options = {
-    interval = 10000
+    interval          = 10000
     width_resolutions = [320]
   }
 }
@@ -519,12 +557,12 @@ func TestGenerateSingletonConfigs(t *testing.T) {
 }
 `,
 		`resource "jellyfin_networking_configuration" "this" {
-  base_url = ""
+  base_url     = ""
   enable_https = false
 }
 `,
 		`resource "jellyfin_branding_configuration" "this" {
-  login_disclaimer = "Hi $${user}\n100%%{x}"
+  login_disclaimer     = "Hi $${user}\n100%%{x}"
   splashscreen_enabled = false
 }
 `,
@@ -568,7 +606,7 @@ func TestGeneratePlugins(t *testing.T) {
 	if !strings.Contains(imports[0], "plugin-id-1") {
 		t.Errorf("expected plugin-id-1 in import: %s", imports[0])
 	}
-	if !strings.Contains(resources[0], `name = "MusicBrainz"`) {
+	if !strings.Contains(resources[0], `name           = "MusicBrainz"`) {
 		t.Errorf("expected plugin name MusicBrainz: %s", resources[0])
 	}
 	if !strings.Contains(resources[0], `repository_url = "https://repo.jellyfin.org/files/plugin/manifest.json"`) {
@@ -594,7 +632,7 @@ func TestGeneratePluginRepositories(t *testing.T) {
 	if len(imports) != 1 {
 		t.Errorf("expected 1 import block, got %d", len(imports))
 	}
-	if !strings.Contains(resources[0], `url = "https://repo.jellyfin.org/files/plugin/manifest.json"`) {
+	if !strings.Contains(resources[0], `url     = "https://repo.jellyfin.org/files/plugin/manifest.json"`) {
 		t.Errorf("expected repo URL in resource: %s", resources[0])
 	}
 }
@@ -604,14 +642,19 @@ func TestFullGenerate(t *testing.T) {
 	defer server.Close()
 
 	outputDir := t.TempDir()
+	var warnings strings.Builder
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: outputDir,
 		usedNames: make(map[string]bool),
+		warnings:  &warnings,
 	}
 
 	if err := g.Generate(); err != nil {
 		t.Fatalf("Generate() error: %v", err)
+	}
+	if warnings.Len() > 0 {
+		t.Errorf("expected no warnings for an empty output directory, got %q", warnings.String())
 	}
 
 	// Check that files were created
@@ -679,6 +722,42 @@ func TestFullGenerate(t *testing.T) {
 		if !strings.Contains(string(resourcesContent), expected) {
 			t.Errorf("resources.tf missing %s", expected)
 		}
+	}
+
+	wantRequiredProviders := `terraform {
+  required_providers {
+    jellyfin = {
+      source = "ThePhaseless/jellyfin"
+    }
+  }
+}
+`
+	if !strings.HasPrefix(string(resourcesContent), wantRequiredProviders) {
+		t.Errorf("resources.tf should start with\n%s\ngot\n%s", wantRequiredProviders, resourcesContent)
+	}
+}
+
+func TestGenerateWarnsAboutOtherConfigurationInOutputDir(t *testing.T) {
+	server := setupTestServer(t)
+	defer server.Close()
+
+	outputDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outputDir, "versions.tf"), []byte("terraform {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var warnings strings.Builder
+	g := &generator{
+		client:    client.NewClient(server.URL, "test-key"),
+		outputDir: outputDir,
+		usedNames: make(map[string]bool),
+		warnings:  &warnings,
+	}
+
+	if err := g.Generate(); err != nil {
+		t.Fatalf("Generate() error: %v", err)
+	}
+	if !strings.Contains(warnings.String(), "required_providers") {
+		t.Errorf("expected a warning about a second required_providers entry, got %q", warnings.String())
 	}
 }
 
@@ -1032,6 +1111,31 @@ func testAccImportClient(t *testing.T) *client.Client {
 	return c
 }
 
+// testAccTerraform runs steps with this provider in-process, registered under
+// the source address the generated terraform block requires.
+func testAccTerraform(t *testing.T, steps ...resource.TestStep) {
+	t.Helper()
+
+	namespace, _, _ := strings.Cut(providerSource, "/")
+	t.Setenv(resource.EnvTfAccProviderNamespace, namespace)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"jellyfin": providerserver.NewProtocol6WithError(provider.New("test")()),
+		},
+		Steps: steps,
+	})
+}
+
+// terraformFmtCheck fails the test if terraform fmt, run from PATH, would
+// rewrite a file in dir.
+func terraformFmtCheck(t *testing.T, dir string) {
+	t.Helper()
+
+	if out, err := exec.Command("terraform", "fmt", "-check", "-diff", dir).CombinedOutput(); err != nil {
+		t.Errorf("terraform fmt -check: %v\n%s", err, out)
+	}
+}
+
 // seedEscapingFixtures gives the server strings that HCL would interpolate
 // or reject unless the importer escapes them, and puts the server back when
 // the test ends.
@@ -1110,10 +1214,11 @@ func seedEscapingFixtures(t *testing.T, c *client.Client) {
 	})
 }
 
-// TestAccImportToolE2E runs the import tool against a real Jellyfin instance
-// and plans the generated files with Terraform and this provider: the plan
-// must import every resource without changes, and each imported resource's
-// configuration must set every value its imported state holds.
+// TestAccImportToolE2E runs the import tool against a real Jellyfin instance,
+// checks the generated files with terraform fmt and plans them, as written,
+// with Terraform and this provider: the plan must import every resource
+// without changes, and each imported resource's configuration must set every
+// value its imported state holds.
 // Set JELLYFIN_ENDPOINT and either JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD to enable this test.
 func TestAccImportToolE2E(t *testing.T) {
 	outputDir := t.TempDir()
@@ -1201,21 +1306,16 @@ func TestAccImportToolE2E(t *testing.T) {
 		t.Logf("Generator warnings:\n%s", warnings.String())
 	}
 
+	terraformFmtCheck(t, outputDir)
+
 	// PlanOnly never applies, so no state is saved and nothing on the server
 	// is changed or destroyed.
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-			"jellyfin": providerserver.NewProtocol6WithError(provider.New("test")()),
-		},
-		Steps: []resource.TestStep{
-			{
-				Config:   importsStr + "\n" + resourcesStr,
-				PlanOnly: true,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PostApplyPreRefresh: []plancheck.PlanCheck{
-						configMatchesImportedState{schemas: providerSchemas(t)},
-					},
-				},
+	testAccTerraform(t, resource.TestStep{
+		Config:   importsStr + "\n" + resourcesStr,
+		PlanOnly: true,
+		ConfigPlanChecks: resource.ConfigPlanChecks{
+			PostApplyPreRefresh: []plancheck.PlanCheck{
+				configMatchesImportedState{schemas: providerSchemas(t)},
 			},
 		},
 	})

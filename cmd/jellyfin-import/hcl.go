@@ -105,11 +105,30 @@ func hclObject(attrs map[string]string, depth int) string {
 	indent := strings.Repeat("  ", depth)
 	var b strings.Builder
 	b.WriteString("{\n")
-	for _, k := range sortedKeys(attrs) {
-		fmt.Fprintf(&b, "%s  %s = %s\n", indent, k, attrs[k])
-	}
+	writeAttributes(&b, attrs, indent+"  ")
 	b.WriteString(indent + "}")
 	return b.String()
+}
+
+// writeAttributes writes attrs sorted by name, aligning the equals signs the
+// way terraform fmt does: across each run of consecutive single-line values,
+// which a multi-line value ends without being aligned itself.
+func writeAttributes(b *strings.Builder, attrs map[string]string, indent string) {
+	keys := sortedKeys(attrs)
+	for start := 0; start < len(keys); {
+		end, width := start, 0
+		for ; end < len(keys) && !strings.Contains(attrs[keys[end]], "\n"); end++ {
+			width = max(width, len(keys[end]))
+		}
+		for _, k := range keys[start:end] {
+			fmt.Fprintf(b, "%s%-*s = %s\n", indent, width, k, attrs[k])
+		}
+		if end < len(keys) {
+			fmt.Fprintf(b, "%s%s = %s\n", indent, keys[end], attrs[keys[end]])
+			end++
+		}
+		start = end
+	}
 }
 
 // hclString quotes s as an HCL string literal, escaping control characters
@@ -156,12 +175,7 @@ func importBlock(resourceType, name, id string) string {
 func resourceBlock(resourceType, name string, attrs map[string]string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "resource %s %s {\n", hclString(resourceType), hclString(name))
-
-	keys := sortedKeys(attrs)
-	for _, k := range keys {
-		fmt.Fprintf(&b, "  %s = %s\n", k, attrs[k])
-	}
-
+	writeAttributes(&b, attrs, "  ")
 	b.WriteString("}\n")
 	return b.String()
 }

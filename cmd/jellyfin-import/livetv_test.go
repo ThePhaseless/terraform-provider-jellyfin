@@ -32,23 +32,23 @@ func TestLivetvAttributes(t *testing.T) {
 		"recording_post_processor_arguments": `"\"{path}\""`,
 		"tuner_hosts": `[
     {
-      id = "t1"
+      id          = "t1"
       tuner_count = 2
-      type = "hdhomerun"
-      url = "http://tuner/"
+      type        = "hdhomerun"
+      url         = "http://tuner/"
     },
   ]`,
 		"listing_providers": `[
     {
       channel_mappings = [
         {
-          name = "1"
+          name  = "1"
           value = "one"
         },
       ]
       enabled_tuners = ["t1"]
-      id = "p1"
-      type = "SchedulesDirect"
+      id             = "p1"
+      type           = "SchedulesDirect"
     },
   ]`,
 	}

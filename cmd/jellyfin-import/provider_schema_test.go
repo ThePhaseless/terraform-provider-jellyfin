@@ -71,9 +71,10 @@ func providerSchemas(t *testing.T) map[string]schema.Schema {
 	return schemas
 }
 
-func TestSingletonFieldsMatchProviderSchemas(t *testing.T) {
+func TestFieldTablesMatchProviderSchemas(t *testing.T) {
 	schemas := providerSchemas(t)
 	tables := map[string][]hclField{
+		"jellyfin_scheduled_task":           scheduledTaskFields,
 		"jellyfin_system_configuration":     systemFields,
 		"jellyfin_encoding_configuration":   encodingFields,
 		"jellyfin_networking_configuration": networkingFields,

@@ -188,12 +188,43 @@ func (g *generator) Generate() error {
 
 	// Write resources.tf
 	if len(resources) > 0 {
-		if err := g.writeFile("resources.tf", strings.Join(resources, "\n")); err != nil {
+		content := terraformBlock + "\n" + strings.Join(resources, "\n")
+		if err := g.writeFile("resources.tf", content); err != nil {
 			return fmt.Errorf("writing resources.tf: %w", err)
 		}
+		g.warnIfOtherConfiguration()
 	}
 
 	return nil
+}
+
+// terraformBlock names the provider's registry address, without which
+// terraform init looks for hashicorp/jellyfin.
+const terraformBlock = `terraform {
+  required_providers {
+    jellyfin = {
+      source = "` + providerSource + `"
+    }
+  }
+}
+`
+
+const providerSource = "ThePhaseless/jellyfin"
+
+// warnIfOtherConfiguration points out that Terraform rejects a second
+// required_providers entry for jellyfin, which configuration already in the
+// output directory may have.
+func (g *generator) warnIfOtherConfiguration() {
+	files, err := filepath.Glob(filepath.Join(g.outputDir, "*.tf"))
+	if err != nil {
+		return
+	}
+	for _, f := range files {
+		if name := filepath.Base(f); name != "imports.tf" && name != "resources.tf" {
+			g.warnf("%s holds other Terraform files; if one of them already lists jellyfin in required_providers, remove the terraform block at the top of resources.tf", g.outputDir)
+			return
+		}
+	}
 }
 
 func (g *generator) generateUsers() ([]string, []string, error) {
@@ -384,14 +415,17 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 		name := g.uniqueName("jellyfin_scheduled_task", sanitizeName(task.Name))
 		imports = append(imports, importBlock("jellyfin_scheduled_task", name, task.ID))
 
-		triggers, err := triggersHCL(task.Triggers)
+		// triggers is required, and the Read stores an empty list for none.
+		if task.Triggers == nil {
+			task.Triggers = []json.RawMessage{}
+		}
+		raw, err := json.Marshal(task)
+		if err != nil {
+			return nil, nil, fmt.Errorf("encoding task %s: %w", task.ID, err)
+		}
+		attrs, err := hclAttributes(string(raw), scheduledTaskFields, 1)
 		if err != nil {
 			return nil, nil, fmt.Errorf("parsing triggers for task %s: %w", task.ID, err)
-		}
-
-		attrs := map[string]string{
-			"task_id":  hclString(task.ID),
-			"triggers": triggers,
 		}
 		resources = append(resources, resourceBlock("jellyfin_scheduled_task", name, attrs))
 	}
@@ -399,48 +433,17 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 	return imports, resources, nil
 }
 
-type scheduledTaskTrigger struct {
-	Type            string  `json:"Type"`
-	TimeOfDayTicks  *int64  `json:"TimeOfDayTicks"`
-	IntervalTicks   *int64  `json:"IntervalTicks"`
-	DayOfWeek       *string `json:"DayOfWeek"`
-	MaxRuntimeTicks *int64  `json:"MaxRuntimeTicks"`
-}
-
-// triggersHCL renders server triggers as the jellyfin_scheduled_task triggers list.
-// Every attribute the server returns is written out because the resource removes
-// unset trigger attributes from the server on apply.
-func triggersHCL(raw []json.RawMessage) (string, error) {
-	if len(raw) == 0 {
-		return "[]", nil
-	}
-
-	var b strings.Builder
-	b.WriteString("[\n")
-	for _, r := range raw {
-		var t scheduledTaskTrigger
-		if err := json.Unmarshal(r, &t); err != nil {
-			return "", err
-		}
-
-		b.WriteString("    {\n")
-		fmt.Fprintf(&b, "      type = %s\n", hclString(t.Type))
-		if t.TimeOfDayTicks != nil {
-			fmt.Fprintf(&b, "      time_of_day_ticks = %d\n", *t.TimeOfDayTicks)
-		}
-		if t.IntervalTicks != nil {
-			fmt.Fprintf(&b, "      interval_ticks = %d\n", *t.IntervalTicks)
-		}
-		if t.DayOfWeek != nil {
-			fmt.Fprintf(&b, "      day_of_week = %s\n", hclString(*t.DayOfWeek))
-		}
-		if t.MaxRuntimeTicks != nil {
-			fmt.Fprintf(&b, "      max_runtime_ticks = %d\n", *t.MaxRuntimeTicks)
-		}
-		b.WriteString("    },\n")
-	}
-	b.WriteString("  ]")
-	return b.String(), nil
+// Every trigger attribute the server returns is written out because the
+// resource removes unset trigger attributes from the server on apply.
+var scheduledTaskFields = []hclField{
+	{json: "Id", attr: "task_id"},
+	{json: "Triggers", attr: "triggers", nested: []hclField{
+		{json: "Type", attr: "type"},
+		{json: "TimeOfDayTicks", attr: "time_of_day_ticks"},
+		{json: "IntervalTicks", attr: "interval_ticks"},
+		{json: "DayOfWeek", attr: "day_of_week"},
+		{json: "MaxRuntimeTicks", attr: "max_runtime_ticks"},
+	}},
 }
 
 func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
