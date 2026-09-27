@@ -4,13 +4,14 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
-func TestLivetvAttributes(t *testing.T) {
+func TestImportedLivetvAttributes(t *testing.T) {
 	raw := `{
   "GuideDays": 14,
   "RecordingPath": null,
@@ -21,9 +22,9 @@ func TestLivetvAttributes(t *testing.T) {
   "RecordingPostProcessorArguments": "\"{path}\""
 }`
 
-	attrs, err := hclAttributes(raw, livetvFields, 1)
+	attrs, err := importedAttributes(context.Background(), "jellyfin_livetv_configuration", "livetv", raw)
 	if err != nil {
-		t.Fatalf("hclAttributes() error: %v", err)
+		t.Fatalf("importedAttributes() error: %v", err)
 	}
 
 	want := map[string]string{
@@ -53,11 +54,11 @@ func TestLivetvAttributes(t *testing.T) {
   ]`,
 	}
 	if len(attrs) != len(want) {
-		t.Errorf("hclAttributes() keys = %v, want %d keys", sortedKeys(attrs), len(want))
+		t.Errorf("importedAttributes() keys = %v, want %d keys", sortedKeys(attrs), len(want))
 	}
 	for k, v := range want {
 		if attrs[k] != v {
-			t.Errorf("hclAttributes()[%q] =\n%s\nwant\n%s", k, attrs[k], v)
+			t.Errorf("importedAttributes()[%q] =\n%s\nwant\n%s", k, attrs[k], v)
 		}
 	}
 }

@@ -233,6 +233,8 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/System/Configuration/encoding", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, map[string]interface{}{
 			"EncodingThreadCount": -1,
+			"DownMixAudioBoost":   2.5,
+			"TonemappingPeak":     100,
 		})
 	})
 
@@ -584,7 +586,9 @@ func TestGenerateSingletonConfigs(t *testing.T) {
 }
 `,
 		`resource "jellyfin_encoding_configuration" "this" {
+  down_mix_audio_boost  = 2.5
   encoding_thread_count = -1
+  tonemapping_peak      = 100
 }
 `,
 		`resource "jellyfin_networking_configuration" "this" {

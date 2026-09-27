@@ -418,17 +418,16 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 		name := g.uniqueName("jellyfin_scheduled_task", sanitizeName(task.Name))
 		imports = append(imports, importBlock("jellyfin_scheduled_task", name, task.ID))
 
-		// triggers is required, and the Read stores an empty list for none.
-		if task.Triggers == nil {
-			task.Triggers = []json.RawMessage{}
-		}
 		raw, err := json.Marshal(task)
 		if err != nil {
 			return nil, nil, fmt.Errorf("encoding task %s: %w", task.ID, err)
 		}
-		attrs, err := hclAttributes(string(raw), scheduledTaskFields, 1)
+		// Every trigger attribute the server returns is written out, because
+		// the resource removes unset trigger attributes from the server on
+		// apply.
+		attrs, err := importedAttributes(g.context(), "jellyfin_scheduled_task", task.ID, string(raw))
 		if err != nil {
-			return nil, nil, fmt.Errorf("parsing triggers for task %s: %w", task.ID, err)
+			return nil, nil, fmt.Errorf("formatting task %s: %w", task.ID, err)
 		}
 		resources = append(resources, resourceBlock("jellyfin_scheduled_task", name, attrs))
 	}
@@ -436,62 +435,48 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 	return imports, resources, nil
 }
 
-// Every trigger attribute the server returns is written out because the
-// resource removes unset trigger attributes from the server on apply.
-var scheduledTaskFields = []hclField{
-	{json: "Id", attr: "task_id"},
-	{json: "Triggers", attr: "triggers", nested: []hclField{
-		{json: "Type", attr: "type"},
-		{json: "TimeOfDayTicks", attr: "time_of_day_ticks"},
-		{json: "IntervalTicks", attr: "interval_ticks"},
-		{json: "DayOfWeek", attr: "day_of_week"},
-		{json: "MaxRuntimeTicks", attr: "max_runtime_ticks"},
-	}},
-}
-
 func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	ctx := g.context()
 	singletons := []struct {
-		name   string
-		fields []hclField
-		read   func() (string, error)
+		name string
+		read func() (string, error)
 	}{
-		{"system", systemFields, func() (string, error) {
+		{"system", func() (string, error) {
 			c, err := g.client.GetSystemConfiguration(ctx)
 			if err != nil {
 				return "", err
 			}
 			return c.RawJSON, nil
 		}},
-		{"encoding", encodingFields, func() (string, error) {
+		{"encoding", func() (string, error) {
 			c, err := g.client.GetEncodingOptions(ctx)
 			if err != nil {
 				return "", err
 			}
 			return c.RawJSON, nil
 		}},
-		{"networking", networkingFields, func() (string, error) {
+		{"networking", func() (string, error) {
 			c, err := g.client.GetNetworkConfiguration(ctx)
 			if err != nil {
 				return "", err
 			}
 			return c.RawJSON, nil
 		}},
-		{"branding", brandingFields, func() (string, error) {
+		{"branding", func() (string, error) {
 			c, err := g.client.GetBrandingConfiguration(ctx)
 			if err != nil {
 				return "", err
 			}
 			return c.RawJSON, nil
 		}},
-		{"livetv", livetvFields, func() (string, error) {
+		{"livetv", func() (string, error) {
 			c, err := g.client.GetLiveTVConfiguration(ctx)
 			if err != nil {
 				return "", err
 			}
 			return c.RawJSON, nil
 		}},
-		{"metadata", metadataFields, func() (string, error) {
+		{"metadata", func() (string, error) {
 			c, err := g.client.GetMetadataConfiguration(ctx)
 			if err != nil {
 				return "", err
@@ -506,11 +491,11 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 		if err != nil {
 			return nil, nil, fmt.Errorf("getting %s configuration: %w", s.name, err)
 		}
-		attrs, err := hclAttributes(raw, s.fields, 1)
+		resourceType := "jellyfin_" + s.name + "_configuration"
+		attrs, err := importedAttributes(ctx, resourceType, s.name, raw)
 		if err != nil {
 			return nil, nil, fmt.Errorf("formatting %s configuration: %w", s.name, err)
 		}
-		resourceType := "jellyfin_" + s.name + "_configuration"
 		imports = append(imports, importBlock(resourceType, "this", s.name))
 		resources = append(resources, resourceBlock(resourceType, "this", attrs))
 	}
