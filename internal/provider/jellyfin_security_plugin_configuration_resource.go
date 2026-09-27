@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -25,8 +26,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 const jellyfinSecurityPluginID = "94879a0c-da24-4eb1-aa06-f28b4b9333b1"
@@ -36,6 +39,7 @@ var isoDateTimePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2
 var (
 	_ resource.Resource                = &JellyfinSecurityPluginConfigurationResource{}
 	_ resource.ResourceWithImportState = &JellyfinSecurityPluginConfigurationResource{}
+	_ wireBound                        = &JellyfinSecurityPluginConfigurationResource{}
 )
 
 // JellyfinSecurityPluginConfigurationResource defines the resource implementation.
@@ -129,6 +133,37 @@ type JellyfinSecurityPluginConfigurationResourceModel struct {
 	OnboardingPasswordRequireLowercase types.Bool   `tfsdk:"onboarding_password_require_lowercase"`
 	OnboardingPasswordRequireDigit     types.Bool   `tfsdk:"onboarding_password_require_digit"`
 	OnboardingPasswordRequireSymbol    types.Bool   `tfsdk:"onboarding_password_require_symbol"`
+}
+
+// The plugin's golden has no older release to derive a Since from, so this
+// binding gates nothing on the plugin's version. No attribute claims the
+// plugin's RequireForAllUsers, a legacy alias it keeps for
+// EnforcementScope=All, so every write sends it back as served.
+var securityPluginWire = sync.OnceValues(func() (*wire.Binding, error) {
+	opts := []wire.Option{
+		wire.Identity("id", "plugin_id"),
+		wire.Delimited("oidc_providers.scopes", " "),
+		wire.Delimited("oidc_providers.acr_values", " "),
+		wire.Delimited("oidc_providers.allowed_groups", ","),
+		wire.Delimited("oidc_providers.admin_groups", ","),
+		wire.Delimited("oidc_providers.additional_allowed_cidrs", ","),
+		wire.Delimited("oidc_providers.role_library_mappings.library_ids", ","),
+		wire.CarryServed("oidc_providers", "CreatedAt", "id"),
+		wire.WithCodec("enrollment_deadline", sameInstantCodec{}),
+	}
+	// The plugin leaves these out when false.
+	for _, name := range []string{
+		"allow_indefinite_trust", "onboarding_password_require_uppercase",
+		"onboarding_password_require_lowercase", "onboarding_password_require_digit",
+		"onboarding_password_require_symbol",
+	} {
+		opts = append(opts, wire.ReadMissingAs(name, types.BoolValue(false)))
+	}
+	return wire.Bind(schemaOf(&JellyfinSecurityPluginConfigurationResource{}), wire.SecurityPluginRoot, opts...)
+})
+
+func (r *JellyfinSecurityPluginConfigurationResource) Wire() (*wire.Binding, error) {
+	return securityPluginWire()
 }
 
 // OidcProviderModel describes an OIDC provider configuration.
@@ -563,6 +598,11 @@ func (r *JellyfinSecurityPluginConfigurationResource) checkJellyfinSecurityVersi
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) apply(ctx context.Context, data *JellyfinSecurityPluginConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+	b := wireBinding(diags, securityPluginWire)
+	if b == nil {
+		return
+	}
+
 	current, err := r.client.GetPluginConfiguration(ctx, data.PluginID.ValueString())
 	if err != nil {
 		diags.AddError("Failed to read JellyfinSecurity plugin configuration", err.Error())
@@ -575,8 +615,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) apply(ctx context.Context,
 		return
 	}
 
-	d := overlayJellyfinSecurity(ctx, base, data)
-	if d.HasError() {
+	if d := b.OverlayModel(ctx, base, data); d.HasError() {
 		diags.Append(d...)
 		return
 	}
@@ -598,13 +637,18 @@ func (r *JellyfinSecurityPluginConfigurationResource) apply(ctx context.Context,
 		return
 	}
 
-	flattenJellyfinSecurity(ctx, updated, data, diags)
+	diags.Append(b.FlattenAfterApply(ctx, updated, data)...)
 	data.ID = data.PluginID
 
 	diags.Append(state.Set(ctx, data)...)
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) read(ctx context.Context, data *JellyfinSecurityPluginConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+	b := wireBinding(diags, securityPluginWire)
+	if b == nil {
+		return
+	}
+
 	current, err := r.client.GetPluginConfiguration(ctx, data.PluginID.ValueString())
 	if err != nil {
 		if client.IsNotFound(err) {
@@ -615,7 +659,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) read(ctx context.Context, 
 		return
 	}
 
-	flattenJellyfinSecurity(ctx, current, data, diags)
+	diags.Append(b.FlattenInto(ctx, current, data)...)
 	data.ID = data.PluginID
 
 	diags.Append(state.Set(ctx, data)...)
@@ -1008,6 +1052,30 @@ func sameInstant(a, b types.String) bool {
 	}
 	bt, ok := parseISODateTime(b.ValueString())
 	return ok && at.Equal(bt)
+}
+
+// sameInstantCodec reads a date-time back as its prior value when both name
+// the same instant; see keepSameInstant.
+type sameInstantCodec struct{}
+
+func (sameInstantCodec) String() string { return "same-instant" }
+
+func (sameInstantCodec) Encode(_ context.Context, v attr.Value) (json.RawMessage, diag.Diagnostics) {
+	s, _ := v.(basetypes.StringValue)
+	b, err := json.Marshal(s.ValueString())
+	if err != nil {
+		return nil, diag.Diagnostics{diag.NewErrorDiagnostic("Failed to encode a date-time", err.Error())}
+	}
+	return b, nil
+}
+
+func (sameInstantCodec) Decode(_ context.Context, raw json.RawMessage, prior attr.Value, _ attr.Type) (attr.Value, diag.Diagnostics) {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return types.StringNull(), nil
+	}
+	p, _ := prior.(basetypes.StringValue)
+	return keepSameInstant(p, types.StringValue(s)), nil
 }
 
 // sameInstantPlanModifier plans the prior value when the configuration names

@@ -4,14 +4,10 @@
 package provider
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
-	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
@@ -41,28 +37,6 @@ var pendingWireMigration = map[string]func() (*wire.Binding, error){
 			// The typed client reads missing or null triggers as an empty list.
 			wire.ReadMissingAs("triggers", types.ListValueMust(scheduledTaskTriggerObjectType(), []attr.Value{})))
 	},
-	"jellyfin_security_plugin_configuration": func() (*wire.Binding, error) {
-		opts := []wire.Option{
-			wire.Identity("id", "plugin_id"),
-			wire.Delimited("oidc_providers.scopes", " "),
-			wire.Delimited("oidc_providers.acr_values", " "),
-			wire.Delimited("oidc_providers.allowed_groups", ","),
-			wire.Delimited("oidc_providers.admin_groups", ","),
-			wire.Delimited("oidc_providers.additional_allowed_cidrs", ","),
-			wire.Delimited("oidc_providers.role_library_mappings.library_ids", ","),
-			wire.CarryServed("oidc_providers", "CreatedAt", "id"),
-			wire.WithCodec("enrollment_deadline", sameInstantCodec{}),
-		}
-		// The plugin leaves these out when false.
-		for _, name := range []string{
-			"allow_indefinite_trust", "onboarding_password_require_uppercase",
-			"onboarding_password_require_lowercase", "onboarding_password_require_digit",
-			"onboarding_password_require_symbol",
-		} {
-			opts = append(opts, wire.ReadMissingAs(name, types.BoolValue(false)))
-		}
-		return wire.Bind(schemaOf(NewJellyfinSecurityPluginConfigurationResource()), wire.SecurityPluginRoot, opts...)
-	},
 }
 
 func encodingVersionMessage(g wire.VersionGap) (string, string) {
@@ -75,28 +49,4 @@ func scheduledTaskTriggerObjectType() types.ObjectType {
 	lt, _ := attrs.(types.ListType)
 	ot, _ := lt.ElemType.(types.ObjectType)
 	return ot
-}
-
-// sameInstantCodec reads a date-time back as its prior value when both name
-// the same instant; see keepSameInstant.
-type sameInstantCodec struct{}
-
-func (sameInstantCodec) String() string { return "same-instant" }
-
-func (sameInstantCodec) Encode(_ context.Context, v attr.Value) (json.RawMessage, diag.Diagnostics) {
-	s, _ := v.(basetypes.StringValue)
-	b, err := json.Marshal(s.ValueString())
-	if err != nil {
-		return nil, diag.Diagnostics{diag.NewErrorDiagnostic("Failed to encode a date-time", err.Error())}
-	}
-	return b, nil
-}
-
-func (sameInstantCodec) Decode(_ context.Context, raw json.RawMessage, prior attr.Value, _ attr.Type) (attr.Value, diag.Diagnostics) {
-	var s string
-	if json.Unmarshal(raw, &s) != nil {
-		return types.StringNull(), nil
-	}
-	p, _ := prior.(basetypes.StringValue)
-	return keepSameInstant(p, types.StringValue(s)), nil
 }
