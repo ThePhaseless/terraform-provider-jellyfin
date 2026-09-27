@@ -225,8 +225,8 @@ func (g *generator) generateLibraries() ([]string, []string, error) {
 			paths[i] = quote(loc)
 		}
 
-		// The provider rejects an empty collection type and reads a library
-		// without one, as Jellyfin's web UI creates a mixed library, as mixed.
+		// Jellyfin's web UI creates a mixed library without a collection type;
+		// the provider reads that as mixed and rejects "".
 		collectionType := folder.CollectionType
 		if collectionType == "" {
 			collectionType = "mixed"
