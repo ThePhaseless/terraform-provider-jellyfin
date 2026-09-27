@@ -356,7 +356,27 @@ resource "jellyfin_library" "test" {
   }
 }
 `,
-				ExpectError: regexp.MustCompile(`Jellyfin\s+10\.11\s+removed\s+network\s+paths[\s\S]*Remove\s+library_options\.path_infos\[0\]\.network_path`),
+				ExpectError: testAccLibraryNetworkPathRejected,
+			},
+			// A value unknown at plan time is checked when Terraform plans again
+			// during apply.
+			{
+				Config: `
+resource "terraform_data" "network_path" {
+  input = "smb://nas/movies"
+}
+
+resource "jellyfin_library" "test" {
+  name            = "TestOptions"
+  collection_type = "movies"
+  paths           = ["/media/movies"]
+
+  library_options = {
+    path_infos = [{ path = "/media/movies", network_path = terraform_data.network_path.output }]
+  }
+}
+`,
+				ExpectError: testAccLibraryNetworkPathRejected,
 			},
 			{
 				SkipFunc: func() (bool, error) { return similarItemsSupported, nil },
@@ -376,6 +396,11 @@ resource "jellyfin_library" "test" {
 			// disabled and extract_chapters_during_library_scan are stored as
 			// Jellyfin's Enabled and ExtractChapterImagesDuringLibraryScan.
 			{
+				PreConfig: func() {
+					if err := testAccCheckNoLibraryNamed(t, "TestOptions")(nil); err != nil {
+						t.Fatalf("a rejected configuration created the library: %v", err)
+					}
+				},
 				Config: `
 resource "jellyfin_library" "test" {
   name            = "TestOptions"
@@ -421,6 +446,8 @@ resource "jellyfin_library" "test" {
   }
 }
 `
+
+var testAccLibraryNetworkPathRejected = regexp.MustCompile(`Jellyfin\s+10\.11\s+removed\s+network\s+paths[\s\S]*Remove\s+library_options\.path_infos\[0\]\.network_path`)
 
 // testAccLibrarySimilarItemsRejected matches the plan-time error only, not the
 // one reported after apply when the server drops the settings.

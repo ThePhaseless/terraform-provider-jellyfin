@@ -354,13 +354,19 @@ func pathInfoAttributes() map[string]schema.Attribute {
 			Validators:          []validator.String{unsupportedLibraryOptionValidator{}},
 		}
 	}
-	networkPath := optionalString("Network path. " + networkPathRemovedMessage)
-	networkPath.DeprecationMessage = networkPathRemovedMessage
 	return map[string]schema.Attribute{
-		"path":         optionalString("Local path."),
-		"network_path": networkPath,
-		"username":     unsupportedString("Username.", false),
-		"password":     unsupportedString("Password.", true),
+		"path": optionalString("Local path."),
+		// Not computed: Jellyfin 10.11 and later never return a network path,
+		// so on them a computed value would only show as known after apply in
+		// every plan that sets path_infos.
+		"network_path": schema.StringAttribute{
+			Description:         "Network path. " + networkPathRemovedMessage,
+			MarkdownDescription: "Network path. " + networkPathRemovedMessage,
+			Optional:            true,
+			DeprecationMessage:  networkPathRemovedMessage,
+		},
+		"username": unsupportedString("Username.", false),
+		"password": unsupportedString("Password.", true),
 	}
 }
 
@@ -814,7 +820,8 @@ func (r *LibraryResource) checkServerVersion(ctx context.Context, config tfsdk.C
 }
 
 // configuredVersionedAttributes leaves out values unknown at plan time, which
-// may still turn out null.
+// may still turn out null. Terraform plans again during apply, once they are
+// known, so they are checked before the library is written.
 func configuredVersionedAttributes(ctx context.Context, config tfsdk.Config) (similarItems, networkPaths []path.Path) {
 	optionsPath := path.Root("library_options")
 	isSet := func(v attr.Value) bool { return !v.IsNull() && !v.IsUnknown() }
@@ -1280,8 +1287,8 @@ func keepPlannedNulls(ctx context.Context, planned, got *LibraryOptionsModel) *L
 // checkSimilarItemSettingsKept exists because Jellyfin 10.x has no similar
 // item settings and drops them, and Terraform's own inconsistent-result error
 // cannot name the attribute: library_options holds a sensitive value.
-// ModifyPlan rejects them earlier, but not values unknown at plan time or
-// planned from the prior state, such as after a server downgrade.
+// ModifyPlan rejects configured values earlier, but not values planned from
+// the prior state, such as after a server downgrade.
 func checkSimilarItemSettingsKept(ctx context.Context, planned, got *LibraryOptionsModel, diags *diag.Diagnostics) {
 	if planned == nil || got == nil || planned.TypeOptions.IsNull() || planned.TypeOptions.IsUnknown() || got.TypeOptions.IsNull() || got.TypeOptions.IsUnknown() {
 		return

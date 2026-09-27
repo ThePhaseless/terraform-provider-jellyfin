@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -310,25 +311,25 @@ func testUnitAssertStringValidation(t *testing.T, a schema.StringAttribute, expe
 	}
 }
 
-func TestUnitUnsupportedLibraryOptionsAreNotComputed(t *testing.T) {
+func TestUnitDeprecatedLibraryOptionsAreNotComputed(t *testing.T) {
 	attrs := map[string]schema.Attribute{}
 	maps.Copy(attrs, libraryOptionsAttributes())
 	for name, a := range pathInfoAttributes() {
 		attrs["path_infos."+name] = a
 	}
 
-	unsupported := 0
+	var deprecated []string
 	for name, a := range attrs {
-		if a.GetDeprecationMessage() != unsupportedLibraryOptionMessage {
+		if a.GetDeprecationMessage() == "" {
 			continue
 		}
-		unsupported++
+		deprecated = append(deprecated, name)
 		if a.IsComputed() {
-			t.Errorf("%s is computed, so create plans show it as known after apply although it always reads as null", name)
+			t.Errorf("%s is computed, so create plans show it as known after apply although Jellyfin 10.11 and later read it as null", name)
 		}
 	}
-	if unsupported == 0 {
-		t.Fatal("found no unsupported library options")
+	if !slices.Contains(deprecated, "path_infos.network_path") || !slices.Contains(deprecated, "import_missing_episodes") {
+		t.Fatalf("deprecated attributes found: %q, want network_path and the unsupported options among them", deprecated)
 	}
 }
 
