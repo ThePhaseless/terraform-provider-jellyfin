@@ -23,11 +23,18 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
+// The goldens live next to internal/wire, which embeds them.
 const (
-	jellyfinAPISchemaGolden     = "testdata/jellyfin_api_schema.golden"
-	securityPluginPayloadGolden = "testdata/security_plugin_config_schema.golden"
+	jellyfinAPISchemaGolden      = "../wire/schema/jellyfin_api_schema.golden"
+	jellyfinAPISchemaFloorGolden = "../wire/schema/jellyfin_api_schema_floor.golden"
+	securityPluginPayloadGolden  = "../wire/schema/security_plugin_config_schema.golden"
+	supportedJellyfinEnvFile     = "internal/provider/supported_jellyfin_version.env"
+	floorJellyfinEnvFile         = "internal/wire/schema/floor.env"
 )
 
 const (
@@ -39,8 +46,12 @@ const (
 // maintainer: what the lines record, which acceptance test regenerates them
 // and with what environment, and what has to change along with them.
 type schemaGuard struct {
-	golden   string
-	test     string
+	golden string
+	test   string
+	// envFile is the docker compose env file that picks the Jellyfin release
+	// the golden records.
+	envFile string
+	// ciStep is empty for a golden CI does not check.
 	ciStep   string
 	env      string
 	records  string
@@ -48,23 +59,45 @@ type schemaGuard struct {
 }
 
 var jellyfinAPISchemaGuard = schemaGuard{
-	golden: jellyfinAPISchemaGolden,
-	test:   "TestAccJellyfinAPISchemaGuard",
-	ciStep: "Run acceptance tests",
+	golden:  jellyfinAPISchemaGolden,
+	test:    "TestAccJellyfinAPISchemaGuard",
+	envFile: supportedJellyfinEnvFile,
+	ciStep:  "Run acceptance tests",
 	records: `Each line is an endpoint internal/client calls ("op", or "undocumented" when
 the server's OpenAPI document does not describe it) or a property of a schema
 those endpoints send or return ("schema"), as that document describes it. The
 golden changes when a Jellyfin release changes one of those, or when
 internal/client starts or stops calling an endpoint.`,
-	followUp: `A changed line can break a resource even though the test passes again, so fix
-the affected resources in the same change.`,
+	followUp: `The provider reads this golden at run time, through internal/wire, for the JSON
+key of each attribute, so a changed line can change what it sends although the
+test passes again. Run TestUnitWireBindings, review the diff of
+internal/provider/testdata/wire_bindings.golden it reports, and fix the
+affected resources in the same change.`,
+}
+
+var jellyfinAPISchemaFloorGuard = schemaGuard{
+	golden:  jellyfinAPISchemaFloorGolden,
+	test:    "TestAccJellyfinAPISchemaFloorGuard",
+	envFile: floorJellyfinEnvFile,
+	env:     "SCHEMA_GUARD_FLOOR=1",
+	records: `The lines of jellyfin_api_schema.golden, reduced the same way from the OpenAPI
+document of the older Jellyfin release that ` + floorJellyfinEnvFile + `
+names. A field the pinned golden has and this one lacks needs the release
+floor.env names as NEXT_JELLYFIN_VERSION, so internal/wire rejects it on older
+servers. CI runs only the supported release and does not check this golden;
+the test runs only with SCHEMA_GUARD_FLOOR=1, against a server of the floor
+release.`,
+	followUp: `A property the diff adds or removes moves the Jellyfin version its attribute
+needs: run TestUnitWireBindings and review the since= changes in
+internal/provider/testdata/wire_bindings.golden.`,
 }
 
 var securityPluginPayloadGuard = schemaGuard{
-	golden: securityPluginPayloadGolden,
-	test:   "TestAccSecurityPluginConfigSchemaGuard",
-	ciStep: "Run restart acceptance tests (isolated)",
-	env:    "JELLYFIN_RESTART_ACC=1",
+	golden:  securityPluginPayloadGolden,
+	test:    "TestAccSecurityPluginConfigSchemaGuard",
+	envFile: supportedJellyfinEnvFile,
+	ciStep:  "Run restart acceptance tests (isolated)",
+	env:     "JELLYFIN_RESTART_ACC=1",
 	records: `Each line is a key of the configuration that the JellyfinSecurity build pinned
 in internal/provider/supported_security_plugin_version.env serves, with its JSON
 type. The test first writes ` + strconv.Quote(payloadListPlaceholder) + ` into every list the plugin serves empty, so a
@@ -134,8 +167,28 @@ type openAPIOperation struct {
 
 func TestAccJellyfinAPISchemaGuard(t *testing.T) {
 	testAccPreCheck(t)
+	checkSchemaGolden(t, jellyfinAPISchemaGuard, testAccReducedAPISchema(t, testAccClient(t)))
+}
+
+func TestAccJellyfinAPISchemaFloorGuard(t *testing.T) {
+	if os.Getenv("SCHEMA_GUARD_FLOOR") != "1" {
+		t.Skip("set SCHEMA_GUARD_FLOOR=1 to check the floor golden against a server of the release " + floorJellyfinEnvFile + " names")
+	}
+	testAccPreCheck(t)
 	c := testAccClient(t)
 
+	info, err := c.GetPublicSystemInfo(context.Background())
+	if err != nil {
+		t.Fatalf("reading the Jellyfin version: %v", err)
+	}
+	if info.Version != wire.FloorVersion() {
+		t.Fatalf("the server runs Jellyfin %s, but %s names %s, the release the floor golden records\n\n%s", info.Version, floorJellyfinEnvFile, wire.FloorVersion(), jellyfinAPISchemaFloorGuard.regenerateHelp())
+	}
+	checkSchemaGolden(t, jellyfinAPISchemaFloorGuard, testAccReducedAPISchema(t, c))
+}
+
+func testAccReducedAPISchema(t *testing.T, c *client.Client) []string {
+	t.Helper()
 	spec, err := c.GetOpenAPISpec(context.Background())
 	if err != nil {
 		t.Fatalf("getting OpenAPI spec: %v", err)
@@ -150,8 +203,7 @@ func TestAccJellyfinAPISchemaGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reducing OpenAPI spec: %v", err)
 	}
-
-	checkSchemaGolden(t, jellyfinAPISchemaGuard, lines)
+	return lines
 }
 
 // reduceOpenAPISpec keeps only the operations the client calls and the schemas
@@ -1358,28 +1410,30 @@ func (g schemaGuard) regenerateHelp() string {
 	if g.env != "" {
 		env += " " + g.env
 	}
+	ci := "CI does not check this golden."
+	if g.ciStep != "" {
+		ci = "CI checks the golden in this step of .github/workflows/test.yml:\n\n  " + g.ciStep
+	}
 	return fmt.Sprintf(`%[1]s
 
-CI checks the golden in this step of .github/workflows/test.yml:
-
-  %[3]s
+%[3]s
 
 To regenerate it, run from the repository root against a fresh server of the
-supported Jellyfin version (down -v drops the volumes a previous run left
-behind):
+Jellyfin release %[7]s names (down -v drops the volumes
+a previous run left behind):
 
-  docker compose --env-file internal/provider/supported_jellyfin_version.env down -v
-  docker compose --env-file internal/provider/supported_jellyfin_version.env up -d
+  docker compose --env-file %[7]s down -v
+  docker compose --env-file %[7]s up -d
   eval "$(./scripts/setup_jellyfin.sh | grep '^export ')"
   %[4]s \
     go test -count=1 -run '^%[2]s$' ./internal/provider/
 
 A maintainer must review the resulting diff before it is committed:
 
-  git diff internal/provider/%[5]s
+  git diff %[5]s
 
 %[6]s
-`, g.records, g.test, g.ciStep, env, g.golden, g.followUp)
+`, g.records, g.test, ci, env, filepath.ToSlash(filepath.Join("internal", "provider", g.golden)), g.followUp, g.envFile)
 }
 
 func dedupStrings(in []string) []string {
