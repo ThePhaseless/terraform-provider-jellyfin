@@ -1953,7 +1953,6 @@ func TestUnitSchemaGuardsRunInTheWorkflowStepTheyName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the workflow: %v", err)
 	}
-	runFilter := regexp.MustCompile(`go test .*-run '([^']+)'`)
 
 	for _, g := range []schemaGuard{jellyfinAPISchemaGuard, securityPluginPayloadGuard} {
 		step := workflowStep(string(raw), g.ciStep)
@@ -1961,11 +1960,10 @@ func TestUnitSchemaGuardsRunInTheWorkflowStepTheyName(t *testing.T) {
 			t.Errorf("%s: .github/workflows/test.yml has no step named %q", g.test, g.ciStep)
 			continue
 		}
-		if !strings.Contains(step, "./internal/provider/") {
-			t.Errorf("%s: step %q does not test ./internal/provider/", g.test, g.ciStep)
-		}
-		if m := runFilter.FindStringSubmatch(step); m != nil && !regexp.MustCompile(m[1]).MatchString(g.test) {
-			t.Errorf("%s: step %q runs only -run '%s'", g.test, g.ciStep, m[1])
+		if runs, err := stepRunsTest(step, g.test); err != nil {
+			t.Errorf("%s: step %q: %v", g.test, g.ciStep, err)
+		} else if !runs {
+			t.Errorf("%s: no go test command in step %q runs it in ./internal/provider/", g.test, g.ciStep)
 		}
 		for _, kv := range strings.Fields("TF_ACC=1 " + g.env) {
 			key, value, _ := strings.Cut(kv, "=")
@@ -1990,6 +1988,159 @@ func workflowStep(workflow, name string) string {
 		return strings.Join(lines[i:end], "\n")
 	}
 	return ""
+}
+
+func TestUnitStepRunsTestReadsRunAndSkip(t *testing.T) {
+	tests := map[string]struct {
+		step string
+		want bool
+	}{
+		"no filter":            {"run: go test -count=1 -v -timeout 10m ./internal/provider/", true},
+		"single-quoted -run":   {"run: go test -run 'TestAccRestartResource|TestAccSecurityPlugin' ./internal/provider/", true},
+		"double-quoted -run":   {`run: go test -run "TestAccRestartResource" ./internal/provider/`, false},
+		"-run=":                {"run: go test -run=TestAccRestartResource ./internal/provider/", false},
+		"--test.run":           {"run: go test --test.run TestAccRestartResource ./internal/provider/", false},
+		"-run of subtests":     {"run: go test -run 'TestAccSecurityPlugin.*/Sub' ./internal/provider/", true},
+		"-skip":                {"run: go test -skip TestAccSecurityPluginConfigSchemaGuard ./internal/provider/", false},
+		"-skip of subtests":    {"run: go test -skip 'TestAccSecurityPluginConfigSchemaGuard/Sub' ./internal/provider/", true},
+		"later -run wins":      {"run: go test -run TestAccSecurityPlugin -run TestAccRestartResource ./internal/provider/", false},
+		"other package":        {"run: go test -run TestAccSecurityPlugin ./cmd/jellyfin-import/", false},
+		"second command":       {"run: go vet ./... && go test -run TestAccSecurityPlugin ./internal/provider/", true},
+		"continued line":       {"run: |\n  go test -v \\\n    -run TestAccRestartResource ./internal/provider/", false},
+		"commented-out filter": {"run: go test ./internal/provider/ # -run TestAccRestartResource", true},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := stepRunsTest(tt.step, "TestAccSecurityPluginConfigSchemaGuard")
+			if err != nil {
+				t.Fatalf("stepRunsTest: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("stepRunsTest = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+// stepRunsTest reports whether a go test command in a workflow step runs the
+// top-level test name in ./internal/provider/.
+func stepRunsTest(step, name string) (bool, error) {
+	for _, cmd := range goTestCommands(step) {
+		if !slices.Contains(cmd.args, "./internal/provider/") {
+			continue
+		}
+		if ok, err := cmd.selects(name); err != nil || ok {
+			return ok, err
+		}
+	}
+	return false, nil
+}
+
+// goTestCommand is one go test invocation: the words that are not flags, among
+// them the packages, and the last -run and -skip patterns.
+type goTestCommand struct {
+	args      []string
+	run, skip string
+}
+
+// goTestCommands reads -run and -skip in every spelling the go command takes:
+// one or two dashes, with or without the test. prefix, and the pattern after
+// "=" or as the next word.
+func goTestCommands(script string) []goTestCommand {
+	var cmds []goTestCommand
+	for _, line := range strings.Split(strings.ReplaceAll(script, "\\\n", " "), "\n") {
+		words := shellWords(line)
+		for i := 0; i+1 < len(words); i++ {
+			if words[i] != "go" || words[i+1] != "test" {
+				continue
+			}
+			var cmd goTestCommand
+			for i += 2; i < len(words) && !slices.Contains([]string{"&&", "||", ";", "|"}, words[i]); i++ {
+				if !strings.HasPrefix(words[i], "-") {
+					cmd.args = append(cmd.args, words[i])
+					continue
+				}
+				flag, value, hasValue := strings.Cut(strings.TrimLeft(words[i], "-"), "=")
+				flag = strings.TrimPrefix(flag, "test.")
+				if flag != "run" && flag != "skip" {
+					continue
+				}
+				if !hasValue && i+1 < len(words) {
+					i++
+					value = words[i]
+				}
+				if flag == "run" {
+					cmd.run = value
+				} else {
+					cmd.skip = value
+				}
+			}
+			cmds = append(cmds, cmd)
+		}
+	}
+	return cmds
+}
+
+// selects follows go test for a top-level test: a pattern holds one regexp per
+// level, split at "/", so -run matches its first level against the name, while
+// -skip with more than one level skips only subtests. go test does not split
+// at a "/" inside brackets or parentheses; this does, which no step needs.
+func (c goTestCommand) selects(name string) (bool, error) {
+	if c.run != "" {
+		top, _, _ := strings.Cut(c.run, "/")
+		re, err := regexp.Compile(top)
+		if err != nil {
+			return false, fmt.Errorf("-run %q: %w", c.run, err)
+		}
+		if !re.MatchString(name) {
+			return false, nil
+		}
+	}
+	if c.skip != "" && !strings.Contains(c.skip, "/") {
+		re, err := regexp.Compile(c.skip)
+		if err != nil {
+			return false, fmt.Errorf("-skip %q: %w", c.skip, err)
+		}
+		if re.MatchString(name) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// shellWords splits a line into words at blanks outside quotes, strips single
+// and double quotes and drops a comment. Unlike sh it expands nothing and reads
+// no backslash escapes, which the workflow's go test commands do not use.
+func shellWords(line string) []string {
+	var words []string
+	var word strings.Builder
+	inWord := false
+	var quote rune
+	for _, c := range line {
+		switch {
+		case quote != 0 && c == quote:
+			quote = 0
+		case quote != 0:
+			word.WriteRune(c)
+		case c == '\'' || c == '"':
+			quote, inWord = c, true
+		case c == ' ' || c == '\t':
+			if inWord {
+				words = append(words, word.String())
+				word.Reset()
+				inWord = false
+			}
+		case c == '#' && !inWord:
+			return words
+		default:
+			word.WriteRune(c)
+			inWord = true
+		}
+	}
+	if inWord {
+		words = append(words, word.String())
+	}
+	return words
 }
 
 func TestUnitClientAPICallsNamedConfigurationsAreMapped(t *testing.T) {
