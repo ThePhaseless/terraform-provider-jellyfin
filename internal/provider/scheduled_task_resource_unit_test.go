@@ -93,7 +93,7 @@ func TestScheduledTaskTriggerTickValidators(t *testing.T) {
 		"negative interval_ticks":                   {attribute: "interval_ticks", value: -1, wantError: true},
 		"zero max_runtime_ticks":                    {attribute: "max_runtime_ticks", value: 0},
 		"negative max_runtime_ticks":                {attribute: "max_runtime_ticks", value: -1, wantError: true},
-		"max_runtime_ticks at CancelAfter's limit":  {attribute: "max_runtime_ticks", value: 42949672949999},
+		"max_runtime_ticks at the limit":            {attribute: "max_runtime_ticks", value: 42949672949999},
 		"max_runtime_ticks one tick past the limit": {attribute: "max_runtime_ticks", value: 42949672950000, wantError: true},
 	}
 

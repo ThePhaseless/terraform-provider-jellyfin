@@ -38,8 +38,8 @@ const (
 
 	ticksPerDay = 864_000_000_000
 
-	// CancellationTokenSource.CancelAfter takes at most 4294967294 whole
-	// milliseconds, and Jellyfin truncates the ticks to milliseconds for it.
+	// CancellationTokenSource.CancelAfter truncates its delay to whole
+	// milliseconds and takes at most 4294967294 of them.
 	maxRuntimeTicksLimit = 4_294_967_295*10_000 - 1
 )
 
