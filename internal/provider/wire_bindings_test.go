@@ -43,28 +43,19 @@ func TestUnitWireBindings(t *testing.T) {
 		seen[name] = true
 
 		bound, isBound := r.(wireBound)
-		pending, isPending := pendingWireMigration[name]
 		_, isTyped := typedClientResources[name]
-		var wireFn func() (*wire.Binding, error)
 		switch {
-		case isBound && (isPending || isTyped):
-			t.Errorf("%s implements wireBound, so drop it from pendingWireMigration and typedClientResources", name)
+		case isBound && isTyped:
+			t.Errorf("%s implements wireBound, so drop it from typedClientResources", name)
 			continue
-		case isBound:
-			wireFn = bound.Wire
-		case isPending && isTyped:
-			t.Errorf("%s is both pending migration and a typed-client resource", name)
-			continue
-		case isPending:
-			wireFn = pending
 		case isTyped:
 			continue
-		default:
+		case !isBound:
 			t.Errorf("%s neither implements wireBound nor is listed in typedClientResources", name)
 			continue
 		}
 
-		b, err := wireFn()
+		b, err := bound.Wire()
 		if err != nil {
 			t.Errorf("%s:\n%v", name, err)
 			continue
@@ -76,23 +67,13 @@ func TestUnitWireBindings(t *testing.T) {
 			lines = append(lines, name+" "+line)
 		}
 	}
-	for _, list := range []map[string]string{typedClientResources, pendingNames()} {
-		for name := range list {
-			if !seen[name] {
-				t.Errorf("%s is listed but the provider has no such resource", name)
-			}
+	for name := range typedClientResources {
+		if !seen[name] {
+			t.Errorf("%s is listed but the provider has no such resource", name)
 		}
 	}
 	sort.Strings(lines)
 	checkWireBindingsGolden(t, lines)
-}
-
-func pendingNames() map[string]string {
-	out := map[string]string{}
-	for name := range pendingWireMigration {
-		out[name] = "pending migration"
-	}
-	return out
 }
 
 func checkWireBindingsGolden(t *testing.T, lines []string) {
