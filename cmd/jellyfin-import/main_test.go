@@ -346,6 +346,33 @@ func TestGenerateLibraries(t *testing.T) {
 	}
 }
 
+func TestGenerateLibrariesWritesMixedForMissingCollectionType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]interface{}{
+			{
+				"Name":      "Mixed",
+				"Locations": []string{"/media/mixed"},
+				"ItemId":    "item-1",
+			},
+		})
+	}))
+	defer server.Close()
+
+	g := &generator{
+		client:    client.NewClient(server.URL, "test-key"),
+		outputDir: t.TempDir(),
+		usedNames: make(map[string]int),
+	}
+
+	_, resources, err := g.generateLibraries()
+	if err != nil {
+		t.Fatalf("generateLibraries() error: %v", err)
+	}
+	if len(resources) != 1 || !strings.Contains(resources[0], `collection_type = "mixed"`) {
+		t.Errorf("expected one library with collection_type mixed: %q", resources)
+	}
+}
+
 func TestGenerateAPIKeys(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()

@@ -56,7 +56,7 @@ resource "jellyfin_library" "movies" {
 
 ### Required
 
-- `collection_type` (String) The collection type (e.g., `movies`, `tvshows`, `music`, `books`, `homevideos`, `boxsets`, `mixed`).
+- `collection_type` (String) The collection type: one of `movies`, `tvshows`, `music`, `musicvideos`, `homevideos`, `boxsets`, `books`, `mixed`. A library without a collection type, which is how Jellyfin's web UI creates a Mixed Movies and Shows library, reads as `mixed`: Jellyfin treats the two the same.
 - `name` (String) The library name.
 - `paths` (List of String) Paths of the library's media folders. Jellyfin looks them up on the server, so when it runs in a container they must be paths inside the container.
 
@@ -110,7 +110,7 @@ Optional:
 
 Optional:
 
-- `network_path` (String, Deprecated) Network path. Jellyfin 10.11 removed network paths, so setting it is an error on Jellyfin 10.11 and later.
+- `network_path` (String, Deprecated) Network path. Jellyfin 10.10 removed network paths, so setting it is an error on Jellyfin 10.10 and later.
 - `password` (String, Sensitive, Deprecated) Password. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `path` (String) Local path.
 - `username` (String, Deprecated) Username. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.

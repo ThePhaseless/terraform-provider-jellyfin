@@ -14,7 +14,10 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
@@ -238,6 +241,63 @@ resource "jellyfin_library" "second" {
 	})
 }
 
+func TestAccLibraryResourceMusicVideos(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckNoLibraryNamed(t, "TestMusicVideos"),
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "jellyfin_library" "test" {
+  name            = "TestMusicVideos"
+  collection_type = "musicvideos"
+  paths           = ["/media/movies"]
+}
+`,
+				Check: resource.TestCheckResourceAttr("jellyfin_library.test", "collection_type", "musicvideos"),
+			},
+		},
+	})
+}
+
+func TestAccLibraryResourceImportWithoutCollectionTypeAsMixed(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckNoLibraryNamed(t, "TestUntyped"),
+		Steps: []resource.TestStep{
+			{
+				// Jellyfin's web UI creates a Mixed Movies and Shows library
+				// like this, without a collection type.
+				PreConfig: func() {
+					if err := testAccClient(t).AddVirtualFolder(context.Background(), "TestUntyped", "", []string{"/media/movies"}, nil); err != nil {
+						t.Fatalf("creating a library without a collection type: %v", err)
+					}
+				},
+				Config: `
+import {
+  to = jellyfin_library.test
+  id = "TestUntyped"
+}
+
+resource "jellyfin_library" "test" {
+  name            = "TestUntyped"
+  collection_type = "mixed"
+  paths           = ["/media/movies"]
+}
+`,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("jellyfin_library.test", plancheck.ResourceActionNoop),
+					},
+				},
+				Check: resource.TestCheckResourceAttr("jellyfin_library.test", "collection_type", "mixed"),
+			},
+		},
+	})
+}
+
 func TestAccLibraryResourceDocumentedExample(t *testing.T) {
 	example, err := os.ReadFile("../../examples/resources/jellyfin_library/resource.tf")
 	if err != nil {
@@ -285,7 +345,7 @@ resource "jellyfin_library" "test" {
 `,
 				ExpectError: regexp.MustCompile(`Unsupported\s+library\s+option`),
 			},
-			// Jellyfin 10.11 removed network paths.
+			// Jellyfin 10.10 removed network paths.
 			{
 				Config: `
 resource "jellyfin_library" "test" {
@@ -298,7 +358,27 @@ resource "jellyfin_library" "test" {
   }
 }
 `,
-				ExpectError: regexp.MustCompile(`Jellyfin\s+10\.11\s+removed\s+network\s+paths[\s\S]*Remove\s+library_options\.path_infos\[0\]\.network_path`),
+				ExpectError: testAccLibraryNetworkPathRejected,
+			},
+			// A value unknown at plan time is checked when Terraform plans again
+			// during apply.
+			{
+				Config: `
+resource "terraform_data" "network_path" {
+  input = "smb://nas/movies"
+}
+
+resource "jellyfin_library" "test" {
+  name            = "TestOptions"
+  collection_type = "movies"
+  paths           = ["/media/movies"]
+
+  library_options = {
+    path_infos = [{ path = "/media/movies", network_path = terraform_data.network_path.output }]
+  }
+}
+`,
+				ExpectError: testAccLibraryNetworkPathRejected,
 			},
 			{
 				SkipFunc: func() (bool, error) { return similarItemsSupported, nil },
@@ -316,8 +396,14 @@ resource "jellyfin_library" "test" {
 				ExpectError: testAccLibrarySimilarItemsRejected,
 			},
 			// disabled and extract_chapters_during_library_scan are stored as
-			// Jellyfin's Enabled and ExtractChapterImagesDuringLibraryScan.
+			// Jellyfin's Enabled and ExtractChapterImagesDuringLibraryScan, and
+			// the create plans the network path left unset as null.
 			{
+				PreConfig: func() {
+					if err := testAccCheckNoLibraryNamed(t, "TestOptions")(nil); err != nil {
+						t.Fatalf("a rejected configuration created the library: %v", err)
+					}
+				},
 				Config: `
 resource "jellyfin_library" "test" {
   name            = "TestOptions"
@@ -327,9 +413,18 @@ resource "jellyfin_library" "test" {
   library_options = {
     disabled                             = true
     extract_chapters_during_library_scan = true
+    path_infos                           = [{ path = "/media/movies" }]
   }
 }
 `,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("jellyfin_library.test", plancheck.ResourceActionCreate),
+						plancheck.ExpectKnownValue("jellyfin_library.test",
+							tfjsonpath.New("library_options").AtMapKey("path_infos").AtSliceIndex(0).AtMapKey("network_path"),
+							knownvalue.Null()),
+					},
+				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.disabled", "true"),
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.extract_chapters_during_library_scan", "true"),
@@ -363,6 +458,8 @@ resource "jellyfin_library" "test" {
   }
 }
 `
+
+var testAccLibraryNetworkPathRejected = regexp.MustCompile(`Jellyfin\s+10\.10\s+removed\s+network\s+paths[\s\S]*Remove\s+library_options\.path_infos\[0\]\.network_path`)
 
 // testAccLibrarySimilarItemsRejected matches the plan-time error only, not the
 // one reported after apply when the server drops the settings.

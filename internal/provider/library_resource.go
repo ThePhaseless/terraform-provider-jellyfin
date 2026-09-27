@@ -139,14 +139,16 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"collection_type": schema.StringAttribute{
-				Description:         "The collection type (e.g., `movies`, `tvshows`, `music`, `books`, `homevideos`, `boxsets`, `mixed`).",
-				MarkdownDescription: "The collection type (e.g., `movies`, `tvshows`, `music`, `books`, `homevideos`, `boxsets`, `mixed`).",
+				Description:         "The collection type: one of " + strings.Join(collectionTypes, ", ") + ". A library without a collection type, which is how Jellyfin's web UI creates a Mixed Movies and Shows library, reads as mixed: Jellyfin treats the two the same.",
+				MarkdownDescription: "The collection type: one of `" + strings.Join(collectionTypes, "`, `") + "`. A library without a collection type, which is how Jellyfin's web UI creates a Mixed Movies and Shows library, reads as `mixed`: Jellyfin treats the two the same.",
 				Required:            true,
 				Validators: []validator.String{
-					stringvalidator.OneOf("movies", "tvshows", "music", "books", "homevideos", "boxsets", "mixed"),
+					stringvalidator.OneOf(collectionTypes...),
 				},
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.RequiresReplaceIf(collectionTypeRequiresReplace,
+						"Changing the collection type replaces the library, except from an empty string to mixed.",
+						"Changing the collection type replaces the library, except from an empty string to `mixed`."),
 				},
 			},
 			"paths": schema.ListAttribute{
@@ -186,6 +188,30 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			},
 		},
 	}
+}
+
+// Jellyfin parses a collection type case-insensitively but returns it in this
+// spelling, so any other spelling would read back as a different value.
+var collectionTypes = []string{"movies", "tvshows", "music", "musicvideos", "homevideos", "boxsets", "books", "mixed"}
+
+// Jellyfin gives a library created without a collection type the same null
+// collection type as one created as mixed, and only its library listing tells
+// them apart, so reading it as an empty string would force a replacement that
+// changes nothing.
+func flattenCollectionType(collectionType string) types.String {
+	if collectionType == "" {
+		return types.StringValue("mixed")
+	}
+	return types.StringValue(collectionType)
+}
+
+// Earlier provider versions stored a library without a collection type as "".
+// A refresh reads that as mixed, but a plan that skips the refresh, as
+// -refresh=false does, still compares mixed against "", and replacing the
+// library there would delete and recreate it for a collection type it already
+// has.
+func collectionTypeRequiresReplace(_ context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
+	resp.RequiresReplace = !req.StateValue.Equal(types.StringValue("")) || !req.PlanValue.Equal(types.StringValue("mixed"))
 }
 
 func libraryOptionsAttributes() map[string]schema.Attribute {
@@ -339,17 +365,45 @@ func pathInfoAttributes() map[string]schema.Attribute {
 			Validators:          []validator.String{unsupportedLibraryOptionValidator{}},
 		}
 	}
-	networkPath := optionalString("Network path. " + networkPathRemovedMessage)
-	networkPath.DeprecationMessage = networkPathRemovedMessage
 	return map[string]schema.Attribute{
-		"path":         optionalString("Local path."),
-		"network_path": networkPath,
-		"username":     unsupportedString("Username.", false),
-		"password":     unsupportedString("Password.", true),
+		"path": optionalString("Local path."),
+		"network_path": schema.StringAttribute{
+			Description:         "Network path. " + networkPathRemovedMessage,
+			MarkdownDescription: "Network path. " + networkPathRemovedMessage,
+			Optional:            true,
+			Computed:            true,
+			DeprecationMessage:  networkPathRemovedMessage,
+			PlanModifiers: []planmodifier.String{
+				priorValueEvenIfNull{},
+			},
+		},
+		"username": unsupportedString("Username.", false),
+		"password": unsupportedString("Password.", true),
 	}
 }
 
-const networkPathRemovedMessage = "Jellyfin 10.11 removed network paths, so setting it is an error on Jellyfin 10.11 and later."
+const networkPathRemovedMessage = "Jellyfin 10.10 removed network paths, so setting it is an error on Jellyfin 10.10 and later."
+
+// Jellyfin before 10.10 keeps a network path set in its web UI, which planning
+// the prior value carries into the options apply writes back. Unlike
+// UseStateForUnknown, which leaves the value unknown when the library is
+// created, this plans null there too: apply then sends no network path and the
+// server has none, so an unknown value would only show as known after apply.
+type priorValueEvenIfNull struct{}
+
+func (priorValueEvenIfNull) Description(context.Context) string {
+	return "An unset value is planned as its prior value, null included."
+}
+
+func (m priorValueEvenIfNull) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (priorValueEvenIfNull) PlanModifyString(_ context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if req.ConfigValue.IsNull() && req.PlanValue.IsUnknown() {
+		resp.PlanValue = req.StateValue
+	}
+}
 
 // Attributes with no Jellyfin library option behind them stay in the schema,
 // deprecated, so configurations that leave them unset keep working until
@@ -550,7 +604,7 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 	resp.Diagnostics.Append(resp.State.Set(ctx, &LibraryResourceModel{
 		ID:             types.StringValue(folder.Name),
 		Name:           data.Name,
-		CollectionType: types.StringValue(folder.CollectionType),
+		CollectionType: flattenCollectionType(folder.CollectionType),
 		Paths:          data.Paths,
 		LibraryOptions: flattenLibraryOptions(ctx, folder.GetLibraryOptions().RawJSON, &resp.Diagnostics),
 		ItemID:         types.StringValue(folder.ItemID),
@@ -591,7 +645,7 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 
 	data.ItemID = types.StringValue(updated.ItemID)
 	data.ID = types.StringValue(updated.Name)
-	data.CollectionType = types.StringValue(updated.CollectionType)
+	data.CollectionType = flattenCollectionType(updated.CollectionType)
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, updated.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues
@@ -619,7 +673,7 @@ func (r *LibraryResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
-	data.CollectionType = types.StringValue(folder.CollectionType)
+	data.CollectionType = flattenCollectionType(folder.CollectionType)
 	data.ItemID = types.StringValue(folder.ItemID)
 	data.ID = types.StringValue(folder.Name)
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, folder.Locations)
@@ -640,6 +694,22 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 	var state LibraryResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// With the options unchanged, the update can only be collection_type going
+	// from the "" earlier versions stored to mixed, which the server already
+	// has. Writing the options anyway would store them as the server reads
+	// them, and a plan made without a refresh, which carries the options from
+	// state written by an older version, need not match that.
+	var plannedOptions, priorOptions types.Object
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("library_options"), &plannedOptions)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("library_options"), &priorOptions)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if plannedOptions.Equal(priorOptions) {
+		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 		return
 	}
 
@@ -681,7 +751,7 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	data.ItemID = types.StringValue(updated.ItemID)
 	data.ID = types.StringValue(updated.Name)
-	data.CollectionType = types.StringValue(updated.CollectionType)
+	data.CollectionType = flattenCollectionType(updated.CollectionType)
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, updated.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues
@@ -799,7 +869,8 @@ func (r *LibraryResource) checkServerVersion(ctx context.Context, config tfsdk.C
 }
 
 // configuredVersionedAttributes leaves out values unknown at plan time, which
-// may still turn out null.
+// may still turn out null. Terraform plans again during apply, once they are
+// known, so they are checked before the library is written.
 func configuredVersionedAttributes(ctx context.Context, config tfsdk.Config) (similarItems, networkPaths []path.Path) {
 	optionsPath := path.Root("library_options")
 	isSet := func(v attr.Value) bool { return !v.IsNull() && !v.IsUnknown() }
@@ -842,10 +913,10 @@ func versionedAttributeErrors(version string, similarItems, networkPaths []path.
 				fmt.Sprintf("The server runs Jellyfin %s, and similar item providers need Jellyfin 12 or later. Remove %s for this server.", version, p))
 		}
 	}
-	if compareDottedVersions(version, "10.11") >= 0 {
+	if compareDottedVersions(version, "10.10") >= 0 {
 		for _, p := range networkPaths {
 			diags.AddAttributeError(p, "Network paths not supported",
-				fmt.Sprintf("The server runs Jellyfin %s, and Jellyfin 10.11 removed network paths, so the server would drop the value. Remove %s from the configuration.", version, p))
+				fmt.Sprintf("The server runs Jellyfin %s, and Jellyfin 10.10 removed network paths, so the server would drop the value. Remove %s from the configuration.", version, p))
 		}
 	}
 	return diags
@@ -1265,8 +1336,8 @@ func keepPlannedNulls(ctx context.Context, planned, got *LibraryOptionsModel) *L
 // checkSimilarItemSettingsKept exists because Jellyfin 10.x has no similar
 // item settings and drops them, and Terraform's own inconsistent-result error
 // cannot name the attribute: library_options holds a sensitive value.
-// ModifyPlan rejects them earlier, but not values unknown at plan time or
-// planned from the prior state, such as after a server downgrade.
+// ModifyPlan rejects configured values earlier, but not values planned from
+// the prior state, such as after a server downgrade.
 func checkSimilarItemSettingsKept(ctx context.Context, planned, got *LibraryOptionsModel, diags *diag.Diagnostics) {
 	if planned == nil || got == nil || planned.TypeOptions.IsNull() || planned.TypeOptions.IsUnknown() || got.TypeOptions.IsNull() || got.TypeOptions.IsUnknown() {
 		return

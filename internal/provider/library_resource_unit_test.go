@@ -13,9 +13,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 func TestUnitLibraryOptionsOverlay(t *testing.T) {
@@ -267,22 +271,44 @@ func TestUnitImageOptionTypeAcceptsOnlyJellyfinSpelling(t *testing.T) {
 	if !ok {
 		t.Fatal("image_options type is not a string attribute")
 	}
-	for value, expectError := range map[string]bool{
+	testUnitAssertStringValidation(t, typeAttr, map[string]bool{
 		"Backdrop": false,
 		"BoxRear":  false,
 		"backdrop": true,
 		"Boxrear":  true,
 		"Poster":   true,
-	} {
+	})
+}
+
+func TestUnitCollectionTypeAcceptsOnlyJellyfinSpelling(t *testing.T) {
+	resp := resource.SchemaResponse{}
+	NewLibraryResource().Schema(context.Background(), resource.SchemaRequest{}, &resp)
+	collectionType, ok := resp.Schema.Attributes["collection_type"].(schema.StringAttribute)
+	if !ok {
+		t.Fatal("collection_type is not a string attribute")
+	}
+	testUnitAssertStringValidation(t, collectionType, map[string]bool{
+		"movies":      false,
+		"musicvideos": false,
+		"mixed":       false,
+		"Movies":      true,
+		"musicVideos": true,
+		"photos":      true,
+	})
+}
+
+func testUnitAssertStringValidation(t *testing.T, a schema.StringAttribute, expectError map[string]bool) {
+	t.Helper()
+	for value, want := range expectError {
 		resp := validator.StringResponse{}
-		for _, v := range typeAttr.Validators {
+		for _, v := range a.Validators {
 			v.ValidateString(context.Background(), validator.StringRequest{
-				Path:        path.Root("type"),
+				Path:        path.Root("value"),
 				ConfigValue: types.StringValue(value),
 			}, &resp)
 		}
-		if resp.Diagnostics.HasError() != expectError {
-			t.Errorf("%q: expected error %t, got diagnostics: %v", value, expectError, resp.Diagnostics)
+		if resp.Diagnostics.HasError() != want {
+			t.Errorf("%q: expected error %t, got diagnostics: %v", value, want, resp.Diagnostics)
 		}
 	}
 }
@@ -309,6 +335,89 @@ func TestUnitUnsupportedLibraryOptionsAreNotComputed(t *testing.T) {
 	}
 }
 
+func TestUnitNetworkPathPlansPriorValueWhenUnset(t *testing.T) {
+	a, ok := pathInfoAttributes()["network_path"].(schema.StringAttribute)
+	if !ok {
+		t.Fatal("network_path is not a string attribute")
+	}
+
+	tests := map[string]struct {
+		config, plan, state, want types.String
+	}{
+		"unset without a prior value": {
+			config: types.StringNull(), plan: types.StringUnknown(), state: types.StringNull(),
+			want: types.StringNull(),
+		},
+		"unset with a prior value": {
+			config: types.StringNull(), plan: types.StringUnknown(), state: types.StringValue("smb://nas/movies"),
+			want: types.StringValue("smb://nas/movies"),
+		},
+		"configured": {
+			config: types.StringValue("smb://nas/films"), plan: types.StringValue("smb://nas/films"), state: types.StringValue("smb://nas/movies"),
+			want: types.StringValue("smb://nas/films"),
+		},
+	}
+	for name, test := range tests {
+		resp := planmodifier.StringResponse{PlanValue: test.plan}
+		for _, m := range a.PlanModifiers {
+			m.PlanModifyString(context.Background(), planmodifier.StringRequest{
+				ConfigValue: test.config,
+				PlanValue:   resp.PlanValue,
+				StateValue:  test.state,
+			}, &resp)
+		}
+		if !resp.PlanValue.Equal(test.want) {
+			t.Errorf("%s: planned %v, want %v", name, resp.PlanValue, test.want)
+		}
+	}
+}
+
+func TestUnitFlattenCollectionTypeReadsMissingTypeAsMixed(t *testing.T) {
+	for server, want := range map[string]string{
+		"":       "mixed",
+		"mixed":  "mixed",
+		"movies": "movies",
+	} {
+		if got := flattenCollectionType(server); got != types.StringValue(want) {
+			t.Errorf("flattenCollectionType(%q) = %v, want %q", server, got, want)
+		}
+	}
+}
+
+func TestUnitCollectionTypeChangeRequiresReplaceExceptEmptyToMixed(t *testing.T) {
+	schemaResp := resource.SchemaResponse{}
+	NewLibraryResource().Schema(context.Background(), resource.SchemaRequest{}, &schemaResp)
+	collectionType, ok := schemaResp.Schema.Attributes["collection_type"].(schema.StringAttribute)
+	if !ok {
+		t.Fatal("collection_type is not a string attribute")
+	}
+	existing := tftypes.NewValue(tftypes.Object{}, map[string]tftypes.Value{})
+
+	for _, test := range []struct {
+		state, plan string
+		want        bool
+	}{
+		{state: "", plan: "mixed", want: false},
+		{state: "", plan: "movies", want: true},
+		{state: "movies", plan: "mixed", want: true},
+		{state: "mixed", plan: "movies", want: true},
+	} {
+		resp := planmodifier.StringResponse{PlanValue: types.StringValue(test.plan)}
+		for _, m := range collectionType.PlanModifiers {
+			m.PlanModifyString(context.Background(), planmodifier.StringRequest{
+				State:       tfsdk.State{Raw: existing},
+				Plan:        tfsdk.Plan{Raw: existing},
+				ConfigValue: types.StringValue(test.plan),
+				PlanValue:   types.StringValue(test.plan),
+				StateValue:  types.StringValue(test.state),
+			}, &resp)
+		}
+		if resp.RequiresReplace != test.want {
+			t.Errorf("%q -> %q: requires replace %t, want %t", test.state, test.plan, resp.RequiresReplace, test.want)
+		}
+	}
+}
+
 func TestUnitVersionedAttributeErrorsFollowServerVersion(t *testing.T) {
 	similarItems := path.Root("library_options").AtName("type_options").AtListIndex(0).AtName("similar_item_providers")
 	networkPath := path.Root("library_options").AtName("path_infos").AtListIndex(0).AtName("network_path")
@@ -318,7 +427,8 @@ func TestUnitVersionedAttributeErrorsFollowServerVersion(t *testing.T) {
 		similarError bool
 		networkError bool
 	}{
-		"10.10":       {version: "10.10.7", similarError: true},
+		"10.9":        {version: "10.9.11", similarError: true},
+		"10.10":       {version: "10.10.0", similarError: true, networkError: true},
 		"10.11":       {version: "10.11.11", similarError: true, networkError: true},
 		"12.1":        {version: "12.1.0", networkError: true},
 		"unparseable": {version: "unknown"},
