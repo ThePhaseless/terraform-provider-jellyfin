@@ -74,15 +74,19 @@ var libraryWire = sync.OnceValues(func() (*wire.Binding, error) {
 		wire.VersionMessage("library_options.type_options.similar_item_provider_order", similarItemsVersionMessage),
 		wire.VersionMessage("library_options.path_infos.network_path", networkPathVersionMessage),
 	}
-	for prefix, attrs := range map[string]map[string]schema.Attribute{
-		"library_options.":            libraryOptionsAttributes(),
-		"library_options.path_infos.": pathInfoAttributes(),
+	for _, p := range []string{
+		"library_options.enable_emby_photos", "library_options.enable_photo_subtitle",
+		"library_options.chapter_image_interval_seconds",
+		"library_options.extract_media_information_during_library_scan",
+		"library_options.download_images_in_advance", "library_options.cache_images_in_library",
+		"library_options.enable_media_conversion", "library_options.disabled_metadata_savers",
+		"library_options.disabled_metadata_fetchers", "library_options.metadata_fetcher_order",
+		"library_options.disabled_image_fetchers", "library_options.image_fetcher_order",
+		"library_options.save_local_thumbnail_sets", "library_options.import_missing_episodes",
+		"library_options.metadata_refresh_mode",
+		"library_options.path_infos.username", "library_options.path_infos.password",
 	} {
-		for name, a := range attrs {
-			if a.GetDeprecationMessage() == unsupportedLibraryOptionMessage {
-				opts = append(opts, wire.NeverSent(prefix+name, unsupportedLibraryOptionMessage))
-			}
-		}
+		opts = append(opts, wire.NeverSent(p, unsupportedLibraryOptionMessage))
 	}
 	return wire.Bind(schemaOf(&LibraryResource{}), "VirtualFolderInfo", opts...)
 })
