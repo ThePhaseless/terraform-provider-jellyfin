@@ -192,10 +192,10 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 // spelling, so any other spelling would read back as a different value.
 var collectionTypes = []string{"movies", "tvshows", "music", "musicvideos", "homevideos", "boxsets", "books", "mixed"}
 
-// flattenCollectionType reads a library without a collection type as mixed.
-// Jellyfin gives such a library the same null collection type as one created
-// as mixed, and only its library listing tells them apart, so an empty string
-// would force a replacement that changes nothing.
+// Jellyfin gives a library created without a collection type the same null
+// collection type as one created as mixed, and only its library listing tells
+// them apart, so reading it as an empty string would force a replacement that
+// changes nothing.
 func flattenCollectionType(collectionType string) types.String {
 	if collectionType == "" {
 		return types.StringValue("mixed")
