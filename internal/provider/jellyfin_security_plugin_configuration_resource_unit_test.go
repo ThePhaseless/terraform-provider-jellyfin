@@ -239,7 +239,7 @@ func TestUnitFillEmptyPayloadLists(t *testing.T) {
 	}
 }
 
-func TestUnitJellyfinSecurityWritesBackExactlyTheServedKeys(t *testing.T) {
+func TestUnitJellyfinSecurityWriteKeepsTheServedShape(t *testing.T) {
 	ctx := context.Background()
 	b := testUnitSecurityPluginWire(t)
 
@@ -255,10 +255,11 @@ func TestUnitJellyfinSecurityWritesBackExactlyTheServedKeys(t *testing.T) {
 	}
 	data := testUnitSecurityPluginRead(t, b, payload)
 
-	// Apply writes over the served configuration, as here: the keys no
-	// attribute claims go back as served, and each OIDC provider, user email
-	// and role mapping is rebuilt from its attributes and the carried
-	// CreatedAt.
+	// Apply overlays the served configuration, as here, so a top-level key
+	// stays in the payload whether or not an attribute claims it; the
+	// bindings golden lists the unclaimed ones. What this checks is that each
+	// rebuilt OIDC provider, role mapping and user email keeps every served
+	// key, and that every value goes out as the JSON type the plugin serves.
 	written, err := parseJSONObject(payload)
 	if err != nil {
 		t.Fatalf("parsing payload: %v", err)
