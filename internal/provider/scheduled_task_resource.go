@@ -37,6 +37,10 @@ const (
 	triggerTypeStartup  = "StartupTrigger"
 
 	ticksPerDay = 864_000_000_000
+
+	// CancellationTokenSource.CancelAfter truncates its delay to whole
+	// milliseconds and takes at most 4294967294 of them.
+	maxRuntimeTicksLimit = 4_294_967_295*10_000 - 1
 )
 
 // NewScheduledTaskResource creates a new scheduled task resource.
@@ -105,9 +109,11 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 								stringvalidator.OneOf(triggerTypeDaily, triggerTypeWeekly, triggerTypeInterval, triggerTypeStartup),
 							},
 						},
-						// Jellyfin saves a trigger before its timer checks the due time, so a
-						// negative or oversized tick value fails the request with a 400 yet
-						// stays on the server.
+						// Jellyfin adds these ticks to a date unchecked and saves the trigger
+						// before its timer takes the due time. Depending on the value and the
+						// server clock, a negative value or one of a day or more either
+						// schedules runs at another time or fails the request with a 400
+						// while the trigger stays on the server.
 						"time_of_day_ticks": schema.Int64Attribute{
 							Description:         "Time of day the task runs, in ticks (100 ns) after midnight, from 0 to 863999999999. Required for DailyTrigger and WeeklyTrigger.",
 							MarkdownDescription: "Time of day the task runs, in ticks (100 ns) after midnight, from `0` to `863999999999`. Required for `DailyTrigger` and `WeeklyTrigger`.",
@@ -132,10 +138,18 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 								stringvalidator.OneOf("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"),
 							},
 						},
+						// Jellyfin saves any value but passes it to CancelAfter only when the
+						// trigger starts a run, so a value CancelAfter rejects fails every such
+						// run before the task begins. The few negative values it takes mean no
+						// limit or an immediate cancel, which leaving the attribute unset or
+						// setting it below 10000 already say.
 						"max_runtime_ticks": schema.Int64Attribute{
-							Description:         "Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns).",
-							MarkdownDescription: "Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns).",
+							Description:         "Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns), from 0 to 42949672949999 (about 49.7 days). Jellyfin counts whole milliseconds, so a value below 10000 (1 ms), including 0, cancels each run as soon as it starts; leave it unset for no limit.",
+							MarkdownDescription: "Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns), from `0` to `42949672949999` (about 49.7 days). Jellyfin counts whole milliseconds, so a value below `10000` (1 ms), including `0`, cancels each run as soon as it starts; leave it unset for no limit.",
 							Optional:            true,
+							Validators: []validator.Int64{
+								int64validator.Between(0, maxRuntimeTicksLimit),
+							},
 						},
 					},
 				},
