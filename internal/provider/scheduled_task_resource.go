@@ -109,9 +109,11 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 								stringvalidator.OneOf(triggerTypeDaily, triggerTypeWeekly, triggerTypeInterval, triggerTypeStartup),
 							},
 						},
-						// Jellyfin saves a trigger before its timer checks the due time, so a
-						// negative or oversized tick value fails the request with a 400 yet
-						// stays on the server.
+						// Jellyfin adds these ticks to a date unchecked and saves the trigger
+						// before its timer takes the due time. Depending on the value and the
+						// server clock, a negative value or one of a day or more either
+						// schedules runs at another time or fails the request with a 400
+						// while the trigger stays on the server.
 						"time_of_day_ticks": schema.Int64Attribute{
 							Description:         "Time of day the task runs, in ticks (100 ns) after midnight, from 0 to 863999999999. Required for DailyTrigger and WeeklyTrigger.",
 							MarkdownDescription: "Time of day the task runs, in ticks (100 ns) after midnight, from `0` to `863999999999`. Required for `DailyTrigger` and `WeeklyTrigger`.",
