@@ -343,7 +343,7 @@ resource "jellyfin_library" "test" {
 `,
 				ExpectError: regexp.MustCompile(`Unsupported\s+library\s+option`),
 			},
-			// Jellyfin 10.11 removed network paths.
+			// Jellyfin 10.10 removed network paths.
 			{
 				Config: `
 resource "jellyfin_library" "test" {
@@ -447,7 +447,7 @@ resource "jellyfin_library" "test" {
 }
 `
 
-var testAccLibraryNetworkPathRejected = regexp.MustCompile(`Jellyfin\s+10\.11\s+removed\s+network\s+paths[\s\S]*Remove\s+library_options\.path_infos\[0\]\.network_path`)
+var testAccLibraryNetworkPathRejected = regexp.MustCompile(`Jellyfin\s+10\.10\s+removed\s+network\s+paths[\s\S]*Remove\s+library_options\.path_infos\[0\]\.network_path`)
 
 // testAccLibrarySimilarItemsRejected matches the plan-time error only, not the
 // one reported after apply when the server drops the settings.

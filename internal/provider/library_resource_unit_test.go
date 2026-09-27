@@ -325,7 +325,7 @@ func TestUnitDeprecatedLibraryOptionsAreNotComputed(t *testing.T) {
 		}
 		deprecated = append(deprecated, name)
 		if a.IsComputed() {
-			t.Errorf("%s is computed, so create plans show it as known after apply although Jellyfin 10.11 and later read it as null", name)
+			t.Errorf("%s is computed, so create plans show it as known after apply although Jellyfin 10.10 and later read it as null", name)
 		}
 	}
 	if !slices.Contains(deprecated, "path_infos.network_path") || !slices.Contains(deprecated, "import_missing_episodes") {
@@ -354,7 +354,8 @@ func TestUnitVersionedAttributeErrorsFollowServerVersion(t *testing.T) {
 		similarError bool
 		networkError bool
 	}{
-		"10.10":       {version: "10.10.7", similarError: true},
+		"10.9":        {version: "10.9.11", similarError: true},
+		"10.10":       {version: "10.10.0", similarError: true, networkError: true},
 		"10.11":       {version: "10.11.11", similarError: true, networkError: true},
 		"12.1":        {version: "12.1.0", networkError: true},
 		"unparseable": {version: "unknown"},

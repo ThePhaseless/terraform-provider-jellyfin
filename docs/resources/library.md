@@ -110,7 +110,7 @@ Optional:
 
 Optional:
 
-- `network_path` (String, Deprecated) Network path. Jellyfin 10.11 removed network paths, so setting it is an error on Jellyfin 10.11 and later.
+- `network_path` (String, Deprecated) Network path. Jellyfin 10.10 removed network paths, so setting it is an error on Jellyfin 10.10 and later.
 - `password` (String, Sensitive, Deprecated) Password. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `path` (String) Local path.
 - `username` (String, Deprecated) Username. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.

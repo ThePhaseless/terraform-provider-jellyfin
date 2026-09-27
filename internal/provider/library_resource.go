@@ -356,7 +356,7 @@ func pathInfoAttributes() map[string]schema.Attribute {
 	}
 	return map[string]schema.Attribute{
 		"path": optionalString("Local path."),
-		// Not computed: Jellyfin 10.11 and later never return a network path,
+		// Not computed: Jellyfin 10.10 and later never return a network path,
 		// so on them a computed value would only show as known after apply in
 		// every plan that sets path_infos.
 		"network_path": schema.StringAttribute{
@@ -370,7 +370,7 @@ func pathInfoAttributes() map[string]schema.Attribute {
 	}
 }
 
-const networkPathRemovedMessage = "Jellyfin 10.11 removed network paths, so setting it is an error on Jellyfin 10.11 and later."
+const networkPathRemovedMessage = "Jellyfin 10.10 removed network paths, so setting it is an error on Jellyfin 10.10 and later."
 
 // Attributes with no Jellyfin library option behind them stay in the schema,
 // deprecated, so configurations that leave them unset keep working until
@@ -864,10 +864,10 @@ func versionedAttributeErrors(version string, similarItems, networkPaths []path.
 				fmt.Sprintf("The server runs Jellyfin %s, and similar item providers need Jellyfin 12 or later. Remove %s for this server.", version, p))
 		}
 	}
-	if compareDottedVersions(version, "10.11") >= 0 {
+	if compareDottedVersions(version, "10.10") >= 0 {
 		for _, p := range networkPaths {
 			diags.AddAttributeError(p, "Network paths not supported",
-				fmt.Sprintf("The server runs Jellyfin %s, and Jellyfin 10.11 removed network paths, so the server would drop the value. Remove %s from the configuration.", version, p))
+				fmt.Sprintf("The server runs Jellyfin %s, and Jellyfin 10.10 removed network paths, so the server would drop the value. Remove %s from the configuration.", version, p))
 		}
 	}
 	return diags
