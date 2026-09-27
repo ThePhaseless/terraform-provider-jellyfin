@@ -29,8 +29,8 @@ var livetvFields = []hclField{
 		{json: "IgnoreDts", attr: "ignore_dts"},
 		{json: "ReadAtNativeFramerate", attr: "read_at_native_framerate"},
 	}},
-	// password is left out so the generated file holds no secret; the
-	// imported state keeps it because the attribute is optional and computed.
+	// password is left out to keep it out of resources.tf; the imported
+	// state keeps it because the attribute is optional and computed.
 	{json: "ListingProviders", attr: "listing_providers", nested: []hclField{
 		{json: "Id", attr: "id"},
 		{json: "Type", attr: "type"},

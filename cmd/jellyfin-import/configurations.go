@@ -150,8 +150,8 @@ var encodingFields = []hclField{
 	{json: "HlsAudioSeekStrategy", attr: "hls_audio_seek_strategy"},
 }
 
-// certificate_password is left out so the generated file holds no secret;
-// the imported state keeps it because the attribute is optional and computed.
+// certificate_password is left out to keep it out of resources.tf; the
+// imported state keeps it because the attribute is optional and computed.
 var networkingFields = []hclField{
 	{json: "BaseUrl", attr: "base_url"},
 	{json: "EnableHttps", attr: "enable_https"},
