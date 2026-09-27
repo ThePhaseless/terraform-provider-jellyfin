@@ -238,6 +238,26 @@ resource "jellyfin_library" "second" {
 	})
 }
 
+func TestAccLibraryResourceMusicVideos(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckNoLibraryNamed(t, "TestMusicVideos"),
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "jellyfin_library" "test" {
+  name            = "TestMusicVideos"
+  collection_type = "musicvideos"
+  paths           = ["/media/movies"]
+}
+`,
+				Check: resource.TestCheckResourceAttr("jellyfin_library.test", "collection_type", "musicvideos"),
+			},
+		},
+	})
+}
+
 func TestAccLibraryResourceDocumentedExample(t *testing.T) {
 	example, err := os.ReadFile("../../examples/resources/jellyfin_library/resource.tf")
 	if err != nil {

@@ -139,11 +139,11 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"collection_type": schema.StringAttribute{
-				Description:         "The collection type (e.g., `movies`, `tvshows`, `music`, `books`, `homevideos`, `boxsets`, `mixed`).",
-				MarkdownDescription: "The collection type (e.g., `movies`, `tvshows`, `music`, `books`, `homevideos`, `boxsets`, `mixed`).",
+				Description:         "The collection type: one of " + strings.Join(collectionTypes, ", ") + ".",
+				MarkdownDescription: "The collection type: one of `" + strings.Join(collectionTypes, "`, `") + "`.",
 				Required:            true,
 				Validators: []validator.String{
-					stringvalidator.OneOf("movies", "tvshows", "music", "books", "homevideos", "boxsets", "mixed"),
+					stringvalidator.OneOf(collectionTypes...),
 				},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
@@ -187,6 +187,10 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 		},
 	}
 }
+
+// Jellyfin parses a collection type case-insensitively but returns it in this
+// spelling, so any other spelling would read back as a different value.
+var collectionTypes = []string{"movies", "tvshows", "music", "musicvideos", "homevideos", "boxsets", "books", "mixed"}
 
 func libraryOptionsAttributes() map[string]schema.Attribute {
 	optionalString := func(desc string) schema.StringAttribute {

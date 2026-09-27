@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -267,22 +268,44 @@ func TestUnitImageOptionTypeAcceptsOnlyJellyfinSpelling(t *testing.T) {
 	if !ok {
 		t.Fatal("image_options type is not a string attribute")
 	}
-	for value, expectError := range map[string]bool{
+	testUnitAssertStringValidation(t, typeAttr, map[string]bool{
 		"Backdrop": false,
 		"BoxRear":  false,
 		"backdrop": true,
 		"Boxrear":  true,
 		"Poster":   true,
-	} {
+	})
+}
+
+func TestUnitCollectionTypeAcceptsOnlyJellyfinSpelling(t *testing.T) {
+	resp := resource.SchemaResponse{}
+	NewLibraryResource().Schema(context.Background(), resource.SchemaRequest{}, &resp)
+	collectionType, ok := resp.Schema.Attributes["collection_type"].(schema.StringAttribute)
+	if !ok {
+		t.Fatal("collection_type is not a string attribute")
+	}
+	testUnitAssertStringValidation(t, collectionType, map[string]bool{
+		"movies":      false,
+		"musicvideos": false,
+		"mixed":       false,
+		"Movies":      true,
+		"musicVideos": true,
+		"photos":      true,
+	})
+}
+
+func testUnitAssertStringValidation(t *testing.T, a schema.StringAttribute, expectError map[string]bool) {
+	t.Helper()
+	for value, want := range expectError {
 		resp := validator.StringResponse{}
-		for _, v := range typeAttr.Validators {
+		for _, v := range a.Validators {
 			v.ValidateString(context.Background(), validator.StringRequest{
-				Path:        path.Root("type"),
+				Path:        path.Root("value"),
 				ConfigValue: types.StringValue(value),
 			}, &resp)
 		}
-		if resp.Diagnostics.HasError() != expectError {
-			t.Errorf("%q: expected error %t, got diagnostics: %v", value, expectError, resp.Diagnostics)
+		if resp.Diagnostics.HasError() != want {
+			t.Errorf("%q: expected error %t, got diagnostics: %v", value, want, resp.Diagnostics)
 		}
 	}
 }
