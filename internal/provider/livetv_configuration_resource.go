@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -22,11 +23,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 var (
 	_ resource.Resource                = &LiveTVConfigurationResource{}
 	_ resource.ResourceWithImportState = &LiveTVConfigurationResource{}
+	_ resource.ResourceWithModifyPlan  = &LiveTVConfigurationResource{}
+	_ wireBound                        = &LiveTVConfigurationResource{}
 )
 
 // NewLiveTVConfigurationResource creates a new Live TV configuration resource.
@@ -58,6 +62,12 @@ type LiveTVConfigurationResourceModel struct {
 	SaveRecordingNFO                         types.Bool   `tfsdk:"save_recording_nfo"`
 	SaveRecordingImages                      types.Bool   `tfsdk:"save_recording_images"`
 }
+
+var livetvWire = sync.OnceValues(func() (*wire.Binding, error) {
+	return wire.Bind(schemaOf(&LiveTVConfigurationResource{}), "LiveTvOptions", wire.Identity("id"))
+})
+
+func (r *LiveTVConfigurationResource) Wire() (*wire.Binding, error) { return livetvWire() }
 
 // TunerHostModel describes a tuner host entry.
 type TunerHostModel struct {
@@ -406,7 +416,23 @@ func (r *LiveTVConfigurationResource) ImportState(ctx context.Context, _ resourc
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("livetv"))...)
 }
 
+// ModifyPlan gates each configured field on the Jellyfin version it needs, so
+// a field a later pin adds is checked without a change here.
+func (r *LiveTVConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	if b := wireBinding(&resp.Diagnostics, livetvWire); b != nil {
+		resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
+	}
+}
+
 func (r *LiveTVConfigurationResource) apply(ctx context.Context, data *LiveTVConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+	b := wireBinding(diags, livetvWire)
+	if b == nil {
+		return
+	}
+
 	current, err := r.client.GetLiveTVConfiguration(ctx)
 	if err != nil {
 		diags.AddError("Failed to read current Live TV configuration", err.Error())
@@ -419,8 +445,7 @@ func (r *LiveTVConfigurationResource) apply(ctx context.Context, data *LiveTVCon
 		return
 	}
 
-	d := overlayLiveTVConfiguration(ctx, base, data)
-	if d.HasError() {
+	if d := b.OverlayModel(ctx, base, data); d.HasError() {
 		diags.Append(d...)
 		return
 	}
@@ -442,19 +467,24 @@ func (r *LiveTVConfigurationResource) apply(ctx context.Context, data *LiveTVCon
 		return
 	}
 
-	flattenLiveTVConfiguration(ctx, updated.RawJSON, data, diags)
+	diags.Append(b.FlattenAfterApply(ctx, updated.RawJSON, data)...)
 	data.ID = types.StringValue("livetv")
 	diags.Append(state.Set(ctx, data)...)
 }
 
 func (r *LiveTVConfigurationResource) read(ctx context.Context, data *LiveTVConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+	b := wireBinding(diags, livetvWire)
+	if b == nil {
+		return
+	}
+
 	current, err := r.client.GetLiveTVConfiguration(ctx)
 	if err != nil {
 		diags.AddError("Failed to read Live TV configuration", err.Error())
 		return
 	}
 
-	flattenLiveTVConfiguration(ctx, current.RawJSON, data, diags)
+	diags.Append(b.FlattenInto(ctx, current.RawJSON, data)...)
 	data.ID = types.StringValue("livetv")
 	diags.Append(state.Set(ctx, data)...)
 }

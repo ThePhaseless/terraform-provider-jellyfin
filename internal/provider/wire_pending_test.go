@@ -20,9 +20,6 @@ import (
 // their keys by hand. TestUnitWireBindings checks them like the others, and
 // each moves into its resource's Wire method when the resource switches.
 var pendingWireMigration = map[string]func() (*wire.Binding, error){
-	"jellyfin_livetv_configuration": func() (*wire.Binding, error) {
-		return wire.Bind(schemaOf(NewLiveTVConfigurationResource()), "LiveTvOptions", wire.Identity("id"))
-	},
 	"jellyfin_scheduled_task": func() (*wire.Binding, error) {
 		return wire.Bind(schemaOf(NewScheduledTaskResource()), "TaskInfo",
 			wire.Identity("id", "task_id"),
