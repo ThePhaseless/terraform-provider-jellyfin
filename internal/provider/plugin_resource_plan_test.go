@@ -5,6 +5,7 @@ package provider
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -125,5 +126,43 @@ func TestUnitPluginUpdateOnlyChangesState(t *testing.T) {
 	}
 	if fake.maxInFlight != 0 {
 		t.Error("Update sent an install or uninstall request")
+	}
+}
+
+func TestUnitPluginSupportedKeywordFailsPlanUnlessPackagesResolveIt(t *testing.T) {
+	// The build Jellyfin offers for the supported release on the server line
+	// the provider does not pin, as 2.6.3.0 is on 10.11.
+	build := pluginRelease(supportedSecurityPluginVersion()) + ".99"
+	installed := PluginResourceModel{
+		ID:               types.StringValue("94879a0cda244eb1aa06f28b4b9333b1"),
+		Name:             types.StringValue(securityPluginName),
+		Version:          types.StringValue(build),
+		InstalledVersion: types.StringValue(build),
+		RepositoryURL:    types.StringValue(securityPluginRepoURL),
+	}
+	supported := installed
+	supported.Version = types.StringValue(pluginVersionSupported)
+
+	cases := []struct {
+		name  string
+		fake  *fakePluginServer
+		fails bool
+	}{
+		{"packages list the installed build", &fakePluginServer{packages: []client.PackageInfo{{Name: securityPluginName, Versions: []client.VersionInfo{{Version: build}}}}}, false},
+		{"packages cannot be listed", &fakePluginServer{packagesStatus: http.StatusInternalServerError}, true},
+		{"repositories do not offer the plugin", &fakePluginServer{packages: bookshelfPackage("13.0.0.0")}, true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			resp := modifyPluginPlan(t, newFakePluginResource(t, c.fake), installed, supported)
+
+			if resp.Diagnostics.HasError() != c.fails {
+				t.Fatalf("errors = %v, want failure %t", resp.Diagnostics.Errors(), c.fails)
+			}
+			if resp.RequiresReplace.Contains(path.Root("version")) {
+				t.Error("plan replaces the plugin")
+			}
+		})
 	}
 }

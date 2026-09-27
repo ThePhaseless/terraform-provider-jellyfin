@@ -619,7 +619,7 @@ func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, 
 	case version.IsNull() || version.IsUnknown() || version.ValueString() == "":
 		// Unset: use supported for known plugins, latest for others.
 		if supported != "" {
-			return r.resolveSupportedBuild(ctx, name, supported), nil
+			return r.resolveSupportedBuild(ctx, name, supported)
 		}
 		return r.resolveLatestVersion(ctx, name)
 
@@ -627,7 +627,7 @@ func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, 
 		if supported == "" {
 			return "", fmt.Errorf("version %q is not available for plugin %q — no supported version is defined", pluginVersionSupported, name)
 		}
-		return r.resolveSupportedBuild(ctx, name, supported), nil
+		return r.resolveSupportedBuild(ctx, name, supported)
 
 	case version.ValueString() == pluginVersionLatest:
 		latest, err := r.resolveLatestVersion(ctx, name)
@@ -675,21 +675,23 @@ func (r *PluginResource) resolveLatestVersion(ctx context.Context, name string) 
 }
 
 // resolveSupportedBuild returns the build of the supported release that this
-// server is offered. JellyfinSecurity ships one build per server ABI under a
-// single release (2.6.3.0 for Jellyfin 10.11, 2.6.3.1 for 12.x) and Jellyfin
-// lists only the builds its ABI accepts, so the pinned build is not installable
-// on the other server line while its sibling is.
-func (r *PluginResource) resolveSupportedBuild(ctx context.Context, name, supported string) string {
+// server is offered, or "" if the repositories do not offer the plugin.
+// JellyfinSecurity ships one build per server ABI under a single release
+// (2.6.3.0 for Jellyfin 10.11, 2.6.3.1 for 12.x) and Jellyfin lists only the
+// builds its ABI accepts, so the pinned build is not installable on the other
+// server line while its sibling is. Falling back to the pinned build when the
+// packages cannot be listed would plan a replacement on the other line.
+func (r *PluginResource) resolveSupportedBuild(ctx context.Context, name, supported string) (string, error) {
 	pkgs, err := r.client.GetAvailablePackages(ctx)
 	if err != nil {
-		return supported
+		return "", fmt.Errorf("listing available packages: %w", err)
 	}
 	for _, pkg := range pkgs {
 		if pkg.Name == name {
-			return pickReleaseBuild(pkg.Versions, supported)
+			return pickReleaseBuild(pkg.Versions, supported), nil
 		}
 	}
-	return supported
+	return "", nil
 }
 
 // pickReleaseBuild returns want when it is offered, otherwise the highest

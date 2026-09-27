@@ -243,6 +243,10 @@ func testAccInstallSecurityPlugin(t *testing.T) *client.Client {
 	if err != nil {
 		t.Fatalf("resolving the supported JellyfinSecurity build: %v", err)
 	}
+	// samePluginVersion matches any version against an empty one.
+	if version == "" {
+		t.Fatalf("the repositories Jellyfin reads do not offer %s", securityPluginName)
+	}
 	if installed != nil && installed.Status == "Active" && samePluginVersion(installed.Version, version) {
 		return c
 	}

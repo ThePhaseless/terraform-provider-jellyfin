@@ -42,6 +42,9 @@ type fakePluginServer struct {
 	keep bool
 	// status, when set, replaces the 204 DELETE answers with.
 	status int
+	// packagesStatus, when set, is what GET /Packages answers instead of the
+	// packages.
+	packagesStatus int
 }
 
 func (f *fakePluginServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -55,6 +58,10 @@ func (f *fakePluginServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && r.URL.Path == "/Packages":
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if f.packagesStatus != 0 {
+			w.WriteHeader(f.packagesStatus)
+			return
+		}
 		if err := json.NewEncoder(w).Encode(f.packages); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
