@@ -102,6 +102,8 @@ var unexpandedSchemas = map[string]bool{
 // and precision, so "%[1]s" and "%5d" each print one argument.
 var formatVerb = regexp.MustCompile(`%[-+# 0]*(?:\[\d+\])?(?:\*|\d+)?(?:\.(?:\[\d+\])?(?:\*|\d+)?)?(?:\[\d+\])?[a-zA-Z%]`)
 
+var formatArgIndex = regexp.MustCompile(`\[\d+\]`)
+
 // A resolved request path writes a runtime value as "{}" and, when the value
 // is computed from parameters of the enclosing function, lists their indexes
 // inside it, as in "{#1}". That tells a parameter passed on as the whole path
@@ -577,25 +579,36 @@ func clientAPICalls(dir string) ([]apiCall, error) {
 
 // packageAPICalls finds request helpers instead of listing them: a function
 // that passes a parameter on as the whole request path becomes a request site
-// for its callers, repeated until none turns up. A parameter built into a
-// larger path is recorded as a runtime value. A call in the package that
-// passes path text for such a parameter, or a request site used as a value,
-// fails instead, since the guard would record the wrong endpoint or none.
+// for its callers, repeated until none turns up. Requests start where they
+// enter net/http through netHTTPRequestSites. A parameter built into a larger
+// path, including every argument of a variadic one, is recorded as a runtime
+// value. The guard fails instead of recording the wrong endpoint or none when
+// a call in the package passes path text for such a parameter, when a request
+// site is used other than by calling it from a function declaration or is
+// called as a method expression, and when a method named like a request site
+// is called through an interface or on a value whose type comes from an
+// import.
 //
-// Two cases still record the wrong endpoint. Only this package is read, so
-// path text that a caller elsewhere passes to an exported method, such as
-// "Counts" for an item ID, selects a route the guard does not see. And a path
-// operand that is not a constant, a parameter or a local variable it can
-// follow, such as a call result, a field or a package variable, is recorded as
-// a runtime value even when it always holds the same text.
+// Three cases still record the wrong endpoint or none. Only this package is
+// read, so path text that a caller elsewhere passes to an exported method,
+// such as "Counts" for an item ID, selects a route the guard does not see. A
+// path operand is read as text only when it is a constant or a local variable
+// whose assignments it can read; anything else, such as a call result, a
+// field, an index expression or a package variable, is recorded as a runtime
+// value even when it always holds the same text. So is a constant format
+// argument that fmt may not print as its value: one of a named type, which
+// may have a String method, or one whose verb takes a width or precision
+// from another argument. And a request that enters net/http any other way,
+// such as through an aliased import of net/http or an http.Request built by
+// hand, is not seen at all.
 func packageAPICalls(fset *token.FileSet, files []*ast.File) ([]apiCall, error) {
 	info := &types.Info{
 		Defs:  map[*ast.Ident]types.Object{},
 		Uses:  map[*ast.Ident]types.Object{},
 		Types: map[ast.Expr]types.TypeAndValue{},
 	}
-	// Only the scopes of local names and the values of constants are needed, so
-	// imports stay unresolved and the type errors that causes are ignored.
+	// Only the package's own names, methods and constants are needed, so imports
+	// stay unresolved and the type errors that causes are ignored.
 	conf := types.Config{Error: func(error) {}}
 	_, _ = conf.Check("client", fset, files, info)
 
@@ -608,10 +621,10 @@ func packageAPICalls(fset *token.FileSet, files []*ast.File) ([]apiCall, error) 
 		}
 	}
 
-	f := &requestFinder{fset: fset, info: info, sites: map[string][]requestSite{}, embeds: map[string][]int{}}
+	f := &requestFinder{fset: fset, info: info, sites: map[types.Object][]requestSite{}, embeds: map[types.Object][]int{}}
 	for {
 		var calls []apiCall
-		f.reached = map[string]bool{}
+		f.reached = map[types.Object]bool{}
 		changed := false
 		for _, fn := range funcs {
 			fnCalls, fnSites, fnEmbeds, err := f.requestsIn(fn)
@@ -619,7 +632,7 @@ func packageAPICalls(fset *token.FileSet, files []*ast.File) ([]apiCall, error) 
 				return nil, err
 			}
 			calls = append(calls, fnCalls...)
-			key := siteKey(fn)
+			key := info.Defs[fn.Name]
 			for _, site := range fnSites {
 				if !slices.Contains(f.sites[key], site) {
 					f.sites[key] = append(f.sites[key], site)
@@ -637,13 +650,15 @@ func packageAPICalls(fset *token.FileSet, files []*ast.File) ([]apiCall, error) 
 			continue
 		}
 
-		for _, fn := range funcs {
-			if err := f.siteValues(fn); err != nil {
-				return nil, err
+		for _, file := range files {
+			for _, decl := range file.Decls {
+				if err := f.siteValues(decl); err != nil {
+					return nil, err
+				}
 			}
 		}
 		for _, fn := range funcs {
-			if key := siteKey(fn); len(f.sites[key]) > 0 && !f.reached[key] {
+			if key := info.Defs[fn.Name]; len(f.sites[key]) > 0 && !f.reached[key] {
 				return nil, fmt.Errorf("%s: %s passes a parameter on as a request path, but nothing in its package calls it, so the guard cannot see the endpoints it requests", fset.Position(fn.Pos()), fn.Name.Name)
 			}
 		}
@@ -670,39 +685,61 @@ var netHTTPRequestSites = map[string]requestSite{
 	"PostForm":              {method: http.MethodPost, pathArg: 0},
 }
 
-// requestFinder holds, by siteKey, the request sites found so far and the
-// parameters each function builds into a request path.
+// requestFinder holds, by the function's object, the request sites found so
+// far and the parameters each function builds into a request path. Keying by
+// object keeps a method of another type, or the builtin delete, apart from a
+// request helper of the same name.
 type requestFinder struct {
 	fset    *token.FileSet
 	info    *types.Info
-	sites   map[string][]requestSite
-	embeds  map[string][]int
-	reached map[string]bool
+	sites   map[types.Object][]requestSite
+	embeds  map[types.Object][]int
+	reached map[types.Object]bool
 }
 
-// siteKey names a function the way a call spells it, so the client's delete
-// method stays apart from the builtin delete.
-func siteKey(fn *ast.FuncDecl) string {
-	if fn.Recv != nil {
-		return "." + fn.Name.Name
-	}
-	return fn.Name.Name
-}
-
-func (f *requestFinder) callSites(call *ast.CallExpr) (string, []requestSite) {
+func (f *requestFinder) callSites(call *ast.CallExpr) (types.Object, []requestSite, error) {
 	switch fun := call.Fun.(type) {
 	case *ast.SelectorExpr:
 		if isNetHTTP(fun.X) {
 			if site, ok := netHTTPRequestSites[fun.Sel.Name]; ok {
-				return "", []requestSite{site}
+				return nil, []requestSite{site}, nil
 			}
-			return "", nil
+			return nil, nil, nil
 		}
-		return "." + fun.Sel.Name, f.sites["."+fun.Sel.Name]
+		obj := f.info.Uses[fun.Sel]
+		if len(f.sites[obj]) > 0 && f.info.Types[fun.X].IsType() {
+			return nil, nil, fmt.Errorf("%s is called as a method expression, which takes the receiver as its first argument, so the guard would read the path from the wrong argument; call it on the client instead", types.ExprString(fun))
+		}
+		if err := f.unresolvedSite(fun); err != nil {
+			return nil, nil, err
+		}
+		return obj, f.sites[obj], nil
 	case *ast.Ident:
-		return fun.Name, f.sites[fun.Name]
+		obj := f.info.Uses[fun]
+		return obj, f.sites[obj], nil
 	}
-	return "", nil
+	return nil, nil, nil
+}
+
+// unresolvedSite rejects a method named like a request helper when the type
+// check cannot tell which method it is: one called through an interface, or on
+// a value whose type comes from an import, which the check does not load.
+func (f *requestFinder) unresolvedSite(sel *ast.SelectorExpr) error {
+	switch obj := f.info.Uses[sel.Sel].(type) {
+	case nil:
+	case *types.Func:
+		if recv := obj.Signature().Recv(); recv == nil || !types.IsInterface(recv.Type()) {
+			return nil
+		}
+	default:
+		return nil
+	}
+	for site := range f.sites {
+		if site.Name() == sel.Sel.Name {
+			return fmt.Errorf("the guard cannot tell whether %s is the request helper %s, since it is called through an interface or on a value whose type comes from an import; call the request helper on the client directly", types.ExprString(sel), site.Name())
+		}
+	}
+	return nil
 }
 
 func isNetHTTP(expr ast.Expr) bool {
@@ -730,7 +767,11 @@ func (f *requestFinder) requestsIn(fn *ast.FuncDecl) ([]apiCall, []requestSite, 
 		if !ok {
 			return true
 		}
-		key, callee := f.callSites(call)
+		key, callee, err := f.callSites(call)
+		if err != nil {
+			firstErr = fmt.Errorf("%s: %w", f.fset.Position(call.Pos()), err)
+			return false
+		}
 		if len(callee) > 0 {
 			f.reached[key] = true
 		}
@@ -745,7 +786,7 @@ func (f *requestFinder) requestsIn(fn *ast.FuncDecl) ([]apiCall, []requestSite, 
 			embeds = append(embeds, embedded...)
 		}
 		for _, i := range f.embeds[key] {
-			embedded, err := r.embeddedArg(call, strings.TrimPrefix(key, "."), i)
+			embedded, err := r.embeddedArg(call, key, i)
 			if err != nil {
 				firstErr = fmt.Errorf("%s: %w", f.fset.Position(call.Pos()), err)
 				return false
@@ -757,14 +798,19 @@ func (f *requestFinder) requestsIn(fn *ast.FuncDecl) ([]apiCall, []requestSite, 
 	return calls, sites, embeds, firstErr
 }
 
-// siteValues rejects a request site that fn uses other than by calling it, as
-// in f := c.get, since the guard cannot tell what is requested through it.
-func (f *requestFinder) siteValues(fn *ast.FuncDecl) error {
+// siteValues rejects a request site that decl uses other than by calling it
+// from a function declaration, as in f := c.get or a package variable's
+// initializer, since the guard cannot see what is requested through it.
+func (f *requestFinder) siteValues(decl ast.Decl) error {
+	fn, inFunc := decl.(*ast.FuncDecl)
+	if inFunc && fn.Body == nil {
+		return nil
+	}
 	skip := map[ast.Node]bool{}
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
+	ast.Inspect(decl, func(n ast.Node) bool {
 		switch e := n.(type) {
 		case *ast.CallExpr:
-			skip[e.Fun] = true
+			skip[e.Fun] = inFunc
 		case *ast.SelectorExpr:
 			skip[e.Sel] = true
 		}
@@ -772,23 +818,28 @@ func (f *requestFinder) siteValues(fn *ast.FuncDecl) error {
 	})
 
 	var err error
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
+	ast.Inspect(decl, func(n ast.Node) bool {
 		if err != nil || skip[n] {
 			return err == nil
 		}
 		var name string
 		switch e := n.(type) {
 		case *ast.SelectorExpr:
-			if _, ok := netHTTPRequestSites[e.Sel.Name]; (ok && isNetHTTP(e.X)) || len(f.sites["."+e.Sel.Name]) > 0 {
+			if _, ok := netHTTPRequestSites[e.Sel.Name]; (ok && isNetHTTP(e.X)) || len(f.sites[f.info.Uses[e.Sel]]) > 0 {
 				name = types.ExprString(e)
+			} else if unresolved := f.unresolvedSite(e); unresolved != nil {
+				err = fmt.Errorf("%s: %w", f.fset.Position(n.Pos()), unresolved)
 			}
 		case *ast.Ident:
-			if _, ok := f.info.Uses[e].(*types.Func); ok && len(f.sites[e.Name]) > 0 {
+			if len(f.sites[f.info.Uses[e]]) > 0 {
 				name = e.Name
 			}
 		}
-		if name != "" {
+		switch {
+		case name != "" && inFunc:
 			err = fmt.Errorf("%s: %s sends requests but is used here as a value, so the guard cannot see what it requests; call it directly", f.fset.Position(n.Pos()), name)
+		case name != "":
+			err = fmt.Errorf("%s: %s sends requests but is used here outside a function declaration, where the guard does not look; call it from a function", f.fset.Position(n.Pos()), name)
 		}
 		return err == nil
 	})
@@ -870,21 +921,29 @@ func (r *pathResolver) request(call *ast.CallExpr, site requestSite) ([]apiCall,
 
 // embeddedArg checks argument i of a call to callee, which builds that
 // argument into a request path, and returns the parameters of fn it is
-// computed from, which fn then builds into a request path as well.
-func (r *pathResolver) embeddedArg(call *ast.CallExpr, callee string, i int) ([]int, error) {
-	if i >= len(call.Args) {
-		return nil, fmt.Errorf("call %s has too few arguments", types.ExprString(call))
-	}
-	values, err := r.operand(call.Args[i])
-	if err != nil {
-		return nil, err
-	}
-	var params []int
-	for _, v := range values {
-		if text := untagPath(v); strings.ReplaceAll(text, "{}", "") != "" {
-			return nil, fmt.Errorf("%s builds argument %d into a request path and the guard records it as a runtime value, so it cannot see which endpoint %q selects; pass the whole path to a request helper instead", callee, i, text)
+// computed from, which fn then builds into a request path as well. For a
+// variadic parameter, that is every argument from i on.
+func (r *pathResolver) embeddedArg(call *ast.CallExpr, callee types.Object, i int) ([]int, error) {
+	args := call.Args
+	if sig, ok := callee.Type().(*types.Signature); !ok || !sig.Variadic() || i != sig.Params().Len()-1 {
+		if i >= len(args) {
+			return nil, fmt.Errorf("call %s has too few arguments", types.ExprString(call))
 		}
-		params = append(params, placeholderParams(v)...)
+		args = args[:i+1]
+	}
+
+	var params []int
+	for j := i; j < len(args); j++ {
+		values, err := r.operand(args[j])
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range values {
+			if text := untagPath(v); strings.ReplaceAll(text, "{}", "") != "" {
+				return nil, fmt.Errorf("%s builds argument %d into a request path and the guard records it as a runtime value, so it cannot see which endpoint %q selects; pass the whole path to a request helper instead", callee.Name(), j, text)
+			}
+			params = append(params, placeholderParams(v)...)
+		}
 	}
 	return params, nil
 }
@@ -937,7 +996,9 @@ func (r *pathResolver) sprintfValues(format string, args []ast.Expr) ([]string, 
 		printed := []string{"%"}
 		if i := argIndexes[n]; i >= 0 {
 			printed = []string{"{}"}
-			if i < len(args) {
+			if i < len(args) && r.info.Types[args[i]].Value != nil {
+				printed = []string{formatConstant(format[loc[0]:loc[1]], r.info.Types[args[i]])}
+			} else if i < len(args) {
 				var err error
 				if printed, err = r.operand(args[i]); err != nil {
 					return nil, err
@@ -948,6 +1009,36 @@ func (r *pathResolver) sprintfValues(format string, args []ast.Expr) ([]string, 
 		last = loc[1]
 	}
 	return concatEach(out, []string{format[last:]}), nil
+}
+
+// formatConstant prints a constant format argument the way fmt prints it with
+// verb, so a number in a path reads as its text. It prints a runtime value
+// instead for a constant of a named type, since fmt calls any String method
+// that type has, and for a verb that takes its width or precision from
+// another argument.
+func formatConstant(verb string, tv types.TypeAndValue) string {
+	basic, ok := types.Unalias(tv.Type).(*types.Basic)
+	if !ok || strings.Contains(verb, "*") {
+		return "{}"
+	}
+	var v any
+	switch info := basic.Info(); {
+	case info&types.IsString != 0:
+		v = constant.StringVal(tv.Value)
+	case info&types.IsBoolean != 0:
+		v = constant.BoolVal(tv.Value)
+	case info&types.IsInteger != 0:
+		n, exact := constant.Int64Val(tv.Value)
+		if !exact {
+			return "{}"
+		}
+		v = n
+	case info&types.IsFloat != 0:
+		v, _ = constant.Float64Val(tv.Value)
+	default:
+		return "{}"
+	}
+	return fmt.Sprintf(formatArgIndex.ReplaceAllString(verb, ""), v)
 }
 
 // formatArgs returns the index of the argument each verb of format prints, or
@@ -1436,6 +1527,11 @@ func TestUnitReduceOpenAPISpecRejectsUnmappedNamedConfiguration(t *testing.T) {
 
 const testClientHelpersSource = `package client
 
+type Client struct {
+	BaseURL    string
+	HTTPClient *http.Client
+}
+
 func (c *Client) doRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
 	url := c.BaseURL + path
 	return http.NewRequestWithContext(ctx, method, url, body)
@@ -1482,12 +1578,25 @@ func TestUnitPackageAPICalls(t *testing.T) {
 const (
 	countsSegment = "Counts"
 	pingPath      = "/System/" + "Ping"
+	primaryIndex  = 0
 )
 
-func (c *Client) Calls(ctx context.Context, id string, existing bool) {
+type imageType string
+
+func (t imageType) String() string { return "Primary" }
+
+const backdrop imageType = "Backdrop"
+
+type cache struct{}
+
+func (k *cache) get(ctx context.Context, key string, v any) error {
+	return nil
+}
+
+func (c *Client) Calls(ctx context.Context, id string, existing bool, index int, k *cache) {
 	c.get(ctx, "/System/Info", nil)
 	c.getRaw(ctx, fmt.Sprintf("/Users/%s/Items?limit=%d", url.PathEscape(id), 5))
-	c.get(ctx, fmt.Sprintf("/Items/%[1]s/Images/%-5d", id, 1), nil)
+	c.get(ctx, fmt.Sprintf("/Items/%[1]s/Images/%-5d", id, index), nil)
 	c.delete(ctx, "/Items/"+id)
 	apiPath := "/Library/VirtualFolders?" + params.Encode()
 	c.postRaw(ctx, apiPath, "")
@@ -1508,6 +1617,11 @@ func (c *Client) Calls(ctx context.Context, id string, existing bool) {
 	c.createKey(ctx, "Terraform")
 	c.get(ctx, "/Items/"+countsSegment, nil)
 	c.getRaw(ctx, pingPath)
+	c.getRaw(ctx, fmt.Sprintf("/Items/%s/Images/%s/%[3]d", id, "Backdrop", primaryIndex))
+	c.getRaw(ctx, fmt.Sprintf("/Items/%s/Images/%s", id, backdrop))
+	c.getRaw(ctx, "/Items/"+id+"/Images/"+string(backdrop))
+	k.get(ctx, "/not/a/request", nil)
+	delete(map[string]string{}, "/not/a/request")
 }
 
 func (c *Client) Scoped(ctx context.Context, id string) {
@@ -1568,6 +1682,9 @@ func (c *Client) createKey(ctx context.Context, app string) error {
 		{http.MethodGet, "/System/Info/Public"},
 		{http.MethodGet, "/Items/Counts"},
 		{http.MethodGet, "/System/Ping"},
+		{http.MethodGet, "/Items/{}/Images/Backdrop/0"},
+		{http.MethodGet, "/Items/{}/Images/{}"},
+		{http.MethodGet, "/Items/{}/Images/Backdrop"},
 		{http.MethodGet, "/Startup/User"},
 		{http.MethodDelete, "/Plugins/{}"},
 		{http.MethodGet, "/Items/{}"},
@@ -1649,6 +1766,71 @@ func (c *Client) Counts(ctx context.Context) error {
 }
 `,
 			wantErr: `getItem builds argument 1 into a request path and the guard records it as a runtime value, so it cannot see which endpoint "Counts" selects`,
+		},
+		"path text for a later variadic argument built into a path": {
+			src: `package client
+
+func (c *Client) getPath(ctx context.Context, parts ...string) error {
+	return c.get(ctx, "/"+strings.Join(parts, "/"), nil)
+}
+
+func (c *Client) Counts(ctx context.Context, id string) error {
+	return c.getPath(ctx, id, "Counts")
+}
+`,
+			wantErr: `getPath builds argument 2 into a request path and the guard records it as a runtime value, so it cannot see which endpoint "Counts" selects`,
+		},
+		"request helper called through an interface": {
+			src: `package client
+
+type getter interface {
+	get(ctx context.Context, path string, decode func(io.Reader) error) error
+}
+
+func (c *Client) Hidden(ctx context.Context) {
+	var g getter = c
+	g.get(ctx, "/Hidden", nil)
+}
+`,
+			wantErr: "the guard cannot tell whether g.get is the request helper get",
+		},
+		"request helper called on a value whose type comes from an import": {
+			src: `package client
+
+func (c *Client) Hidden(ctx context.Context) {
+	lo.Must(c, nil).get(ctx, "/Hidden", nil)
+}
+`,
+			wantErr: `the guard cannot tell whether lo.Must(c, nil).get is the request helper get`,
+		},
+		"request helper called as a method expression": {
+			src: `package client
+
+func (c *Client) Hidden(ctx context.Context) {
+	(*Client).get(c, ctx, "/Hidden", nil)
+}
+`,
+			wantErr: "(*Client).get is called as a method expression",
+		},
+		"request helper held by a package variable": {
+			src: `package client
+
+var getHidden = (*Client).get
+
+func (c *Client) Hidden(ctx context.Context) {
+	getHidden(c, ctx, "/Hidden", nil)
+}
+`,
+			wantErr: "(*Client).get sends requests but is used here outside a function declaration",
+		},
+		"request helper called from a package variable's function literal": {
+			src: `package client
+
+var hidden = func(ctx context.Context, c *Client) error {
+	return c.get(ctx, "/Hidden", nil)
+}
+`,
+			wantErr: "c.get sends requests but is used here outside a function declaration",
 		},
 		"path text passed on to a parameter built into a path": {
 			src: `package client
