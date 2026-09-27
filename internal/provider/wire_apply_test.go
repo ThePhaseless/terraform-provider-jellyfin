@@ -112,21 +112,195 @@ func planRead(t *testing.T, r resource.Resource, doc string, set ...planValue) t
 	return plan
 }
 
-func updateAgainst(t *testing.T, r resource.Resource, c *client.Client, plan tfsdk.Plan) resource.UpdateResponse {
+func configure(t *testing.T, r resource.Resource, c *client.Client) {
 	t.Helper()
-	ctx := context.Background()
 	configurable, ok := r.(resource.ResourceWithConfigure)
 	if !ok {
 		t.Fatalf("%T takes no client", r)
 	}
 	var configured resource.ConfigureResponse
-	configurable.Configure(ctx, resource.ConfigureRequest{ProviderData: c}, &configured)
+	configurable.Configure(context.Background(), resource.ConfigureRequest{ProviderData: c}, &configured)
 	if configured.Diagnostics.HasError() {
 		t.Fatalf("configure: %v", configured.Diagnostics)
 	}
+}
+
+func updateAgainst(t *testing.T, r resource.Resource, c *client.Client, plan tfsdk.Plan) resource.UpdateResponse {
+	t.Helper()
+	configure(t, r, c)
 	resp := resource.UpdateResponse{State: tfsdk.State(plan)}
-	r.Update(ctx, resource.UpdateRequest{Plan: plan, State: tfsdk.State(plan)}, &resp)
+	r.Update(context.Background(), resource.UpdateRequest{Plan: plan, State: tfsdk.State(plan)}, &resp)
 	return resp
+}
+
+func readAgainst(t *testing.T, r resource.Resource, c *client.Client, state tfsdk.State) resource.ReadResponse {
+	t.Helper()
+	configure(t, r, c)
+	resp := resource.ReadResponse{State: state}
+	r.Read(context.Background(), resource.ReadRequest{State: state}, &resp)
+	return resp
+}
+
+// jsonAt returns the value at keys in raw, indexing arrays with ints.
+func jsonAt(t *testing.T, raw []byte, keys ...any) any {
+	t.Helper()
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatalf("parsing %s: %v", raw, err)
+	}
+	for _, k := range keys {
+		switch k := k.(type) {
+		case string:
+			m, ok := v.(map[string]any)
+			if !ok {
+				t.Fatalf("%s holds no object at %v", raw, k)
+			}
+			v = m[k]
+		case int:
+			l, ok := v.([]any)
+			if !ok || k >= len(l) {
+				t.Fatalf("%s holds no element %d", raw, k)
+			}
+			v = l[k]
+		}
+	}
+	return v
+}
+
+func TestUnitApplyPostsPlannedValueAndKeepsUnclaimedKeys(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		resource resource.Resource
+		endpoint string
+		before   string
+		set      planValue
+		key      []any
+		want     string
+	}{
+		{
+			name: "encoding", resource: NewEncodingConfigurationResource(), endpoint: "/System/Configuration/encoding",
+			before: `{"SubtitleExtractionTimeoutMinutes":30,"Unclaimed":"kept"}`,
+			set:    planValue{path.Root("subtitle_extraction_timeout_minutes"), types.Int64Value(45)},
+			key:    []any{"SubtitleExtractionTimeoutMinutes"}, want: `45`,
+		},
+		{
+			name: "networking", resource: NewNetworkingConfigurationResource(), endpoint: "/System/Configuration/network",
+			before: `{"BaseUrl":"/jellyfin","Unclaimed":"kept"}`,
+			set:    planValue{path.Root("base_url"), types.StringValue("/media")},
+			key:    []any{"BaseUrl"}, want: `"/media"`,
+		},
+		{
+			name: "system", resource: NewSystemConfigurationResource(), endpoint: "/System/Configuration",
+			before: `{"PathSubstitutions":[{"From":"/a","To":"/b"}],"Unclaimed":"kept"}`,
+			set:    planValue{path.Root("path_substitutions").AtListIndex(0).AtName("to"), types.StringValue("/c")},
+			key:    []any{"PathSubstitutions", 0, "To"}, want: `"/c"`,
+		},
+		{
+			name: "livetv", resource: NewLiveTVConfigurationResource(), endpoint: "/System/Configuration/livetv",
+			before: `{"TunerHosts":[{"Url":"http://tuner","Type":"M3U","FriendlyName":"Tuner"}],"Unclaimed":"kept"}`,
+			set:    planValue{path.Root("tuner_hosts").AtListIndex(0).AtName("friendly_name"), types.StringValue("Renamed")},
+			key:    []any{"TunerHosts", 0, "FriendlyName"}, want: `"Renamed"`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := &fakeJellyfin{get: tc.endpoint, post: tc.endpoint, before: tc.before, after: func(posted []byte) string { return string(posted) }}
+			resp := updateAgainst(t, tc.resource, srv.client(t), planRead(t, tc.resource, tc.before, tc.set))
+			if resp.Diagnostics.HasError() {
+				t.Fatalf("apply: %v", resp.Diagnostics)
+			}
+			posted := srv.body()
+			checkSameJSON(t, jsonAt(t, posted, tc.key...), tc.want)
+			checkSameJSON(t, jsonAt(t, posted, "Unclaimed"), `"kept"`)
+		})
+	}
+}
+
+func TestUnitReadReplacesStateWithServedValue(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name          string
+		resource      resource.Resource
+		get           string
+		state, served string
+		set           []planValue
+		at            path.Path
+		want          attr.Value
+	}{
+		{
+			name: "encoding cleared", resource: NewEncodingConfigurationResource(), get: "/System/Configuration/encoding",
+			state:  `{"SubtitleExtractionTimeoutMinutes":45}`,
+			served: `{}`,
+			at:     path.Root("subtitle_extraction_timeout_minutes"), want: types.Int64Null(),
+		},
+		{
+			name: "networking cleared", resource: NewNetworkingConfigurationResource(), get: "/System/Configuration/network",
+			state:  `{"BaseUrl":"/jellyfin"}`,
+			served: `{"BaseUrl":null}`,
+			at:     path.Root("base_url"), want: types.StringNull(),
+		},
+		{
+			name: "system cleared", resource: NewSystemConfigurationResource(), get: "/System/Configuration",
+			state:  `{"PathSubstitutions":[{"From":"/a","To":"/b"}]}`,
+			served: `{"PathSubstitutions":[{"From":"/a"}]}`,
+			at:     path.Root("path_substitutions").AtListIndex(0).AtName("to"), want: types.StringNull(),
+		},
+		{
+			name: "system served empty", resource: NewSystemConfigurationResource(), get: "/System/Configuration",
+			state:  `{"MetadataOptions":[{"ItemType":"Movie"}]}`,
+			served: `{"MetadataOptions":[{"ItemType":"Movie","DisabledMetadataSavers":[]}]}`,
+			at:     path.Root("metadata_options").AtListIndex(0).AtName("disabled_metadata_savers"),
+			want:   types.ListValueMust(types.StringType, []attr.Value{}),
+		},
+		{
+			name: "livetv cleared", resource: NewLiveTVConfigurationResource(), get: "/System/Configuration/livetv",
+			state:  `{"TunerHosts":[{"Url":"http://tuner","Type":"M3U","FriendlyName":"Tuner"}]}`,
+			served: `{"TunerHosts":[{"Url":"http://tuner","Type":"M3U"}]}`,
+			at:     path.Root("tuner_hosts").AtListIndex(0).AtName("friendly_name"), want: types.StringNull(),
+		},
+		{
+			name: "livetv served empty", resource: NewLiveTVConfigurationResource(), get: "/System/Configuration/livetv",
+			state:  `{"TunerHosts":[{"Url":"http://tuner","Type":"M3U"}]}`,
+			served: `{"TunerHosts":[{"Url":"http://tuner","Type":"M3U","Source":""}]}`,
+			at:     path.Root("tuner_hosts").AtListIndex(0).AtName("source"), want: types.StringValue(""),
+		},
+		{
+			name: "scheduled task cleared", resource: NewScheduledTaskResource(), get: "/ScheduledTasks/abc",
+			state:  `{"Id":"abc","Triggers":[{"Type":"DailyTrigger","TimeOfDayTicks":1,"MaxRuntimeTicks":2}]}`,
+			served: `{"Id":"abc","Triggers":[{"Type":"DailyTrigger","TimeOfDayTicks":1}]}`,
+			set:    []planValue{{path.Root("task_id"), types.StringValue("abc")}},
+			at:     path.Root("triggers").AtListIndex(0).AtName("max_runtime_ticks"), want: types.Int64Null(),
+		},
+		{
+			name: "scheduled task served empty", resource: NewScheduledTaskResource(), get: "/ScheduledTasks/abc",
+			state:  `{"Id":"abc","Triggers":[{"Type":"IntervalTrigger","IntervalTicks":1}]}`,
+			served: `{"Id":"abc","Triggers":[{"Type":"IntervalTrigger","IntervalTicks":1,"DayOfWeek":""}]}`,
+			set:    []planValue{{path.Root("task_id"), types.StringValue("abc")}},
+			at:     path.Root("triggers").AtListIndex(0).AtName("day_of_week"), want: types.StringValue(""),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+
+			srv := &fakeJellyfin{get: tc.get, before: tc.served}
+			resp := readAgainst(t, tc.resource, srv.client(t), tfsdk.State(planRead(t, tc.resource, tc.state, tc.set...)))
+			if resp.Diagnostics.HasError() {
+				t.Fatalf("read: %v", resp.Diagnostics)
+			}
+			var got attr.Value
+			if d := resp.State.GetAttribute(ctx, tc.at, &got); d.HasError() {
+				t.Fatal(d)
+			}
+			if !got.Equal(tc.want) {
+				t.Errorf("%s = %v after read, want %v", tc.at, got, tc.want)
+			}
+		})
+	}
 }
 
 func TestUnitApplyKeepsPlannedNullInsideListElementServedEmpty(t *testing.T) {
