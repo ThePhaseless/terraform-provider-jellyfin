@@ -7,10 +7,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // User represents a Jellyfin user.
@@ -66,6 +68,11 @@ type UserPolicy struct {
 	EnableSubtitleManagement         bool              `json:"EnableSubtitleManagement"`
 	EnableLyricManagement            bool              `json:"EnableLyricManagement"`
 }
+
+// errBlankUserID stops a user update before it is sent: Jellyfin applies an
+// update whose userId is missing or only whitespace to the signed-in user,
+// which is the account the provider authenticates as.
+var errBlankUserID = errors.New("user id is blank")
 
 // AuthResult represents the result of a user authentication.
 type AuthResult struct {
@@ -132,12 +139,15 @@ func (c *Client) GetUserRaw(ctx context.Context, id string) (string, error) {
 	return raw, nil
 }
 
-// UpdateUserRaw POSTs a raw user JSON to /Users/{id}.
+// UpdateUserRaw POSTs a raw user JSON to /Users?userId={id}.
 // The server replaces the user's Configuration with the one in the body, so
 // the body must carry the Configuration read from GetUserRaw or the user's
 // settings are reset to defaults.
 func (c *Client) UpdateUserRaw(ctx context.Context, id, userJSON string) error {
-	if err := c.postRaw(ctx, fmt.Sprintf("/Users/%s", url.PathEscape(id)), userJSON); err != nil {
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("updating user: %w", errBlankUserID)
+	}
+	if err := c.postRaw(ctx, fmt.Sprintf("/Users?userId=%s", url.QueryEscape(id)), userJSON); err != nil {
 		return fmt.Errorf("updating user %s: %w", id, err)
 	}
 	return nil
@@ -145,6 +155,9 @@ func (c *Client) UpdateUserRaw(ctx context.Context, id, userJSON string) error {
 
 // UpdateUserPassword changes a user's password.
 func (c *Client) UpdateUserPassword(ctx context.Context, id, currentPassword, newPassword string) error {
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("updating password: %w", errBlankUserID)
+	}
 	body := map[string]string{
 		"CurrentPw": currentPassword,
 		"NewPw":     newPassword,
@@ -153,7 +166,7 @@ func (c *Client) UpdateUserPassword(ctx context.Context, id, currentPassword, ne
 	if err != nil {
 		return fmt.Errorf("marshaling password update request for user %s: %w", id, err)
 	}
-	if err := c.post(ctx, fmt.Sprintf("/Users/%s/Password", url.PathEscape(id)), jsonBody); err != nil {
+	if err := c.post(ctx, fmt.Sprintf("/Users/Password?userId=%s", url.QueryEscape(id)), jsonBody); err != nil {
 		return fmt.Errorf("updating password for user %s: %w", id, err)
 	}
 	return nil
@@ -219,7 +232,7 @@ func (c *Client) AuthenticateByName(ctx context.Context, username, password stri
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("authentication failed for user %s (status %d): %s", username, resp.StatusCode, readResponseBody(resp.Body))
+		return nil, fmt.Errorf("authentication failed for user %s: %w", username, &HTTPError{Method: http.MethodPost, Path: "/Users/AuthenticateByName", StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)})
 	}
 
 	var result AuthResult
