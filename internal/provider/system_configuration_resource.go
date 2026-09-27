@@ -233,9 +233,16 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 		"to":   optionalString("To path."),
 	}
 
+	requiredString := func(desc string) schema.StringAttribute {
+		return schema.StringAttribute{
+			Description:         desc,
+			MarkdownDescription: desc,
+			Required:            true,
+		}
+	}
 	castReceiverApplicationAttributes := map[string]schema.Attribute{
-		"id":   optionalString("Application ID."),
-		"name": optionalString("Application name."),
+		"id":   requiredString("Application ID."),
+		"name": requiredString("Application name."),
 	}
 
 	trickplayOptionsAttributes := map[string]schema.Attribute{

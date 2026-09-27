@@ -25,14 +25,23 @@ resource "jellyfin_system_configuration" "test" {
 `,
 				ExpectError: regexp.MustCompile(`trickplay_options\.process_priority\s+value\s+must\s+be\s+one\s+of`),
 			},
+			{
+				Config: `
+resource "jellyfin_system_configuration" "test" {
+  cast_receiver_applications = [{ id = "F007D354" }]
+}
+`,
+				ExpectError: regexp.MustCompile(`element 0:\s+attribute "name" is required`),
+			},
 			// Create and Read.
 			{
 				Config: testAccSystemConfigurationResourceConfig("TestServer", systemConfigurationTestValues{
-					itemIDFlags:            false,
-					imageSavingConvention:  "Compatible",
-					chapterImageResolution: "P720",
-					scanBehavior:           "Blocking",
-					processPriority:        "Idle",
+					itemIDFlags:              false,
+					imageSavingConvention:    "Compatible",
+					chapterImageResolution:   "P720",
+					scanBehavior:             "Blocking",
+					processPriority:          "Idle",
+					castReceiverApplications: `[{ id = "F007D354", name = "Stable" }]`,
 				}),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "server_name", "TestServer"),
@@ -42,6 +51,9 @@ resource "jellyfin_system_configuration" "test" {
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "chapter_image_resolution", "P720"),
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "trickplay_options.scan_behavior", "Blocking"),
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "trickplay_options.process_priority", "Idle"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.#", "1"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.0.id", "F007D354"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.0.name", "Stable"),
 				),
 			},
 			// ImportState.
@@ -55,11 +67,12 @@ resource "jellyfin_system_configuration" "test" {
 			// Update back to a fresh server's values so later tests start from the defaults.
 			{
 				Config: testAccSystemConfigurationResourceConfig("UpdatedServer", systemConfigurationTestValues{
-					itemIDFlags:            true,
-					imageSavingConvention:  "Legacy",
-					chapterImageResolution: "MatchSource",
-					scanBehavior:           "NonBlocking",
-					processPriority:        "BelowNormal",
+					itemIDFlags:              true,
+					imageSavingConvention:    "Legacy",
+					chapterImageResolution:   "MatchSource",
+					scanBehavior:             "NonBlocking",
+					processPriority:          "BelowNormal",
+					castReceiverApplications: `[{ id = "F007D354", name = "Stable" }, { id = "6F511C87", name = "Unstable" }]`,
 				}),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "server_name", "UpdatedServer"),
@@ -69,6 +82,9 @@ resource "jellyfin_system_configuration" "test" {
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "chapter_image_resolution", "MatchSource"),
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "trickplay_options.scan_behavior", "NonBlocking"),
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "trickplay_options.process_priority", "BelowNormal"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.#", "2"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.1.id", "6F511C87"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.1.name", "Unstable"),
 				),
 			},
 		},
@@ -76,11 +92,12 @@ resource "jellyfin_system_configuration" "test" {
 }
 
 type systemConfigurationTestValues struct {
-	itemIDFlags            bool
-	imageSavingConvention  string
-	chapterImageResolution string
-	scanBehavior           string
-	processPriority        string
+	itemIDFlags              bool
+	imageSavingConvention    string
+	chapterImageResolution   string
+	scanBehavior             string
+	processPriority          string
+	castReceiverApplications string
 }
 
 func testAccSystemConfigurationResourceConfig(serverName string, v systemConfigurationTestValues) string {
@@ -100,6 +117,8 @@ resource "jellyfin_system_configuration" "test" {
     scan_behavior    = "` + v.scanBehavior + `"
     process_priority = "` + v.processPriority + `"
   }
+
+  cast_receiver_applications = ` + v.castReceiverApplications + `
 }
 `
 }
