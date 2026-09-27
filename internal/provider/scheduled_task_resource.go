@@ -141,10 +141,11 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 						// Jellyfin saves any value but passes it to CancelAfter only when the
 						// trigger starts a run, so a value CancelAfter rejects fails every such
 						// run before the task begins. The few negative values it takes mean no
-						// limit or an immediate cancel.
+						// limit or an immediate cancel, which leaving the attribute unset or
+						// setting it below 10000 already say.
 						"max_runtime_ticks": schema.Int64Attribute{
-							Description:         "Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns), from 0 to 42949672949999 (about 49.7 days).",
-							MarkdownDescription: "Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns), from `0` to `42949672949999` (about 49.7 days).",
+							Description:         "Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns), from 0 to 42949672949999 (about 49.7 days). Jellyfin counts whole milliseconds, so a value below 10000 (1 ms), including 0, cancels each run as soon as it starts; leave it unset for no limit.",
+							MarkdownDescription: "Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns), from `0` to `42949672949999` (about 49.7 days). Jellyfin counts whole milliseconds, so a value below `10000` (1 ms), including `0`, cancels each run as soon as it starts; leave it unset for no limit.",
 							Optional:            true,
 							Validators: []validator.Int64{
 								int64validator.Between(0, maxRuntimeTicksLimit),

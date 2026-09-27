@@ -48,7 +48,7 @@ Optional:
 
 - `day_of_week` (String) Day of the week the task runs (`Sunday` through `Saturday`). Required for `WeeklyTrigger`.
 - `interval_ticks` (Number) Interval between runs, in ticks (100 ns). Required for `IntervalTrigger`.
-- `max_runtime_ticks` (Number) Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns), from `0` to `42949672949999` (about 49.7 days).
+- `max_runtime_ticks` (Number) Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns), from `0` to `42949672949999` (about 49.7 days). Jellyfin counts whole milliseconds, so a value below `10000` (1 ms), including `0`, cancels each run as soon as it starts; leave it unset for no limit.
 - `time_of_day_ticks` (Number) Time of day the task runs, in ticks (100 ns) after midnight, from `0` to `863999999999`. Required for `DailyTrigger` and `WeeklyTrigger`.
 
 ## Import
