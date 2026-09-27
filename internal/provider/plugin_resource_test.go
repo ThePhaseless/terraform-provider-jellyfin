@@ -178,11 +178,11 @@ resource "jellyfin_plugin" "test" {
 	})
 }
 
-// TestAccPluginResourcePinnedVersionSurvivesRestart follows the resource's
-// documented way to keep a pinned version: Jellyfin's plugin update task runs
-// at startup, so it only stays pinned across a restart with the task's
-// triggers removed.
-func TestAccPluginResourcePinnedVersionSurvivesRestart(t *testing.T) {
+// TestAccPluginResourcePinSurvivesRestartWithoutUpdateTriggers follows the
+// resource's documented way to keep a pinned version: Jellyfin's plugin update
+// task runs at startup, so it only stays pinned across a restart with the
+// task's triggers removed.
+func TestAccPluginResourcePinSurvivesRestartWithoutUpdateTriggers(t *testing.T) {
 	if os.Getenv("JELLYFIN_RESTART_ACC") == "" {
 		t.Skip("set JELLYFIN_RESTART_ACC=1 to run tests that restart the server; run against a disposable Jellyfin (e.g. the bundled docker-compose) in isolation, not a shared instance")
 	}
