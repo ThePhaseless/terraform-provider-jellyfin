@@ -172,8 +172,8 @@ type gatedValue struct {
 }
 
 // VersionErrors rejects each configured value whose field the server's
-// Jellyfin version lacks: a field that needs SinceVersion on older servers,
-// and a Legacy field on its until version and later. It asks version for the
+// Jellyfin version lacks: a field with a Since version on older servers, and
+// a Legacy field on its until version and later. It asks version for the
 // server's version only when such a value is configured. It leaves out values
 // unknown at plan time; Terraform plans again during apply, once they are
 // known.

@@ -89,7 +89,8 @@ schema Dup.Foo_Bar: string
 }
 
 func TestUnitEmbeddedCatalog(t *testing.T) {
-	pinned, floor := Pinned(), Floor()
+	c := embedded()
+	pinned, floor := c.pinned, c.floor
 	if _, ok := pinned["BrandingOptionsDto"]["LoginDisclaimer"]; !ok {
 		t.Error("the pinned golden lacks BrandingOptionsDto.LoginDisclaimer")
 	}
@@ -102,8 +103,8 @@ func TestUnitEmbeddedCatalog(t *testing.T) {
 	if _, ok := floor["EncodingOptions"]["HlsAudioSeekStrategy"]; ok {
 		t.Error("the floor golden has HlsAudioSeekStrategy, which Jellyfin 12.0 added")
 	}
-	if !hasLeadingDigit(FloorVersion()) || compareVersions(SinceVersion(), FloorVersion()) <= 0 {
-		t.Errorf("floor.env: version %q, next %q; want a version and a later one", FloorVersion(), SinceVersion())
+	if !hasLeadingDigit(c.floorVer) || compareVersions(c.sinceVer, c.floorVer) <= 0 {
+		t.Errorf("floor.env: version %q, next %q; want a version and a later one", c.floorVer, c.sinceVer)
 	}
 }
 

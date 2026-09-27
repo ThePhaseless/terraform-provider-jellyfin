@@ -81,14 +81,9 @@ var embedded = sync.OnceValue(func() *catalog {
 // versions. Callers must not modify it.
 func Pinned() Index { return embedded().pinned }
 
-// Floor returns the objects of FloorVersion. Callers must not modify it.
-func Floor() Index { return embedded().floor }
-
+// FloorVersion is the Jellyfin release jellyfin_api_schema_floor.golden
+// records.
 func FloorVersion() string { return embedded().floorVer }
-
-// SinceVersion is the release a field needs when Pinned has it and Floor does
-// not.
-func SinceVersion() string { return embedded().sinceVer }
 
 func envValue(content, key string) string {
 	for _, line := range strings.Split(content, "\n") {
