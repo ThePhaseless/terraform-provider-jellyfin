@@ -69,7 +69,7 @@ func TestGenerateSingletonConfigsRendersTypedLivetvAttributes(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	_, resources, err := g.generateSingletonConfigs()

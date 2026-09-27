@@ -270,7 +270,7 @@ func TestGenerateUsers(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	imports, resources, err := g.generateUsers()
@@ -306,7 +306,7 @@ func TestGenerateLibraries(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	imports, resources, err := g.generateLibraries()
@@ -336,7 +336,7 @@ func TestGenerateAPIKeys(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	imports, resources, err := g.generateAPIKeys()
@@ -362,7 +362,7 @@ func TestGenerateScheduledTasks(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	imports, resources, err := g.generateScheduledTasks()
@@ -479,7 +479,7 @@ func TestGenerateSingletonConfigs(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	imports, resources, err := g.generateSingletonConfigs()
@@ -554,7 +554,7 @@ func TestGeneratePlugins(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	imports, resources, err := g.generatePlugins()
@@ -583,7 +583,7 @@ func TestGeneratePluginRepositories(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	imports, resources, err := g.generatePluginRepositories()
@@ -607,7 +607,7 @@ func TestFullGenerate(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: outputDir,
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	if err := g.Generate(); err != nil {
@@ -693,7 +693,7 @@ func TestGenerateWithServerError(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	err := g.Generate()
@@ -731,7 +731,7 @@ func TestSanitizeNameEdgeCases(t *testing.T) {
 }
 
 func TestUniqueName(t *testing.T) {
-	g := &generator{usedNames: make(map[string]int)}
+	g := &generator{usedNames: make(map[string]bool)}
 
 	// First use: no suffix
 	name1 := g.uniqueName("jellyfin_user", "admin")
@@ -758,6 +758,69 @@ func TestUniqueName(t *testing.T) {
 	}
 }
 
+func TestUniqueNameSkipsSuffixedNamesAlreadyTaken(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		bases []string
+		want  []string
+	}{
+		"suffix taken by an earlier base name": {
+			bases: []string{"films", "films_1", "films"},
+			want:  []string{"films", "films_1", "films_2"},
+		},
+		"base name taken by an earlier suffix": {
+			bases: []string{"films", "films", "films_1"},
+			want:  []string{"films", "films_1", "films_1_1"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			g := &generator{usedNames: make(map[string]bool)}
+			for i, base := range tc.bases {
+				if got := g.uniqueName("jellyfin_library", base); got != tc.want[i] {
+					t.Errorf("uniqueName(%q) call %d = %q, want %q", base, i+1, got, tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateLibrariesGivesEachLibraryItsOwnAddress(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]interface{}{
+			{"Name": "Films!", "CollectionType": "movies", "Locations": []string{"/media/movies"}},
+			{"Name": "Films 1", "CollectionType": "movies", "Locations": []string{"/media/movies"}},
+			{"Name": "Films", "CollectionType": "movies", "Locations": []string{"/media/movies"}},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	g := &generator{
+		client:    client.NewClient(server.URL, "test-key"),
+		usedNames: make(map[string]bool),
+	}
+	imports, _, err := g.generateLibraries()
+	if err != nil {
+		t.Fatalf("generateLibraries() error: %v", err)
+	}
+
+	want := []string{"jellyfin_library.films\n", "jellyfin_library.films_1\n", "jellyfin_library.films_2\n"}
+	if len(imports) != len(want) {
+		t.Fatalf("expected %d import blocks, got %d", len(want), len(imports))
+	}
+	for i, to := range want {
+		if !strings.Contains(imports[i], "to = "+to) {
+			t.Errorf("imports[%d] = %q, want it to import to %s", i, imports[i], strings.TrimSpace(to))
+		}
+	}
+}
+
 func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
 	// Server that has /Plugins but returns 500 for /Packages
 	mux := http.NewServeMux()
@@ -780,7 +843,7 @@ func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	imports, resources, err := g.generatePlugins()
@@ -822,7 +885,7 @@ func TestGeneratePluginsResolvesOnlyTheInstalledVersion(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	_, resources, err := g.generatePlugins()
@@ -856,7 +919,7 @@ func TestGenerateLibrariesSkipsLibrariesWithoutCollectionType(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 		warnings:  &warnings,
 	}
 
@@ -1058,7 +1121,7 @@ func TestAccImportToolE2E(t *testing.T) {
 	g := &generator{
 		client:    c,
 		outputDir: outputDir,
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 		warnings:  &warnings,
 	}
 
@@ -1164,7 +1227,7 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		g := &generator{
 			client:    c,
 			outputDir: t.TempDir(),
-			usedNames: make(map[string]int),
+			usedNames: make(map[string]bool),
 		}
 
 		imports, resources, err := g.generateUsers()
@@ -1193,7 +1256,7 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		g := &generator{
 			client:    c,
 			outputDir: t.TempDir(),
-			usedNames: make(map[string]int),
+			usedNames: make(map[string]bool),
 		}
 
 		imports, resources, err := g.generateScheduledTasks()
@@ -1214,7 +1277,7 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		g := &generator{
 			client:    c,
 			outputDir: t.TempDir(),
-			usedNames: make(map[string]int),
+			usedNames: make(map[string]bool),
 		}
 
 		imports, resources, err := g.generateSingletonConfigs()
@@ -1239,7 +1302,7 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		g := &generator{
 			client:    c,
 			outputDir: t.TempDir(),
-			usedNames: make(map[string]int),
+			usedNames: make(map[string]bool),
 		}
 
 		imports, resources, err := g.generateAPIKeys()
@@ -1259,7 +1322,7 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		g := &generator{
 			client:    c,
 			outputDir: t.TempDir(),
-			usedNames: make(map[string]int),
+			usedNames: make(map[string]bool),
 		}
 
 		// Libraries may or may not exist on a fresh instance - just verify no error.
@@ -1273,7 +1336,7 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		g := &generator{
 			client:    c,
 			outputDir: t.TempDir(),
-			usedNames: make(map[string]int),
+			usedNames: make(map[string]bool),
 		}
 
 		// Plugin repos may or may not exist - just verify no error.
@@ -1287,7 +1350,7 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		g := &generator{
 			client:    c,
 			outputDir: t.TempDir(),
-			usedNames: make(map[string]int),
+			usedNames: make(map[string]bool),
 		}
 
 		// Plugins may or may not exist - just verify no error.

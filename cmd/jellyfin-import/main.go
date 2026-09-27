@@ -51,7 +51,7 @@ func main() {
 		client:    c,
 		ctx:       context.Background(),
 		outputDir: *outputDir,
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	if err := g.Generate(); err != nil {
@@ -86,7 +86,7 @@ type generator struct {
 	client    *client.Client
 	ctx       context.Context
 	outputDir string
-	usedNames map[string]int // tracks used resource addresses to avoid collisions
+	usedNames map[string]bool // resource addresses already handed out
 	warnings  io.Writer
 }
 
@@ -105,15 +105,17 @@ func (g *generator) warnf(format string, args ...any) {
 	fmt.Fprintf(w, "Warning: "+format+"\n", args...)
 }
 
-// uniqueName returns a unique Terraform resource name, appending a numeric suffix on collision.
+// uniqueName returns a Terraform resource name that no earlier call returned
+// for resourceType, appending the lowest numeric suffix that is still free.
+// A suffixed name has to be checked as well, because another name can
+// sanitize to it.
 func (g *generator) uniqueName(resourceType, baseName string) string {
-	key := resourceType + "." + baseName
-	count := g.usedNames[key]
-	g.usedNames[key] = count + 1
-	if count == 0 {
-		return baseName
+	name := baseName
+	for i := 1; g.usedNames[resourceType+"."+name]; i++ {
+		name = fmt.Sprintf("%s_%d", baseName, i)
 	}
-	return fmt.Sprintf("%s_%d", baseName, count)
+	g.usedNames[resourceType+"."+name] = true
+	return name
 }
 
 // Generate generates all Terraform files.
