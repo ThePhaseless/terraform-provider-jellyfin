@@ -1292,7 +1292,8 @@ func seedFixtures(t *testing.T, c *client.Client) {
 // checks the generated files with terraform fmt and plans them, as written,
 // with Terraform and this provider: the plan must import every resource
 // without changes, and each imported resource's configuration must set every
-// value its imported state holds.
+// value its imported state holds, apart from the attributes rendered leaves
+// out.
 // Set JELLYFIN_ENDPOINT and either JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD to enable this test.
 func TestAccImportToolE2E(t *testing.T) {
 	outputDir := t.TempDir()

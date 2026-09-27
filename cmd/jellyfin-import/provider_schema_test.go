@@ -122,10 +122,10 @@ func TestLibraryCollectionTypesMatchProviderValidator(t *testing.T) {
 }
 
 // configMatchesImportedState checks that the configuration of every resource
-// the plan imports sets each configurable attribute the imported state holds
-// a value for, to that value. Terraform plans no change for an attribute that
-// is optional and computed and left out of the configuration, so an empty
-// plan alone would not show that the importer missed one.
+// the plan imports sets each attribute rendered accepts and the imported
+// state holds a value for, to that value. Terraform plans no change for an
+// attribute that is optional and computed and left out of the configuration,
+// so an empty plan alone would not show that the importer missed one.
 type configMatchesImportedState struct {
 	schemas map[string]schema.Schema
 }
