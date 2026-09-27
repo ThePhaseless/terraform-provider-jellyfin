@@ -66,7 +66,7 @@ func (r *BrandingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 			"login_disclaimer":      schema.StringAttribute{Description: "The login disclaimer text.", MarkdownDescription: "The login disclaimer text.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 			"custom_css":            schema.StringAttribute{Description: "Custom CSS content.", MarkdownDescription: "Custom CSS content.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 			"splashscreen_enabled":  schema.BoolAttribute{Description: "Whether the splash screen is enabled.", MarkdownDescription: "Whether the splash screen is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
-			"splashscreen_location": schema.StringAttribute{Description: "The splash screen location. " + splashscreenLocationUnsupportedMessage, MarkdownDescription: "The splash screen location. " + splashscreenLocationUnsupportedMessage, Optional: true, Computed: true, DeprecationMessage: splashscreenLocationUnsupportedMessage, Validators: []validator.String{splashscreenLocationValidator{}}, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
+			"splashscreen_location": schema.StringAttribute{Description: "The splash screen location. " + splashscreenLocationUnsupportedMessage, MarkdownDescription: "The splash screen location. " + splashscreenLocationUnsupportedMessage, Optional: true, DeprecationMessage: splashscreenLocationUnsupportedMessage, Validators: []validator.String{splashscreenLocationValidator{}}},
 		},
 	}
 }
@@ -206,7 +206,6 @@ func overlayBrandingConfiguration(_ context.Context, m map[string]json.RawMessag
 	putJSONString(m, "LoginDisclaimer", data.LoginDisclaimer)
 	putJSONString(m, "CustomCss", data.CustomCSS)
 	putJSONBool(m, "SplashscreenEnabled", data.SplashscreenEnabled)
-	putJSONString(m, "SplashscreenLocation", data.SplashscreenLocation)
 }
 
 func flattenBrandingConfiguration(_ context.Context, raw string, data *BrandingConfigurationResourceModel, diags *diag.Diagnostics) {
@@ -218,5 +217,7 @@ func flattenBrandingConfiguration(_ context.Context, raw string, data *BrandingC
 	data.LoginDisclaimer = getJSONString(m, "LoginDisclaimer")
 	data.CustomCSS = getJSONString(m, "CustomCss")
 	data.SplashscreenEnabled = getJSONBool(m, "SplashscreenEnabled")
-	data.SplashscreenLocation = getJSONString(m, "SplashscreenLocation")
+	// Jellyfin never returns the location, and the attribute is not computed,
+	// so a value read here could only contradict the plan.
+	data.SplashscreenLocation = types.StringNull()
 }
