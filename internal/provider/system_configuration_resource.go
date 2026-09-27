@@ -478,10 +478,10 @@ func overlaySystemConfiguration(ctx context.Context, m map[string]json.RawMessag
 	var diags diag.Diagnostics
 
 	putJSONBool(m, "EnableMetrics", data.EnableMetrics)
-	putJSONBool(m, "EnableNormalizedItemByNameIDs", data.EnableNormalizedItemByNameIDs)
+	putJSONBool(m, "EnableNormalizedItemByNameIds", data.EnableNormalizedItemByNameIDs)
 	putJSONBool(m, "IsPortAuthorized", data.IsPortAuthorized)
 	putJSONBool(m, "QuickConnectAvailable", data.QuickConnectAvailable)
-	putJSONBool(m, "EnableCaseSensitiveItemIDs", data.EnableCaseSensitiveItemIDs)
+	putJSONBool(m, "EnableCaseSensitiveItemIds", data.EnableCaseSensitiveItemIDs)
 	putJSONBool(m, "DisableLiveTvChannelUserDataName", data.DisableLiveTvChannelUserDataName)
 	putJSONString(m, "MetadataPath", data.MetadataPath)
 	putJSONString(m, "PreferredMetadataLanguage", data.PreferredMetadataLanguage)
@@ -662,7 +662,7 @@ func overlayTrickplayOptions(ctx context.Context, m map[string]json.RawMessage, 
 	putJSONBool(entry, "EnableHwEncoding", opts.EnableHwEncoding)
 	putJSONBool(entry, "EnableKeyFrameOnlyExtraction", opts.EnableKeyFrameOnlyExtraction)
 	putJSONString(entry, "ScanBehavior", opts.ScanBehavior)
-	putJSONString(entry, "ProcessPriorityClass", opts.ProcessPriority)
+	putJSONString(entry, "ProcessPriority", opts.ProcessPriority)
 	putJSONInt64(entry, "Interval", opts.Interval)
 	putJSONInt64List(ctx, entry, "WidthResolutions", opts.WidthResolutions)
 	putJSONInt64(entry, "TileWidth", opts.TileWidth)
@@ -686,10 +686,10 @@ func flattenSystemConfiguration(ctx context.Context, raw string, data *SystemCon
 	}
 
 	data.EnableMetrics = getJSONBool(m, "EnableMetrics")
-	data.EnableNormalizedItemByNameIDs = getJSONBool(m, "EnableNormalizedItemByNameIDs")
+	data.EnableNormalizedItemByNameIDs = getJSONBool(m, "EnableNormalizedItemByNameIds")
 	data.IsPortAuthorized = getJSONBool(m, "IsPortAuthorized")
 	data.QuickConnectAvailable = getJSONBool(m, "QuickConnectAvailable")
-	data.EnableCaseSensitiveItemIDs = getJSONBool(m, "EnableCaseSensitiveItemIDs")
+	data.EnableCaseSensitiveItemIDs = getJSONBool(m, "EnableCaseSensitiveItemIds")
 	data.DisableLiveTvChannelUserDataName = getJSONBool(m, "DisableLiveTvChannelUserDataName")
 	data.MetadataPath = getJSONString(m, "MetadataPath")
 	data.PreferredMetadataLanguage = getJSONString(m, "PreferredMetadataLanguage")
@@ -955,7 +955,7 @@ func flattenTrickplayOptions(ctx context.Context, m map[string]json.RawMessage, 
 		"enable_hw_encoding":               getJSONBool(entry, "EnableHwEncoding"),
 		"enable_key_frame_only_extraction": getJSONBool(entry, "EnableKeyFrameOnlyExtraction"),
 		"scan_behavior":                    getJSONString(entry, "ScanBehavior"),
-		"process_priority":                 getJSONString(entry, "ProcessPriorityClass"),
+		"process_priority":                 getJSONString(entry, "ProcessPriority"),
 		"interval":                         getJSONInt64(entry, "Interval"),
 		"width_resolutions":                widthResolutions,
 		"tile_width":                       getJSONInt64(entry, "TileWidth"),

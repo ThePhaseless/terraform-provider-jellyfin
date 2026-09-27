@@ -13,10 +13,10 @@ func TestUnitSystemConfigurationOverlay(t *testing.T) {
 	ctx := context.Background()
 	fixture := `{
 		"EnableMetrics": true,
-		"EnableNormalizedItemByNameIDs": false,
+		"EnableNormalizedItemByNameIds": false,
 		"IsPortAuthorized": true,
 		"QuickConnectAvailable": false,
-		"EnableCaseSensitiveItemIDs": false,
+		"EnableCaseSensitiveItemIds": false,
 		"DisableLiveTvChannelUserDataName": false,
 		"MetadataPath": "/metadata",
 		"PreferredMetadataLanguage": "en",
@@ -80,7 +80,7 @@ func TestUnitSystemConfigurationOverlay(t *testing.T) {
 			"EnableHwEncoding": false,
 			"EnableKeyFrameOnlyExtraction": false,
 			"ScanBehavior": "Job",
-			"ProcessPriorityClass": "BelowNormal",
+			"ProcessPriority": "BelowNormal",
 			"Interval": 10000,
 			"WidthResolutions": [320],
 			"TileWidth": 10,
