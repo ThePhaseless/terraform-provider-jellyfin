@@ -31,13 +31,13 @@ jobs:
           # (2.6.3.0 for 10.11, 2.6.3.1 for 12.x); the tag is v2.6.3 for both.
           OLD_RELEASE=$(echo "$OLD_VERSION" | cut -d. -f1-3)
           NEW_RELEASE=$(echo "$NEW_VERSION" | cut -d. -f1-3)
-          echo "old=${OLD_RELEASE}" >> $GITHUB_OUTPUT
-          echo "new=${NEW_RELEASE}" >> $GITHUB_OUTPUT
+          echo "old=${OLD_RELEASE}" >> "$GITHUB_OUTPUT"
+          echo "new=${NEW_RELEASE}" >> "$GITHUB_OUTPUT"
           if [ "$OLD_RELEASE" = "$NEW_RELEASE" ]; then
-            echo "bumped=false" >> $GITHUB_OUTPUT
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
             echo "Plugin release unchanged (${NEW_RELEASE}); nothing to compare."
           else
-            echo "bumped=true" >> $GITHUB_OUTPUT
+            echo "bumped=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Fetch PluginConfiguration.cs at both versions
@@ -66,11 +66,11 @@ jobs:
           OIDC_DIFF=$(diff /tmp/old_oidc_props.txt /tmp/new_oidc_props.txt || true)
 
           if [ -z "$CONFIG_DIFF" ] && [ -z "$OIDC_DIFF" ]; then
-            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
             echo "No schema changes detected."
             exit 0
           fi
-          echo "has_changes=true" >> $GITHUB_OUTPUT
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
 
           echo "PluginConfiguration.cs changes:"
           echo '```diff'

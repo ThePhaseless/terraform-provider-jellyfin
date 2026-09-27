@@ -5,7 +5,10 @@ on:
   pull_request:
     paths-ignore:
       - 'README.md'
+  # Branches are covered by their PR's pull_request run; push on every branch
+  # ran the suite twice per PR.
   push:
+    branches: [main]
     paths-ignore:
       - 'README.md'
 
@@ -74,9 +77,11 @@ jobs:
           chmod +x scripts/setup_jellyfin.sh
           exports="$(scripts/setup_jellyfin.sh | grep '^export ')"
           eval "$exports"
-          echo "JELLYFIN_ENDPOINT=${JELLYFIN_ENDPOINT}" >> "$GITHUB_ENV"
-          echo "JELLYFIN_USERNAME=${JELLYFIN_USERNAME}" >> "$GITHUB_ENV"
-          echo "JELLYFIN_PASSWORD=${JELLYFIN_PASSWORD}" >> "$GITHUB_ENV"
+          {
+            echo "JELLYFIN_ENDPOINT=${JELLYFIN_ENDPOINT}"
+            echo "JELLYFIN_USERNAME=${JELLYFIN_USERNAME}"
+            echo "JELLYFIN_PASSWORD=${JELLYFIN_PASSWORD}"
+          } >> "$GITHUB_ENV"
 
       - name: Run acceptance tests
         env:
