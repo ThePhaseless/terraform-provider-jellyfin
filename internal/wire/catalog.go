@@ -77,10 +77,6 @@ var embedded = sync.OnceValue(func() *catalog {
 	}
 })
 
-// Pinned returns the objects of the supported Jellyfin and security plugin
-// versions. Callers must not modify it.
-func Pinned() Index { return embedded().pinned }
-
 // FloorVersion is the Jellyfin release jellyfin_api_schema_floor.golden
 // records.
 func FloorVersion() string { return embedded().floorVer }
