@@ -1105,12 +1105,31 @@ func testAccImportClient(t *testing.T) *client.Client {
 		}
 		skip("JELLYFIN_ENDPOINT and either JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD must be set for acceptance tests")
 	}
+	testAccBootstrap(t, endpoint)
 
 	c, err := importClient(context.Background(), endpoint, apiKey, username, password)
 	if err != nil {
 		t.Fatalf("failed to configure Jellyfin import acceptance test client: %v", err)
 	}
 	return c
+}
+
+// testAccBootstrap completes a fresh server's startup wizard the way a first
+// terraform run does, by configuring the provider. Until then Jellyfin has no
+// user for the importer to log in as.
+func testAccBootstrap(t *testing.T, endpoint string) {
+	t.Helper()
+
+	info, err := client.NewClient(endpoint, "").GetPublicSystemInfo(context.Background())
+	if err != nil {
+		t.Fatalf("reading Jellyfin startup status: %v", err)
+	}
+	if info.StartupWizardCompleted {
+		return
+	}
+	testAccTerraform(t, resource.TestStep{
+		Config: terraformBlock + `data "jellyfin_system_info" "bootstrap" {}`,
+	})
 }
 
 // testAccTerraform runs steps with this provider in-process, registered under
