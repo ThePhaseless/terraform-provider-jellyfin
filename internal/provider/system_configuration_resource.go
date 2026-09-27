@@ -213,30 +213,48 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			},
 		}
 	}
+	// UseStateForUnknown also copies a null prior value, and a planned null
+	// fails the apply when the server returns a value. That happens for an
+	// entry a list gains in the plan, whose prior values are all null while
+	// the server fills in what the entry leaves out, and for the three
+	// attributes whose keys 0.3.7 and earlier misspelt, which state from
+	// those versions holds as null.
+	nonNullStateString := func(a schema.StringAttribute) schema.StringAttribute {
+		a.PlanModifiers = []planmodifier.String{stringplanmodifier.UseNonNullStateForUnknown()}
+		return a
+	}
+	nonNullStateBool := func(a schema.BoolAttribute) schema.BoolAttribute {
+		a.PlanModifiers = []planmodifier.Bool{boolplanmodifier.UseNonNullStateForUnknown()}
+		return a
+	}
+	nonNullStateList := func(a schema.ListAttribute) schema.ListAttribute {
+		a.PlanModifiers = []planmodifier.List{listplanmodifier.UseNonNullStateForUnknown()}
+		return a
+	}
 
 	metadataOptionsAttributes := map[string]schema.Attribute{
-		"item_type":                   optionalString("Item type."),
-		"disabled_metadata_savers":    optionalStringList("Disabled metadata savers."),
-		"local_metadata_reader_order": optionalStringList("Local metadata reader order."),
-		"disabled_metadata_fetchers":  optionalStringList("Disabled metadata fetchers."),
-		"metadata_fetcher_order":      optionalStringList("Metadata fetcher order."),
-		"disabled_image_fetchers":     optionalStringList("Disabled image fetchers."),
-		"image_fetcher_order":         optionalStringList("Image fetcher order."),
+		"item_type":                   nonNullStateString(optionalString("Item type.")),
+		"disabled_metadata_savers":    nonNullStateList(optionalStringList("Disabled metadata savers.")),
+		"local_metadata_reader_order": nonNullStateList(optionalStringList("Local metadata reader order.")),
+		"disabled_metadata_fetchers":  nonNullStateList(optionalStringList("Disabled metadata fetchers.")),
+		"metadata_fetcher_order":      nonNullStateList(optionalStringList("Metadata fetcher order.")),
+		"disabled_image_fetchers":     nonNullStateList(optionalStringList("Disabled image fetchers.")),
+		"image_fetcher_order":         nonNullStateList(optionalStringList("Image fetcher order.")),
 	}
 
 	nameValuePairAttributes := map[string]schema.Attribute{
-		"name":  optionalString("Name."),
-		"value": optionalString("Value."),
+		"name":  nonNullStateString(optionalString("Name.")),
+		"value": nonNullStateString(optionalString("Value.")),
 	}
 
 	pathSubstitutionAttributes := map[string]schema.Attribute{
-		"from": optionalString("From path."),
-		"to":   optionalString("To path."),
+		"from": nonNullStateString(optionalString("From path.")),
+		"to":   nonNullStateString(optionalString("To path.")),
 	}
 
 	castReceiverApplicationAttributes := map[string]schema.Attribute{
-		"id":   optionalString("Application ID. Must be set in every entry."),
-		"name": optionalString("Application name. Must be set in every entry."),
+		"id":   nonNullStateString(optionalString("Application ID. Must be set in every entry.")),
+		"name": nonNullStateString(optionalString("Application name. Must be set in every entry.")),
 	}
 
 	trickplayOptionsAttributes := map[string]schema.Attribute{
@@ -244,7 +262,7 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 		"enable_hw_encoding":               optionalBool("Enable hardware encoding."),
 		"enable_key_frame_only_extraction": optionalBool("Enable key frame only extraction."),
 		"scan_behavior":                    optionalEnum("Scan behavior.", "Blocking", "NonBlocking"),
-		"process_priority":                 optionalEnum("Process priority class.", "Normal", "Idle", "High", "RealTime", "BelowNormal", "AboveNormal"),
+		"process_priority":                 nonNullStateString(optionalEnum("Process priority class.", "Normal", "Idle", "High", "RealTime", "BelowNormal", "AboveNormal")),
 		"interval":                         optionalInt("Interval."),
 		"width_resolutions":                optionalIntList("Width resolutions."),
 		"tile_width":                       optionalInt("Tile width."),
@@ -267,10 +285,10 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				},
 			},
 			"enable_metrics":                         optionalBool("Enable metrics."),
-			"enable_normalized_item_by_name_ids":     optionalBool("Enable normalized item by name IDs."),
+			"enable_normalized_item_by_name_ids":     nonNullStateBool(optionalBool("Enable normalized item by name IDs.")),
 			"is_port_authorized":                     optionalBool("Is port authorized."),
 			"quick_connect_available":                optionalBool("Quick connect available."),
-			"enable_case_sensitive_item_ids":         optionalBool("Enable case sensitive item IDs."),
+			"enable_case_sensitive_item_ids":         nonNullStateBool(optionalBool("Enable case sensitive item IDs.")),
 			"disable_live_tv_channel_user_data_name": optionalBool("Disable live TV channel user data name."),
 			"metadata_path":                          optionalString("Metadata path."),
 			"preferred_metadata_language":            optionalString("Preferred metadata language."),

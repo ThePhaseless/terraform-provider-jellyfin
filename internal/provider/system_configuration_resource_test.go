@@ -42,6 +42,7 @@ resource "jellyfin_system_configuration" "test" {
 					scanBehavior:             "Blocking",
 					processPriority:          "Idle",
 					castReceiverApplications: `[{ id = "F007D354", name = "Stable" }]`,
+					pathSubstitutions:        `[]`,
 				}),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "server_name", "TestServer"),
@@ -64,6 +65,23 @@ resource "jellyfin_system_configuration" "test" {
 				ImportStateId:           "system",
 				ImportStateVerifyIgnore: []string{"server_name"},
 			},
+			// An entry added at update has no prior values; to is left out, and Jellyfin fills in "".
+			{
+				Config: testAccSystemConfigurationResourceConfig("TestServer", systemConfigurationTestValues{
+					itemIDFlags:              false,
+					imageSavingConvention:    "Compatible",
+					chapterImageResolution:   "P720",
+					scanBehavior:             "Blocking",
+					processPriority:          "Idle",
+					castReceiverApplications: `[{ id = "F007D354", name = "Stable" }]`,
+					pathSubstitutions:        `[{ from = "/mnt/media" }]`,
+				}),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "path_substitutions.#", "1"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "path_substitutions.0.from", "/mnt/media"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "path_substitutions.0.to", ""),
+				),
+			},
 			// Update back to a fresh server's values so later tests start from the defaults.
 			{
 				Config: testAccSystemConfigurationResourceConfig("UpdatedServer", systemConfigurationTestValues{
@@ -73,6 +91,7 @@ resource "jellyfin_system_configuration" "test" {
 					scanBehavior:             "NonBlocking",
 					processPriority:          "BelowNormal",
 					castReceiverApplications: `[{ id = "F007D354", name = "Stable" }, { id = "6F511C87", name = "Unstable" }]`,
+					pathSubstitutions:        `[]`,
 				}),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "server_name", "UpdatedServer"),
@@ -85,6 +104,7 @@ resource "jellyfin_system_configuration" "test" {
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.#", "2"),
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.1.id", "6F511C87"),
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.1.name", "Unstable"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "path_substitutions.#", "0"),
 				),
 			},
 			// Leaves every nested attribute out so the post-apply empty-plan check covers omitted lists and objects.
@@ -110,6 +130,7 @@ type systemConfigurationTestValues struct {
 	scanBehavior             string
 	processPriority          string
 	castReceiverApplications string
+	pathSubstitutions        string
 }
 
 func testAccSystemConfigurationResourceConfig(serverName string, v systemConfigurationTestValues) string {
@@ -131,6 +152,7 @@ resource "jellyfin_system_configuration" "test" {
   }
 
   cast_receiver_applications = ` + v.castReceiverApplications + `
+  path_substitutions         = ` + v.pathSubstitutions + `
 }
 `
 }
