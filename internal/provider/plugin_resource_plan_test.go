@@ -10,8 +10,11 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
@@ -162,6 +165,71 @@ func TestUnitPluginSupportedKeywordFailsPlanUnlessPackagesResolveIt(t *testing.T
 			}
 			if resp.RequiresReplace.Contains(path.Root("version")) {
 				t.Error("plan replaces the plugin")
+			}
+		})
+	}
+}
+
+// TestUnitPluginVersionPlan runs version's plan modifiers in order, handing
+// each the previous one's plan value as the framework does.
+func TestUnitPluginVersionPlan(t *testing.T) {
+	ctx := context.Background()
+	resourceSchema := pluginResourceSchema(t)
+	attr, ok := resourceSchema.Attributes["version"].(schema.StringAttribute)
+	if !ok {
+		t.Fatal("version is not a schema.StringAttribute")
+	}
+	stateWith := func(version string) *PluginResourceModel {
+		return &PluginResourceModel{
+			ID:               types.StringValue(bookshelfID),
+			Name:             types.StringValue("Bookshelf"),
+			Version:          types.StringValue(version),
+			InstalledVersion: types.StringValue("13.0.0.0"),
+			RepositoryURL:    types.StringValue(stableRepoURL),
+		}
+	}
+
+	cases := []struct {
+		name   string
+		state  *PluginResourceModel
+		config types.String
+		want   types.String
+	}{
+		{"keyword removed from the configuration", stateWith("latest"), types.StringNull(), types.StringValue("13.0.0.0")},
+		{"keyword kept in the configuration", stateWith("latest"), types.StringValue("latest"), types.StringValue("latest")},
+		{"version removed from the configuration", stateWith("13.0.0.0"), types.StringNull(), types.StringValue("13.0.0.0")},
+		{"create without a version", nil, types.StringNull(), types.StringUnknown()},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// The framework plans an unset Optional and Computed value as
+			// unknown before the plan modifiers run.
+			planned := c.config
+			if planned.IsNull() {
+				planned = types.StringUnknown()
+			}
+			req := planmodifier.StringRequest{
+				Path:        path.Root("version"),
+				ConfigValue: c.config,
+				StateValue:  types.StringNull(),
+				PlanValue:   planned,
+				State:       tfsdk.State{Schema: resourceSchema, Raw: tftypes.NewValue(resourceSchema.Type().TerraformType(ctx), nil)},
+			}
+			if c.state != nil {
+				req.State = pluginResourceState(t, *c.state)
+				req.StateValue = c.state.Version
+			}
+			for _, m := range attr.PlanModifiers {
+				resp := &planmodifier.StringResponse{PlanValue: req.PlanValue}
+				m.PlanModifyString(ctx, req, resp)
+				if resp.Diagnostics.HasError() {
+					t.Fatalf("plan modifier: %v", resp.Diagnostics.Errors())
+				}
+				req.PlanValue = resp.PlanValue
+			}
+			if !req.PlanValue.Equal(c.want) {
+				t.Errorf("plan = %v, want %v", req.PlanValue, c.want)
 			}
 		})
 	}

@@ -100,12 +100,13 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"version": schema.StringAttribute{
-				Description:         "The plugin version to install, as the repository lists it (e.g. 13.0.0.0), or a keyword: latest installs the newest version the repositories offer, and supported installs the Jellyfin Security release this provider was tested against, in the build the server accepts. A keyword is resolved only when the plugin is installed, or when it replaces another value, and stays in state as written; installed_version holds the result. Omitted, it installs as supported does for Jellyfin Security and as latest does for any other plugin, and then holds the installed version. Changing the value reinstalls the plugin, unless the new value names the installed version, as a keyword set on an imported plugin usually does; then only state changes.",
-				MarkdownDescription: "The plugin version to install, as the repository lists it (e.g. `13.0.0.0`), or a keyword: `latest` installs the newest version the repositories offer, and `supported` installs the Jellyfin Security release this provider was tested against, in the build the server accepts. A keyword is resolved only when the plugin is installed, or when it replaces another value, and stays in state as written; `installed_version` holds the result. Omitted, it installs as `supported` does for Jellyfin Security and as `latest` does for any other plugin, and then holds the installed version. Changing the value reinstalls the plugin, unless the new value names the installed version, as a keyword set on an imported plugin usually does; then only state changes.",
+				Description:         "The plugin version to install, as the repository lists it (e.g. 13.0.0.0), or a keyword: latest installs the newest version the repositories offer, and supported installs the Jellyfin Security release this provider was tested against, in the build the server accepts. A keyword is resolved only when the plugin is installed, or when it replaces another value, and stays in state as written; installed_version holds the result. Omitted, it installs as supported does for Jellyfin Security and as latest does for any other plugin, and then holds the installed version, as it also does once a keyword is removed from the configuration. Changing the value reinstalls the plugin, unless the new value names the installed version, as a keyword set on an imported plugin usually does; then only state changes.",
+				MarkdownDescription: "The plugin version to install, as the repository lists it (e.g. `13.0.0.0`), or a keyword: `latest` installs the newest version the repositories offer, and `supported` installs the Jellyfin Security release this provider was tested against, in the build the server accepts. A keyword is resolved only when the plugin is installed, or when it replaces another value, and stays in state as written; `installed_version` holds the result. Omitted, it installs as `supported` does for Jellyfin Security and as `latest` does for any other plugin, and then holds the installed version, as it also does once a keyword is removed from the configuration. Changing the value reinstalls the plugin, unless the new value names the installed version, as a keyword set on an imported plugin usually does; then only state changes.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
+					omittedVersionPlanModifier{},
 				},
 			},
 			"installed_version": schema.StringAttribute{
@@ -556,6 +557,32 @@ func versionDescribes(version types.String, installed string) bool {
 		return false
 	}
 	return isPluginVersionKeyword(version.ValueString()) || samePluginVersion(installed, version.ValueString())
+}
+
+// omittedVersionPlanModifier plans the installed version for a version the
+// configuration no longer sets while state holds a keyword. Terraform plans an
+// omitted Optional and Computed value as the prior one, and Read keeps a
+// keyword, so the keyword would otherwise stay in state for good.
+type omittedVersionPlanModifier struct{}
+
+func (omittedVersionPlanModifier) Description(context.Context) string {
+	return "Plans the installed version when the configuration drops a version keyword."
+}
+
+func (m omittedVersionPlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (omittedVersionPlanModifier) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if !req.ConfigValue.IsNull() || req.StateValue.IsNull() || !isPluginVersionKeyword(req.StateValue.ValueString()) {
+		return
+	}
+	var installed types.String
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("installed_version"), &installed)...)
+	if installed.IsNull() || installed.IsUnknown() || installed.ValueString() == "" {
+		return
+	}
+	resp.PlanValue = installed
 }
 
 func isPluginVersionKeyword(version string) bool {

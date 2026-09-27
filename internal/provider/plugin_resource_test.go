@@ -260,6 +260,23 @@ resource "jellyfin_plugin" "test" {
 				ConfigPlanChecks: inPlace,
 				Check:            resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", "latest"),
 			},
+			// An omitted version holds the installed version, also once it
+			// held a keyword.
+			{
+				Config: fmt.Sprintf(`
+resource "jellyfin_plugin" "test" {
+  name           = %q
+  repository_url = %q
+}
+`, pluginName, stableRepoURL),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("jellyfin_plugin.test", plancheck.ResourceActionUpdate),
+						plancheck.ExpectKnownValue("jellyfin_plugin.test", tfjsonpath.New("version"), knownvalue.StringExact(latest)),
+					},
+				},
+				Check: resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", latest),
+			},
 		},
 	})
 }
