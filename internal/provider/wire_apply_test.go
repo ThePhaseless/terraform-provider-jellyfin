@@ -33,6 +33,12 @@ type fakeJellyfin struct {
 	posted []byte
 }
 
+func (f *fakeJellyfin) body() []byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.posted
+}
+
 func serves(doc string) func([]byte) string {
 	return func([]byte) string { return doc }
 }

@@ -179,23 +179,40 @@ func scheduledTaskBinding(t *testing.T) *wire.Binding {
 	return b
 }
 
-func TestScheduledTaskWriteOmitsNullTriggerAttributes(t *testing.T) {
+func TestScheduledTaskApplyPostsTriggersWithoutNullAttributes(t *testing.T) {
 	t.Parallel()
 
+	type postCase struct {
+		triggers types.List
+		body     string
+	}
+	cases := map[string]postCase{
+		"no triggers": {types.ListValueMust(scheduledTaskTriggerType(t), []attr.Value{}), `[]`},
+	}
 	for name, tc := range triggerSerialisationCases {
+		cases[name] = postCase{triggerList(t, tc.trigger), `[` + tc.json + `]`}
+	}
+
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+			ctx := context.Background()
 
-			data := ScheduledTaskResourceModel{
-				ID:       types.StringNull(),
-				TaskID:   types.StringValue("7738148ffcd07979c7ceb148e06b3aed"),
-				Triggers: triggerList(t, tc.trigger),
+			plan := tfsdk.Plan{Schema: scheduledTaskSchema(t)}
+			data := ScheduledTaskResourceModel{ID: types.StringNull(), TaskID: types.StringValue("abc"), Triggers: tc.triggers}
+			if d := plan.Set(ctx, &data); d.HasError() {
+				t.Fatalf("plan: %v", d)
 			}
-			task := map[string]json.RawMessage{}
-			if d := scheduledTaskBinding(t).OverlayModel(context.Background(), task, &data); d.HasError() {
-				t.Fatalf("write: %v", d)
+			srv := &fakeJellyfin{
+				get: "/ScheduledTasks/abc", post: "/ScheduledTasks/abc/Triggers",
+				before: `{"Id":"abc","Triggers":[{"Type":"StartupTrigger"}]}`,
+				after:  func(posted []byte) string { return `{"Id":"abc","Triggers":` + string(posted) + `}` },
 			}
-			checkSameJSON(t, task, `{"Triggers":[`+tc.json+`]}`)
+			resp := updateAgainst(t, NewScheduledTaskResource(), srv.client(t), plan)
+			if resp.Diagnostics.HasError() {
+				t.Fatalf("apply: %v", resp.Diagnostics)
+			}
+			checkSameJSON(t, json.RawMessage(srv.body()), tc.body)
 		})
 	}
 }

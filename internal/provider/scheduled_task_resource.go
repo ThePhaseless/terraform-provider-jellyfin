@@ -302,14 +302,13 @@ func (r *ScheduledTaskResource) writeTriggers(ctx context.Context, data *Schedul
 		return
 	}
 
-	// The triggers endpoint takes the task's Triggers list on its own.
-	task := map[string]json.RawMessage{}
-	if d := b.OverlayModel(ctx, task, data); d.HasError() {
-		diags.Append(d...)
+	body, d := triggersBody(ctx, b, data)
+	diags.Append(d...)
+	if diags.HasError() {
 		return
 	}
 
-	if err := r.client.UpdateScheduledTaskTriggers(ctx, data.TaskID.ValueString(), string(task["Triggers"])); err != nil {
+	if err := r.client.UpdateScheduledTaskTriggers(ctx, data.TaskID.ValueString(), body); err != nil {
 		diags.AddError("Failed to update scheduled task triggers", err.Error())
 		return
 	}
@@ -323,6 +322,26 @@ func (r *ScheduledTaskResource) writeTriggers(ctx context.Context, data *Schedul
 	diags.Append(b.FlattenAfterApply(ctx, updated.RawJSON, data)...)
 	data.ID = data.TaskID
 	diags.Append(state.Set(ctx, data)...)
+}
+
+// triggersBody writes the task's triggers through b and returns the list on
+// its own, which is what the triggers endpoint takes.
+func triggersBody(ctx context.Context, b *wire.Binding, data *ScheduledTaskResourceModel) (string, diag.Diagnostics) {
+	task := map[string]json.RawMessage{}
+	diags := b.OverlayModel(ctx, task, data)
+	if diags.HasError() {
+		return "", diags
+	}
+	for _, f := range b.Fields {
+		if f.Path != "triggers" || len(f.KeyPath) != 1 {
+			continue
+		}
+		if raw, ok := task[f.KeyPath[0]]; ok {
+			return string(raw), diags
+		}
+	}
+	diags.AddError("Failed to serialize triggers", "The task binding wrote no top-level triggers list.\n\nThis is a bug in the provider.")
+	return "", diags
 }
 
 func (r *ScheduledTaskResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
