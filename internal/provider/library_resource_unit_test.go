@@ -7,7 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
-	"strings"
+	"slices"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -20,10 +20,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
-func TestUnitLibraryOptionsOverlay(t *testing.T) {
+func TestUnitLibraryOptionsRoundTrip(t *testing.T) {
 	ctx := context.Background()
+	b := testUnitLibraryOptionsWire(t)
 	fixture := `{
 		"Enabled": false,
 		"EnablePhotos": true,
@@ -55,40 +58,21 @@ func TestUnitLibraryOptionsOverlay(t *testing.T) {
 		]
 	}`
 
-	var diags diag.Diagnostics
-	data := flattenLibraryOptions(ctx, fixture, &diags)
-	if diags.HasError() {
-		t.Fatalf("flatten: %v", diags)
+	data := testUnitLibraryRead(t, b, fixture)
+	if !data.LibraryOptions.Disabled.ValueBool() {
+		t.Errorf("disabled = %v, want true for Enabled false", data.LibraryOptions.Disabled)
 	}
 
 	base := map[string]json.RawMessage{}
-	if d := overlayLibraryOptions(ctx, base, data); d.HasError() {
-		t.Fatalf("overlay: %v", d)
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
+		t.Fatalf("write: %v", d)
 	}
-
-	result, err := json.Marshal(base)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	var got map[string]interface{}
-	if err := json.Unmarshal(result, &got); err != nil {
-		t.Fatalf("unmarshal result: %v", err)
-	}
-	var want map[string]interface{}
-	if err := json.Unmarshal([]byte(fixture), &want); err != nil {
-		t.Fatalf("unmarshal fixture: %v", err)
-	}
-
-	gotJSON, _ := json.Marshal(got)
-	wantJSON, _ := json.Marshal(want)
-	if string(gotJSON) != string(wantJSON) {
-		t.Fatalf("round-trip mismatch\n got: %s\nwant: %s", gotJSON, wantJSON)
-	}
+	testUnitAssertJSONEqual(t, mustJSON(base), fixture)
 }
 
-func TestUnitTypeOptionsOverlayKeepsUnsetServerValues(t *testing.T) {
+func TestUnitTypeOptionsWriteKeepsUnsetServerValues(t *testing.T) {
 	ctx := context.Background()
+	b := testUnitLibraryOptionsWire(t)
 	base := map[string]json.RawMessage{
 		"TypeOptions": json.RawMessage(`[
 			{
@@ -108,13 +92,13 @@ func TestUnitTypeOptionsOverlayKeepsUnsetServerValues(t *testing.T) {
 		]`),
 	}
 
-	movie := testUnitTypeOptions("movie")
-	movie.MetadataFetchers = testUnitStringList(t, "TheMovieDb")
-	backdrop := ImageOptionsModel{Type: types.StringValue("Backdrop"), Limit: types.Int64Value(2), MinWidth: types.Int64Null()}
-	movie.ImageOptions = testUnitList(t, imageOptionsObjectType(), []ImageOptionsModel{backdrop})
-
-	if d := overlayTypeOptions(ctx, base, testUnitList(t, typeOptionsObjectType(), []TypeOptionsModel{movie})); d.HasError() {
-		t.Fatalf("overlay: %v", d)
+	data := testUnitLibraryRead(t, b, `{"TypeOptions": [{
+		"Type": "movie",
+		"MetadataFetchers": ["TheMovieDb"],
+		"ImageOptions": [{"Type": "Backdrop", "Limit": 2}]
+	}]}`)
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
+		t.Fatalf("write: %v", d)
 	}
 
 	want := `[{
@@ -130,15 +114,11 @@ func TestUnitTypeOptionsOverlayKeepsUnsetServerValues(t *testing.T) {
 	testUnitAssertJSONEqual(t, base["TypeOptions"], want)
 }
 
-func TestUnitFlattenTypeOptionsWithoutSimilarItemKeysIsNull(t *testing.T) {
-	var diags diag.Diagnostics
-	opts := flattenLibraryOptions(context.Background(), `{"TypeOptions": [{"Type": "Movie", "MetadataFetchers": ["TheMovieDb"]}]}`, &diags)
-	if diags.HasError() {
-		t.Fatalf("flatten: %v", diags)
-	}
+func TestUnitTypeOptionsWithoutSimilarItemKeysReadAsNull(t *testing.T) {
+	data := testUnitLibraryRead(t, testUnitLibraryOptionsWire(t), `{"TypeOptions": [{"Type": "Movie", "MetadataFetchers": ["TheMovieDb"]}]}`)
 
 	var entries []TypeOptionsModel
-	if d := opts.TypeOptions.ElementsAs(context.Background(), &entries, false); d.HasError() {
+	if d := data.LibraryOptions.TypeOptions.ElementsAs(context.Background(), &entries, false); d.HasError() {
 		t.Fatalf("elements: %v", d)
 	}
 	for name, v := range map[string]types.List{
@@ -213,21 +193,18 @@ func TestUnitPlanTypeOptionsByTypeUsesPriorEntryOfSameType(t *testing.T) {
 	}
 }
 
-func TestUnitKeepPlannedNullsCoversTypeOptionsLists(t *testing.T) {
+func TestUnitLibraryReadAfterApplyKeepsPlannedNullTypeOptionsLists(t *testing.T) {
 	ctx := context.Background()
-	planned := testUnitTypeOptions("Movie")
-	got := testUnitTypeOptions("Movie")
-	got.MetadataFetcherOrder = testUnitStringList(t)
-	got.SimilarItemProviders = testUnitStringList(t)
-	got.SimilarItemProviderOrder = testUnitStringList(t, "TheMovieDb")
+	b := testUnitLibraryOptionsWire(t)
+	data := testUnitLibraryRead(t, b, `{"TypeOptions": [{"Type": "Movie"}]}`)
 
-	out := keepPlannedNulls(ctx,
-		&LibraryOptionsModel{TypeOptions: testUnitList(t, typeOptionsObjectType(), []TypeOptionsModel{planned}), PathInfos: types.ListNull(pathInfoObjectType())},
-		&LibraryOptionsModel{TypeOptions: testUnitList(t, typeOptionsObjectType(), []TypeOptionsModel{got}), PathInfos: types.ListNull(pathInfoObjectType())},
-	)
+	served := `{"TypeOptions": [{"Type": "Movie", "MetadataFetcherOrder": [], "SimilarItemProviders": [], "SimilarItemProviderOrder": ["TheMovieDb"]}]}`
+	if d := b.FlattenAfterApply(ctx, served, &data); d.HasError() {
+		t.Fatalf("read after apply: %v", d)
+	}
 
 	var entries []TypeOptionsModel
-	if d := out.TypeOptions.ElementsAs(ctx, &entries, false); d.HasError() {
+	if d := data.LibraryOptions.TypeOptions.ElementsAs(ctx, &entries, false); d.HasError() {
 		t.Fatalf("elements: %v", d)
 	}
 	if !entries[0].MetadataFetcherOrder.IsNull() || !entries[0].SimilarItemProviders.IsNull() {
@@ -238,31 +215,30 @@ func TestUnitKeepPlannedNullsCoversTypeOptionsLists(t *testing.T) {
 	}
 }
 
-func TestUnitCheckSimilarItemSettingsKeptReportsDroppedSettings(t *testing.T) {
+func TestUnitLibraryReadAfterApplyReportsDroppedSimilarItemSettings(t *testing.T) {
 	ctx := context.Background()
-	planned := testUnitTypeOptions("Movie")
-	planned.SimilarItemProviders = testUnitStringList(t, "Local Genre/Tag")
-	planned.SimilarItemProviderOrder = testUnitStringList(t, "Local Genre/Tag")
-	kept := planned
-	dropped := testUnitTypeOptions("Movie")
-	options := func(entry TypeOptionsModel) *LibraryOptionsModel {
-		return &LibraryOptionsModel{TypeOptions: testUnitList(t, typeOptionsObjectType(), []TypeOptionsModel{entry})}
+	b := testUnitLibraryOptionsWire(t)
+	planned := `{"TypeOptions": [{"Type": "Movie", "SimilarItemProviders": ["Local Genre/Tag"], "SimilarItemProviderOrder": ["Local Genre/Tag"]}]}`
+
+	kept := testUnitLibraryRead(t, b, planned)
+	if d := b.FlattenAfterApply(ctx, planned, &kept); d.HasError() {
+		t.Fatalf("settings the server kept: %v", d)
 	}
 
-	var diags diag.Diagnostics
-	checkSimilarItemSettingsKept(ctx, options(planned), options(kept), &diags)
-	if diags.HasError() {
-		t.Fatalf("settings the server kept: %v", diags)
-	}
-
-	checkSimilarItemSettingsKept(ctx, options(planned), options(dropped), &diags)
-	if !diags.HasError() {
-		t.Fatal("settings the server dropped: no error")
-	}
-	for _, name := range []string{"type_options[0].similar_item_providers", "type_options[0].similar_item_provider_order"} {
-		if !strings.Contains(diags[0].Detail(), name) {
-			t.Errorf("error detail %q does not name %s", diags[0].Detail(), name)
+	dropped := testUnitLibraryRead(t, b, planned)
+	d := b.FlattenAfterApply(ctx, `{"TypeOptions": [{"Type": "Movie"}]}`, &dropped)
+	var paths []string
+	for _, e := range d.Errors() {
+		if withPath, ok := e.(diag.DiagnosticWithPath); ok {
+			paths = append(paths, withPath.Path().String())
 		}
+	}
+	want := []string{
+		"library_options.type_options[0].similar_item_provider_order",
+		"library_options.type_options[0].similar_item_providers",
+	}
+	if !slices.Equal(paths, want) {
+		t.Errorf("settings the server dropped: errors at %v, want %v", paths, want)
 	}
 }
 
@@ -418,9 +394,26 @@ func TestUnitCollectionTypeChangeRequiresReplaceExceptEmptyToMixed(t *testing.T)
 	}
 }
 
-func TestUnitVersionedAttributeErrorsFollowServerVersion(t *testing.T) {
+func TestUnitLibraryVersionErrorsFollowServerVersion(t *testing.T) {
+	ctx := context.Background()
 	similarItems := path.Root("library_options").AtName("type_options").AtListIndex(0).AtName("similar_item_providers")
 	networkPath := path.Root("library_options").AtName("path_infos").AtListIndex(0).AtName("network_path")
+
+	root, err := libraryWire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := testUnitLibraryRead(t, testUnitLibraryOptionsWire(t),
+		`{"TypeOptions": [{"Type": "Movie", "SimilarItemProviders": ["Local Genre/Tag"]}], "PathInfos": [{"Path": "/media", "NetworkPath": "//nas/media"}]}`)
+	obj, d := types.ObjectValueFrom(ctx, root.AttrTypes, &data)
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	raw, err := obj.ToTerraformValue(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := tfsdk.Config{Schema: schemaOf(NewLibraryResource()), Raw: raw}
 
 	tests := map[string]struct {
 		version      string
@@ -434,7 +427,7 @@ func TestUnitVersionedAttributeErrorsFollowServerVersion(t *testing.T) {
 		"unparseable": {version: "unknown"},
 	}
 	for name, test := range tests {
-		diags := versionedAttributeErrors(test.version, []path.Path{similarItems}, []path.Path{networkPath})
+		diags := root.VersionErrors(ctx, config, func() (string, error) { return test.version, nil })
 		gotSimilar, gotNetwork := false, false
 		for _, d := range diags {
 			withPath, ok := d.(diag.DiagnosticWithPath)
@@ -496,4 +489,42 @@ func testUnitAssertJSONEqual(t *testing.T, got json.RawMessage, want string) {
 	if string(gotJSON) != string(wantJSON) {
 		t.Fatalf("JSON mismatch\n got: %s\nwant: %s", gotJSON, wantJSON)
 	}
+}
+
+func testUnitLibraryOptionsWire(t *testing.T) *wire.Binding {
+	t.Helper()
+	b, err := libraryOptionsWire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// testUnitLibraryRead reads options into a library whose other attributes
+// are set, as the resource's model always has them.
+func testUnitLibraryRead(t *testing.T, b *wire.Binding, options string) LibraryResourceModel {
+	t.Helper()
+	data := LibraryResourceModel{
+		ID:             types.StringValue("Movies"),
+		Name:           types.StringValue("Movies"),
+		CollectionType: types.StringValue("movies"),
+		Paths:          testUnitStringList(t, "/media"),
+		ItemID:         types.StringValue("item"),
+	}
+	if d := b.FlattenInto(context.Background(), options, &data); d.HasError() {
+		t.Fatalf("read: %v", d)
+	}
+	return data
+}
+
+func typeOptionsObjectType() types.ObjectType { return testUnitObjectType(typeOptionsAttributes()) }
+
+func imageOptionsObjectType() types.ObjectType { return testUnitObjectType(imageOptionsAttributes()) }
+
+func testUnitObjectType(attrs map[string]schema.Attribute) types.ObjectType {
+	t := types.ObjectType{AttrTypes: map[string]attr.Type{}}
+	for name, a := range attrs {
+		t.AttrTypes[name] = a.GetType()
+	}
+	return t
 }

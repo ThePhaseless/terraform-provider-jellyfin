@@ -118,15 +118,6 @@ func overlayAdapter[T any](overlay func(ctx context.Context, doc map[string]json
 	}
 }
 
-func readVirtualFolderOptions(raw []byte) (string, bool) {
-	var folders []map[string]json.RawMessage
-	if json.Unmarshal(raw, &folders) != nil || len(folders) == 0 {
-		return "", false
-	}
-	opts, ok := folders[0]["LibraryOptions"]
-	return string(opts), ok
-}
-
 func wireDiffCases() []wireDiffCase {
 	return []wireDiffCase{
 		{
@@ -152,34 +143,6 @@ func wireDiffCases() []wireDiffCase {
 			captured: []string{"livetv.json", "livetv_with_tuner.json"}, servedBase: true,
 			oldFlatten: flatAdapter(flattenLiveTVConfiguration),
 			oldOverlay: overlayAdapter(overlayLiveTVConfiguration),
-		},
-		{
-			name: "library_options", resource: NewLibraryResource(), document: "LibraryOptions", object: "LibraryOptions",
-			captured: []string{"virtual_folders.json"}, extract: readVirtualFolderOptions, servedBase: true,
-			extra: func(payload map[string]any) {
-				infos, _ := payload["PathInfos"].([]any)
-				for i, e := range infos {
-					if info, ok := e.(map[string]any); ok {
-						info["NetworkPath"] = fmt.Sprintf("//nas/share%d", i)
-					}
-				}
-			},
-			oldFlatten: func(ctx context.Context, raw string, prior types.Object) (types.Object, diag.Diagnostics) {
-				m, diags := modelOf[LibraryResourceModel](ctx, prior, "library_options")
-				if diags.HasError() {
-					return prior, diags
-				}
-				m.LibraryOptions = flattenLibraryOptions(ctx, raw, &diags)
-				obj, d := objectOf(ctx, prior.AttributeTypes(ctx), &m)
-				return obj, append(diags, d...)
-			},
-			oldOverlay: func(ctx context.Context, doc map[string]json.RawMessage, obj types.Object) diag.Diagnostics {
-				m, diags := modelOf[LibraryResourceModel](ctx, obj, "library_options")
-				if diags.HasError() {
-					return diags
-				}
-				return overlayLibraryOptions(ctx, doc, m.LibraryOptions)
-			},
 		},
 		{
 			name: "security_plugin", resource: NewJellyfinSecurityPluginConfigurationResource(), object: wire.SecurityPluginRoot,
@@ -228,17 +191,6 @@ func wireDiffCases() []wireDiffCase {
 			},
 		},
 	}
-}
-
-func findWireDiffCase(t *testing.T, name string) wireDiffCase {
-	t.Helper()
-	for _, c := range wireDiffCases() {
-		if c.name == name {
-			return c
-		}
-	}
-	t.Fatalf("no differential case %s", name)
-	return wireDiffCase{}
 }
 
 func (c wireDiffCase) binding(t *testing.T) *wire.Binding {
@@ -657,110 +609,6 @@ func TestUnitWireReadsAndWritesLikeTheHandWrittenMappings(t *testing.T) {
 	}
 }
 
-func TestUnitWireKeepPlannedNullsMatchesLibraryReconcile(t *testing.T) {
-	ctx := context.Background()
-	c := findWireDiffCase(t, "library_options")
-	b := c.binding(t)
-	payloads := c.payloads(t)
-	nullPrior := types.ObjectNull(b.AttrTypes)
-	full, d := b.Flatten(ctx, parseDoc(t, payloads[0].raw), nullPrior)
-	if d.HasError() {
-		t.Fatal(d)
-	}
-	// Null what the old reconcile covers: the lists inside type_options and
-	// network_path inside path_infos.
-	opts, _ := full.Attributes()["library_options"].(basetypes.ObjectValue)
-	nullIn := func(listName string, names ...string) {
-		l, _ := opts.Attributes()[listName].(basetypes.ListValue)
-		et, _ := l.ElementType(ctx).(basetypes.ObjectType)
-		elems := make([]attr.Value, len(l.Elements()))
-		for i, e := range l.Elements() {
-			o, _ := e.(basetypes.ObjectValue)
-			for _, n := range names {
-				o = withAttr(ctx, o, n, nullValue(ctx, o.Attributes()[n].Type(ctx)))
-			}
-			elems[i] = o
-		}
-		nl, _ := types.ListValue(et, elems)
-		opts = withAttr(ctx, opts, listName, nl)
-	}
-	nullIn("type_options", "metadata_fetchers", "metadata_fetcher_order", "image_fetchers", "image_options", "image_fetcher_order", "similar_item_providers", "similar_item_provider_order")
-	nullIn("path_infos", "network_path")
-	planned := withAttr(ctx, full, "library_options", opts)
-
-	for _, p := range payloads {
-		got, d := b.Flatten(ctx, parseDoc(t, p.raw), planned)
-		if d.HasError() {
-			t.Fatalf("%s: %v", p.name, d)
-		}
-		plannedModel, _ := modelOf[LibraryResourceModel](ctx, planned)
-		gotModel, _ := modelOf[LibraryResourceModel](ctx, got)
-		gotModel.LibraryOptions = keepPlannedNulls(ctx, plannedModel.LibraryOptions, gotModel.LibraryOptions)
-		oldObj, _ := objectOf(ctx, b.AttrTypes, &gotModel)
-		newObj := wire.KeepPlannedNulls(planned, got)
-		var diffs []string
-		valueDiffs(ctx, oldObj, newObj, "", &diffs)
-		for _, diff := range diffs {
-			t.Errorf("%s: %s", p.name, diff)
-		}
-	}
-}
-
-func TestUnitWireDroppedMatchesSimilarItemCheck(t *testing.T) {
-	ctx := context.Background()
-	c := findWireDiffCase(t, "library_options")
-	b := c.binding(t)
-	full := synthesize(wire.Pinned(), "LibraryOptions", c.name, 0)
-	c.extra(full)
-	raw, _ := json.Marshal(full)
-	planned, d := b.Flatten(ctx, parseDoc(t, string(raw)), types.ObjectNull(b.AttrTypes))
-	if d.HasError() {
-		t.Fatal(d)
-	}
-	typeOptions, _ := full["TypeOptions"].([]any)
-	for _, e := range typeOptions {
-		if entry, ok := e.(map[string]any); ok {
-			delete(entry, "SimilarItemProviders")
-			delete(entry, "SimilarItemProviderOrder")
-		}
-	}
-	raw, _ = json.Marshal(full)
-	got, d := b.Flatten(ctx, parseDoc(t, string(raw)), planned)
-	if d.HasError() {
-		t.Fatal(d)
-	}
-
-	plannedModel, _ := modelOf[LibraryResourceModel](ctx, planned)
-	gotModel, _ := modelOf[LibraryResourceModel](ctx, got)
-	var oldDiags diag.Diagnostics
-	checkSimilarItemSettingsKept(ctx, plannedModel.LibraryOptions, gotModel.LibraryOptions, &oldDiags)
-
-	var newPaths []string
-	for _, e := range b.Dropped(planned, got) {
-		if pe, ok := e.(diag.DiagnosticWithPath); ok {
-			newPaths = append(newPaths, pe.Path().String())
-		}
-	}
-	sort.Strings(newPaths)
-	want := []string{
-		"library_options.type_options[0].similar_item_provider_order",
-		"library_options.type_options[0].similar_item_providers",
-		"library_options.type_options[1].similar_item_provider_order",
-		"library_options.type_options[1].similar_item_providers",
-	}
-	if !reflect.DeepEqual(newPaths, want) {
-		t.Errorf("Dropped reports %v, want %v", newPaths, want)
-	}
-	if len(oldDiags) != 1 {
-		t.Fatalf("old check reports %v", oldDiags)
-	}
-	for _, p := range want {
-		if !strings.Contains(oldDiags[0].Detail(), strings.TrimPrefix(p, "library_options.")) {
-			t.Errorf("old check does not name %s: %s", p, oldDiags[0].Detail())
-		}
-	}
-}
-
 func diagLines(diags diag.Diagnostics) []string {
 	var out []string
 	for _, e := range diags {
@@ -776,34 +624,6 @@ func diagLines(diags diag.Diagnostics) []string {
 
 func TestUnitWireVersionErrorsMatchTheHandWrittenChecks(t *testing.T) {
 	ctx := context.Background()
-	lib := findWireDiffCase(t, "library_options")
-	libRoot := wireOf(t, NewLibraryResource())
-	libDoc := lib.binding(t)
-	full := synthesize(wire.Pinned(), "LibraryOptions", lib.name, 0)
-	lib.extra(full)
-	raw, _ := json.Marshal(full)
-	planned, d := libDoc.Flatten(ctx, parseDoc(t, string(raw)), types.ObjectNull(libDoc.AttrTypes))
-	if d.HasError() {
-		t.Fatal(d)
-	}
-	libSchema := schemaOf(NewLibraryResource())
-	tfValue, err := planned.ToTerraformValue(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	libConfig := tfsdk.Config{Schema: libSchema, Raw: tfValue}
-	for _, version := range []string{"10.9.11", "10.10.0", "10.11.11", "12.0.0", "12.1.0", "unstable"} {
-		similar, network := configuredVersionedAttributes(ctx, libConfig)
-		old := diagLines(versionedAttributeErrors(version, similar, network))
-		got := diagLines(libRoot.VersionErrors(ctx, libConfig, func() (string, error) { return version, nil }))
-		if !reflect.DeepEqual(old, got) {
-			t.Errorf("library on %s:\nold %q\nnew %q", version, old, got)
-		}
-		if version == "10.11.11" && len(old) != 6 {
-			t.Errorf("library on %s: %d errors, want one per similar item setting and network path of the two synthesized elements", version, len(old))
-		}
-	}
-
 	encRoot, err := pendingWireMigration["jellyfin_encoding_configuration"]()
 	if err != nil {
 		t.Fatal(err)
