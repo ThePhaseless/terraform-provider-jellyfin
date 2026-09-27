@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/parser"
 	"go/token"
 	"go/types"
@@ -572,14 +573,24 @@ func clientAPICalls(dir string) ([]apiCall, error) {
 // packageAPICalls finds request helpers instead of listing them: a function
 // that passes a parameter on as the whole request path becomes a request site
 // for its callers, repeated until none turns up. A parameter built into a
-// larger path is recorded as a runtime value, which is right for the IDs
-// callers pass to exported methods. A call in the package that passes path text
-// for such a parameter, or a request site used as a value, fails instead,
-// since the guard would record the wrong endpoint or none.
+// larger path is recorded as a runtime value. A call in the package that
+// passes path text for such a parameter, or a request site used as a value,
+// fails instead, since the guard would record the wrong endpoint or none.
+//
+// Two cases still record the wrong endpoint. Only this package is read, so
+// path text that a caller elsewhere passes to an exported method, such as
+// "Counts" for an item ID, selects a route the guard does not see. And a path
+// operand that is not a constant, a parameter or a local variable it can
+// follow, such as a call result, a field or a package variable, is recorded as
+// a runtime value even when it always holds the same text.
 func packageAPICalls(fset *token.FileSet, files []*ast.File) ([]apiCall, error) {
-	info := &types.Info{Defs: map[*ast.Ident]types.Object{}, Uses: map[*ast.Ident]types.Object{}}
-	// Only the scopes of local names are needed, so imports stay unresolved and
-	// the type errors that causes are ignored.
+	info := &types.Info{
+		Defs:  map[*ast.Ident]types.Object{},
+		Uses:  map[*ast.Ident]types.Object{},
+		Types: map[ast.Expr]types.TypeAndValue{},
+	}
+	// Only the scopes of local names and the values of constants are needed, so
+	// imports stay unresolved and the type errors that causes are ignored.
 	conf := types.Config{Error: func(error) {}}
 	_, _ = conf.Check("client", fset, files, info)
 
@@ -874,6 +885,9 @@ func (r *pathResolver) embeddedArg(call *ast.CallExpr, callee string, i int) ([]
 }
 
 func (r *pathResolver) values(expr ast.Expr) ([]string, error) {
+	if tv := r.info.Types[expr]; tv.Value != nil && tv.Value.Kind() == constant.String {
+		return []string{constant.StringVal(tv.Value)}, nil
+	}
 	switch e := expr.(type) {
 	case *ast.BasicLit:
 		if e.Kind == token.STRING {
@@ -1460,6 +1474,11 @@ func parseTestClient(t *testing.T, sources ...string) (*token.FileSet, []*ast.Fi
 func TestUnitPackageAPICalls(t *testing.T) {
 	calls := `package client
 
+const (
+	countsSegment = "Counts"
+	pingPath      = "/System/" + "Ping"
+)
+
 func (c *Client) Calls(ctx context.Context, id string, existing bool) {
 	c.get(ctx, "/System/Info", nil)
 	c.getRaw(ctx, fmt.Sprintf("/Users/%s/Items?limit=%d", url.PathEscape(id), 5))
@@ -1482,6 +1501,8 @@ func (c *Client) Calls(ctx context.Context, id string, existing bool) {
 	c.getRaw(ctx, fmt.Sprintf("/System/Info/%s", name))
 	c.getItem(ctx, id)
 	c.createKey(ctx, "Terraform")
+	c.get(ctx, "/Items/"+countsSegment, nil)
+	c.getRaw(ctx, pingPath)
 }
 
 func (c *Client) Scoped(ctx context.Context, id string) {
@@ -1540,6 +1561,8 @@ func (c *Client) createKey(ctx context.Context, app string) error {
 		{http.MethodHead, "/System/Ping"},
 		{http.MethodGet, "/Health"},
 		{http.MethodGet, "/System/Info/Public"},
+		{http.MethodGet, "/Items/Counts"},
+		{http.MethodGet, "/System/Ping"},
 		{http.MethodGet, "/Startup/User"},
 		{http.MethodDelete, "/Plugins/{}"},
 		{http.MethodGet, "/Items/{}"},
@@ -1603,6 +1626,21 @@ func (c *Client) getItem(ctx context.Context, sub string) error {
 
 func (c *Client) Counts(ctx context.Context) error {
 	return c.getItem(ctx, "Counts")
+}
+`,
+			wantErr: `getItem builds argument 1 into a request path and the guard records it as a runtime value, so it cannot see which endpoint "Counts" selects`,
+		},
+		"constant path text for a parameter built into a path": {
+			src: `package client
+
+const countsSegment = "Counts"
+
+func (c *Client) getItem(ctx context.Context, sub string) error {
+	return c.get(ctx, "/Items/"+sub, nil)
+}
+
+func (c *Client) Counts(ctx context.Context) error {
+	return c.getItem(ctx, countsSegment)
 }
 `,
 			wantErr: `getItem builds argument 1 into a request path and the guard records it as a runtime value, so it cannot see which endpoint "Counts" selects`,
