@@ -5,14 +5,21 @@ package provider
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
 func TestUnitReadForImportRefusesResourcesWithoutABinding(t *testing.T) {
-	for _, resourceType := range []string{"jellyfin_api_key", "jellyfin_no_such_resource"} {
-		if _, _, err := ReadForImport(context.Background(), resourceType, "id", "{}"); err == nil {
-			t.Errorf("ReadForImport(%s) returned no error", resourceType)
-		}
+	_, _, err := ReadForImport(context.Background(), "jellyfin_api_key", "id", "{}")
+	if err == nil || !strings.Contains(err.Error(), "does not import a Jellyfin JSON document") {
+		t.Errorf("ReadForImport(jellyfin_api_key) error = %v, want one saying it has no document to import", err)
+	}
+}
+
+func TestUnitReadForImportRefusesUnknownResourceTypes(t *testing.T) {
+	_, _, err := ReadForImport(context.Background(), "jellyfin_no_such_resource", "id", "{}")
+	if err == nil || !strings.Contains(err.Error(), "has no resource jellyfin_no_such_resource") {
+		t.Errorf("ReadForImport(jellyfin_no_such_resource) error = %v, want one naming the unknown type", err)
 	}
 }
 

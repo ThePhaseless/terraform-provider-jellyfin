@@ -32,6 +32,9 @@ func ReadForImport(ctx context.Context, resourceType, importID, raw string) (sch
 			break
 		}
 	}
+	if r == nil {
+		return schema.Schema{}, types.Object{}, fmt.Errorf("the provider has no resource %s", resourceType)
+	}
 	bound, isBound := r.(wireBound)
 	importer, imports := r.(resource.ResourceWithImportState)
 	if !isBound || !imports {
