@@ -10,84 +10,57 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
-func TestUnitUserPolicyOverlay(t *testing.T) {
+func TestUnitUserPolicyRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	fixture := `{
-		"IsHidden": true,
-		"EnableMediaPlayback": false,
-		"LoginAttemptsBeforeLockout": 3,
-		"MaxActiveSessions": 2,
-		"SyncPlayAccess": "JoinGroups",
-		"AccessSchedules": [
-			{"DayOfWeek": "Monday", "StartHour": 9.0, "EndHour": 17.0}
-		],
-		"EnabledFolders": ["/movies"]
-	}`
-
-	m, err := parseJSONObject(fixture)
+	b, err := userPolicyWire()
 	if err != nil {
-		t.Fatalf("parse: %v", err)
+		t.Fatal(err)
+	}
+	fixture := `{"IsAdministrator":false,"IsDisabled":false,"EnableAllFolders":true,` +
+		`"IsHidden":true,"EnableMediaPlayback":false,"MaxParentalRating":13,"MaxParentalSubRating":1,` +
+		`"LoginAttemptsBeforeLockout":3,"MaxActiveSessions":2,"SyncPlayAccess":"JoinGroups",` +
+		`"AccessSchedules":[{"DayOfWeek":"Monday","StartHour":9.5,"EndHour":17}],"EnabledFolders":["/movies"]}`
+
+	data := UserResourceModel{ID: types.StringValue("user-1"), Name: types.StringValue("alice")}
+	if d := b.FlattenInto(ctx, fixture, &data); d.HasError() {
+		t.Fatalf("read: %v", d)
+	}
+	if data.Policy == nil || data.Policy.MaxParentalSubRating.ValueInt64() != 1 || !data.EnableAllFolders.ValueBool() {
+		t.Fatalf("read policy %+v, enable_all_folders %v", data.Policy, data.EnableAllFolders)
+	}
+	if !data.Name.Equal(types.StringValue("alice")) {
+		t.Errorf("name = %v, want the prior value: the policy document has no name", data.Name)
 	}
 
-	policy := &UserPolicyModel{
-		IsHidden:                   types.BoolValue(true),
-		EnableMediaPlayback:        types.BoolValue(false),
-		MaxParentalRating:          types.Int64Value(13),
-		MaxParentalSubRating:       types.Int64Value(1),
-		LoginAttemptsBeforeLockout: types.Int64Value(3),
-		MaxActiveSessions:          types.Int64Value(2),
-		SyncPlayAccess:             types.StringValue("JoinGroups"),
-		EnabledFolders:             mustStringList([]string{"/movies"}),
-		AccessSchedules:            mustAccessScheduleList(ctx, []UserAccessScheduleModel{{DayOfWeek: types.StringValue("Monday"), StartHour: types.Float64Value(9.0), EndHour: types.Float64Value(17.0)}}),
+	base := map[string]json.RawMessage{}
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
+		t.Fatalf("write: %v", d)
 	}
-
-	if d := overlayPolicyIntoJSON(ctx, m, policy); d.HasError() {
-		t.Fatalf("overlay: %v", d)
-	}
-
-	got := policyFromRaw(ctx, string(mustJSON(m)), nil)
-	fields := []struct {
-		name      string
-		got, want attr.Value
-	}{
-		{"IsHidden", got.IsHidden, policy.IsHidden},
-		{"EnableMediaPlayback", got.EnableMediaPlayback, policy.EnableMediaPlayback},
-		{"MaxParentalRating", got.MaxParentalRating, policy.MaxParentalRating},
-		{"MaxParentalSubRating", got.MaxParentalSubRating, policy.MaxParentalSubRating},
-		{"LoginAttemptsBeforeLockout", got.LoginAttemptsBeforeLockout, policy.LoginAttemptsBeforeLockout},
-		{"MaxActiveSessions", got.MaxActiveSessions, policy.MaxActiveSessions},
-		{"SyncPlayAccess", got.SyncPlayAccess, policy.SyncPlayAccess},
-		{"EnabledFolders", got.EnabledFolders, policy.EnabledFolders},
-		{"AccessSchedules", got.AccessSchedules, policy.AccessSchedules},
-	}
-	for _, f := range fields {
-		if !f.got.Equal(f.want) {
-			t.Errorf("%s = %s, want %s", f.name, f.got, f.want)
-		}
-	}
+	testUnitAssertJSONEqual(t, mustJSON(base), fixture)
 }
 
-func TestUnitUserPolicyOverlayWritesNullParentalRatings(t *testing.T) {
+func TestUnitUserPolicyWriteSendsNullParentalRatings(t *testing.T) {
 	ctx := context.Background()
+	b, err := userPolicyWire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data UserResourceModel
+	if d := b.FlattenInto(ctx, `{}`, &data); d.HasError() {
+		t.Fatalf("read: %v", d)
+	}
+
 	m, err := parseJSONObject(`{"MaxParentalRating": 10, "MaxParentalSubRating": 2, "IsHidden": true}`)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-
-	policy := &UserPolicyModel{
-		MaxParentalRating:    types.Int64Null(),
-		MaxParentalSubRating: types.Int64Null(),
-		IsHidden:             types.BoolNull(),
-	}
-
-	if d := overlayPolicyIntoJSON(ctx, m, policy); d.HasError() {
-		t.Fatalf("overlay: %v", d)
+	if d := b.OverlayModel(ctx, m, &data); d.HasError() {
+		t.Fatalf("write: %v", d)
 	}
 
 	if got := string(m["MaxParentalRating"]); got != "null" {
@@ -133,27 +106,4 @@ func TestUnitUserRenameKeepsConfiguration(t *testing.T) {
 	if got := string(posted["Configuration"]); got != `{"SubtitleLanguagePreference":"fre"}` {
 		t.Errorf("Configuration = %s, want the one read from the server", got)
 	}
-}
-
-func mustStringList(values []string) types.List {
-	v, _ := types.ListValueFrom(context.Background(), types.StringType, values)
-	return v
-}
-
-func mustAccessScheduleList(ctx context.Context, values []UserAccessScheduleModel) types.List {
-	objType := types.ObjectType{AttrTypes: map[string]attr.Type{
-		"day_of_week": types.StringType,
-		"start_hour":  types.Float64Type,
-		"end_hour":    types.Float64Type,
-	}}
-	objects := make([]types.Object, len(values))
-	for i, v := range values {
-		objects[i], _ = types.ObjectValue(objType.AttrTypes, map[string]attr.Value{
-			"day_of_week": v.DayOfWeek,
-			"start_hour":  v.StartHour,
-			"end_hour":    v.EndHour,
-		})
-	}
-	v, _ := types.ListValueFrom(ctx, objType, objects)
-	return v
 }
