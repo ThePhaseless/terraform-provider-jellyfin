@@ -12,7 +12,9 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
@@ -87,10 +89,13 @@ func TestAccSecurityPluginConfigurationResource(t *testing.T) {
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(name, plancheck.ResourceActionUpdate),
+						// updated spells the GUID with dashes, which names the
+						// same plugin as the spelling in state.
+						plancheck.ExpectKnownValue(name, tfjsonpath.New("plugin_id"), knownvalue.StringExact(dashFreeID)),
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(name, "id", jellyfinSecurityPluginID),
+					resource.TestCheckResourceAttr(name, "id", dashFreeID),
 					resource.TestCheckResourceAttr(name, "public_base_url", "https://media.example.com/jellyfin"),
 					resource.TestCheckResourceAttr(name, "pair_device_on_second_screen_approval", "false"),
 					resource.TestCheckResourceAttr(name, "step_up_window_seconds", "300"),

@@ -6,6 +6,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -51,15 +52,7 @@ func (r *PluginConfigurationResource) Schema(_ context.Context, _ resource.Schem
 		MarkdownDescription: "Manages plugin configuration in Jellyfin. Configuration is passed as a JSON string, " +
 			"allowing universal support for any plugin settings including SSO-Auth.",
 		Attributes: map[string]schema.Attribute{
-			"plugin_id": schema.StringAttribute{
-				Description:         "The plugin ID (GUID).",
-				MarkdownDescription: "The plugin ID (GUID).",
-				Required:            true,
-				Validators:          requiredIdentifierValidators(),
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
+			"plugin_id": pluginIDAttribute(),
 			"id": schema.StringAttribute{
 				Description:         "The plugin configuration resource identifier.",
 				MarkdownDescription: "The plugin configuration resource identifier.",
@@ -179,4 +172,48 @@ func (r *PluginConfigurationResource) Delete(_ context.Context, _ resource.Delet
 
 func (r *PluginConfigurationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("plugin_id"), req, resp)
+}
+
+func pluginIDAttribute() schema.StringAttribute {
+	return schema.StringAttribute{
+		Description:         "The plugin ID (GUID), with or without dashes. Both spellings name the same plugin, so switching between them plans no change.",
+		MarkdownDescription: "The plugin ID (GUID), with or without dashes. Both spellings name the same plugin, so switching between them plans no change.",
+		Required:            true,
+		Validators:          requiredIdentifierValidators(),
+		PlanModifiers: []planmodifier.String{
+			samePluginGUIDPlanModifier{},
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+}
+
+// normalizeGUID returns a lowercase, dash-free GUID so that the provider can
+// compare IDs regardless of whether Jellyfin returns them as "D" or "N" format.
+func normalizeGUID(s string) string {
+	return strings.ToLower(strings.ReplaceAll(s, "-", ""))
+}
+
+// samePluginGUIDPlanModifier plans the plugin_id in state when the
+// configuration spells the same GUID another way. jellyfin_plugin's id and GET
+// /Plugins use the dash-free spelling while a GUID copied from elsewhere, such
+// as an import ID, often has dashes, and without this a change of spelling
+// would replace the resource. Terraform accepts a prior value in place of a
+// configured one the provider treats as equal.
+type samePluginGUIDPlanModifier struct{}
+
+func (samePluginGUIDPlanModifier) Description(context.Context) string {
+	return "Keeps the plugin_id in state when the configuration spells the same GUID another way."
+}
+
+func (m samePluginGUIDPlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (samePluginGUIDPlanModifier) PlanModifyString(_ context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if req.StateValue.IsNull() || req.PlanValue.IsNull() || req.PlanValue.IsUnknown() {
+		return
+	}
+	if normalizeGUID(req.PlanValue.ValueString()) == normalizeGUID(req.StateValue.ValueString()) {
+		resp.PlanValue = req.StateValue
+	}
 }
