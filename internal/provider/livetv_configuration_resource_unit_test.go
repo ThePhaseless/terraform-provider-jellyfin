@@ -7,38 +7,22 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-
-	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-func TestUnitLiveTVConfigurationOverlay(t *testing.T) {
+func TestUnitLiveTVConfigurationRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	fixture := `{"GuideDays":14,"RecordingPath":"/recordings","TunerHosts":[{"Id":"host1","Url":"http://tv/"}],"ListingProviders":[{"Id":"prov1","Type":"SchedulesDirect","Username":"u","Password":"p","EnabledTuners":["host1"],"ChannelMappings":[{"Name":"c1","Value":"d1"}]}],"PrePaddingSeconds":30,"PostPaddingSeconds":30}`
-
-	var data LiveTVConfigurationResourceModel
-	data.GuideDays = types.Int64Value(14)
-	data.TunerHosts = types.ListNull(tunerHostObjectType())
-	data.ListingProviders = types.ListNull(listingProviderObjectType())
-	data.PrePaddingSeconds = types.Int64Value(30)
-	data.PostPaddingSeconds = types.Int64Value(30)
-
-	m, err := parseJSONObject(fixture)
+	b, err := livetvWire()
 	if err != nil {
-		t.Fatalf("parse: %v", err)
+		t.Fatal(err)
 	}
+	fixture := `{"GuideDays":14,"RecordingPath":"/recordings","MovieRecordingPath":"/recordings/movies","SeriesRecordingPath":"/recordings/series","EnableRecordingSubfolders":true,"EnableOriginalAudioWithEncodedRecordings":false,"TunerHosts":[{"Id":"host1","Url":"http://tv/","Type":"m3u","DeviceId":"device1","FriendlyName":"Tuner","ImportFavoritesOnly":false,"AllowHWTranscoding":true,"AllowFmp4TranscodingContainer":false,"AllowStreamSharing":true,"FallbackMaxStreamingBitrate":30000000,"EnableStreamLooping":false,"Source":"source","TunerCount":2,"UserAgent":"agent","IgnoreDts":true,"ReadAtNativeFramerate":false}],"ListingProviders":[{"Id":"prov1","Type":"SchedulesDirect","Username":"u","Password":"p","ListingsId":"listings1","ZipCode":"12345","Country":"US","Path":"/guide.xml","EnabledTuners":["host1"],"EnableAllTuners":false,"NewsCategories":["News"],"SportsCategories":["Sports"],"KidsCategories":["Kids"],"MovieCategories":["Movie"],"ChannelMappings":[{"Name":"c1","Value":"d1"}],"MoviePrefix":"M: ","PreferredLanguage":"en","UserAgent":"agent"}],"PrePaddingSeconds":30,"PostPaddingSeconds":30,"MediaLocationsCreated":["/recordings"],"RecordingPostProcessor":"/bin/true","RecordingPostProcessorArguments":"\"{path}\"","SaveRecordingNFO":true,"SaveRecordingImages":true}`
 
-	if d := overlayLiveTVConfiguration(ctx, m, &data); d.HasError() {
-		t.Fatalf("overlay: %v", d)
+	data := readWire[LiveTVConfigurationResourceModel](t, b, fixture)
+	base := map[string]json.RawMessage{}
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
+		t.Fatalf("write: %v", d)
 	}
-
-	var got LiveTVConfigurationResourceModel
-	flattenLiveTVConfiguration(ctx, string(mustJSON(m)), &got, nil)
-
-	gotJSON, _ := json.Marshal(got)
-	wantJSON, _ := json.Marshal(data)
-	if string(gotJSON) != string(wantJSON) {
-		t.Fatalf("round-trip mismatch\n got: %s\nwant: %s", gotJSON, wantJSON)
-	}
+	checkSameJSON(t, base, fixture)
 }
 
 func mustJSON(v interface{}) []byte {

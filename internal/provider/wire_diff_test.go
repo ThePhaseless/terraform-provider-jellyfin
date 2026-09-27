@@ -130,12 +130,6 @@ func readVirtualFolderOptions(raw []byte) (string, bool) {
 func wireDiffCases() []wireDiffCase {
 	return []wireDiffCase{
 		{
-			name: "livetv", resource: NewLiveTVConfigurationResource(), object: "LiveTvOptions",
-			captured: []string{"livetv.json", "livetv_with_tuner.json"}, servedBase: true,
-			oldFlatten: flatAdapter(flattenLiveTVConfiguration),
-			oldOverlay: overlayAdapter(overlayLiveTVConfiguration),
-		},
-		{
 			name: "user_policy", resource: NewUserResource(), document: "Policy", object: "UserPolicy",
 			captured: []string{"user_policy.json"}, servedBase: true,
 			accepted: map[string]string{
