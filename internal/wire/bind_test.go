@@ -294,6 +294,18 @@ func TestUnitBindRejects(t *testing.T) {
 			opts: []Option{ReadMissingAs("name", types.BoolValue(false))},
 			want: "name: ReadMissingAs gives a basetypes.BoolType, but the attribute is a basetypes.StringType",
 		},
+		"a codec on a list of objects": {
+			opts: []Option{WithCodec("hosts", stampCodec{})},
+			want: "hosts is a nested attribute, whose own attributes take their codecs",
+		},
+		"delimiting an object": {
+			opts: []Option{Delimited("opts", ",")},
+			want: "opts is a nested attribute, whose own attributes take their codecs",
+		},
+		"inverting a merged list": {
+			opts: []Option{Inverted("types", "Types")},
+			want: "types is a nested attribute, whose own attributes take their codecs",
+		},
 		"a nested attribute on a scalar key": {
 			attrs: withAttr("name", schema.SingleNestedAttribute{Optional: true, Attributes: map[string]schema.Attribute{"x": optString()}}),
 			want:  "name is an object, but Doc.Name is string",

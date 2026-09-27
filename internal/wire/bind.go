@@ -316,6 +316,9 @@ func (bb *binder) field(object, path, name string, a schema.Attribute, inst, sin
 		nestedSince = f.Since
 	}
 
+	if _, nested := a.(schema.NestedAttribute); nested && opt.codec != nil {
+		bb.errorf("%s is a nested attribute, whose own attributes take their codecs, so it takes no Inverted, Delimited or WithCodec; ReadMissingAs gives it a read default", path)
+	}
 	switch na := a.(type) {
 	case schema.ListNestedAttribute:
 		if !f.Prop.List || f.Prop.Ref == "" {
