@@ -41,7 +41,9 @@ func wireBinding(diags *diag.Diagnostics, bind func() (*wire.Binding, error)) *w
 // checkServerHasFields rejects, at plan time, configured values whose fields
 // the server's Jellyfin version lacks. Such a server accepts the write and
 // silently drops the value, which Terraform could only report after apply as
-// an inconsistent result.
+// an inconsistent result. Terraform plans each resource this way again in the
+// refresh that precedes a destroy, so such a value left in the configuration
+// also fails terraform destroy unless it runs with -refresh=false.
 func checkServerHasFields(ctx context.Context, c *client.Client, b *wire.Binding, config tfsdk.Config) diag.Diagnostics {
 	if c == nil {
 		return nil
