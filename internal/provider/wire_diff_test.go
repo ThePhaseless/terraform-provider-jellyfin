@@ -130,12 +130,6 @@ func readVirtualFolderOptions(raw []byte) (string, bool) {
 func wireDiffCases() []wireDiffCase {
 	return []wireDiffCase{
 		{
-			name: "networking", resource: NewNetworkingConfigurationResource(), object: "NetworkConfiguration",
-			captured: []string{"network.json"}, servedBase: true,
-			oldFlatten: flatAdapter(flattenNetworkingConfiguration),
-			oldOverlay: overlayAdapter(overlayNetworkingConfiguration),
-		},
-		{
 			name: "system", resource: NewSystemConfigurationResource(), object: "ServerConfiguration",
 			captured: []string{"system.json"}, servedBase: true,
 			oldFlatten: flatAdapter(flattenSystemConfiguration),
