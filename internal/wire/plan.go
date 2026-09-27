@@ -171,6 +171,19 @@ type gatedValue struct {
 	f *Field
 }
 
+// VersionGap is a configured value that the server's Jellyfin version lacks,
+// as VersionErrors hands it to a VersionMessage.
+type VersionGap struct {
+	// Path leads to the value, with list indexes.
+	Path path.Path
+	Key  string
+	// Since is set when the server is older than the field, Until when the
+	// server is as new as the release that removed it.
+	Since         string
+	Until         string
+	ServerVersion string
+}
+
 // VersionErrors rejects each configured value whose field the server's
 // Jellyfin version lacks: a field with a Since version on older servers, and
 // a Legacy field on its until version and later. It asks version for the
@@ -205,16 +218,32 @@ func (b *Binding) VersionErrors(ctx context.Context, cfg tfsdk.Config, version f
 		return diags
 	}
 	for _, g := range gated {
+		gap := VersionGap{Path: g.p, Key: g.f.key(), ServerVersion: ver}
 		switch {
 		case g.f.Since != "" && compareVersions(ver, g.f.Since) < 0:
-			diags.AddAttributeError(g.p, "Unsupported Jellyfin server version",
-				fmt.Sprintf("%s requires Jellyfin %s or later: the server runs Jellyfin %s, which has no %s field, so it would discard the value. Remove %s from the configuration or upgrade the server.", g.p, g.f.Since, ver, g.f.key(), g.p))
+			gap.Since = g.f.Since
 		case g.f.Until != "" && compareVersions(ver, g.f.Until) >= 0:
-			diags.AddAttributeError(g.p, "Unsupported Jellyfin server version",
-				fmt.Sprintf("The server runs Jellyfin %s. %s Remove %s from the configuration.", ver, g.f.Reason, g.p))
+			gap.Until = g.f.Until
+		default:
+			continue
 		}
+		message := g.f.VersionMessage
+		if message == nil {
+			message = g.f.genericVersionMessage
+		}
+		summary, detail := message(gap)
+		diags.AddAttributeError(g.p, summary, detail)
 	}
 	return diags
+}
+
+func (f *Field) genericVersionMessage(g VersionGap) (summary, detail string) {
+	if g.Since != "" {
+		return "Unsupported Jellyfin server version",
+			fmt.Sprintf("%s requires Jellyfin %s or later: the server runs Jellyfin %s, which has no %s field, so it would discard the value. Remove %s from the configuration or upgrade the server.", g.Path, g.Since, g.ServerVersion, g.Key, g.Path)
+	}
+	return "Unsupported Jellyfin server version",
+		fmt.Sprintf("The server runs Jellyfin %s. %s Remove %s from the configuration.", g.ServerVersion, f.Reason, g.Path)
 }
 
 func collectGated(n *node, obj basetypes.ObjectValue, at path.Path, out *[]gatedValue) {

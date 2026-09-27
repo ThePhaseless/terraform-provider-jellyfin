@@ -67,6 +67,9 @@ type Field struct {
 	Since       string
 	Until       string
 	ReadMissing attr.Value
+	// VersionMessage words the error VersionErrors reports when the server's
+	// version falls outside Since or Until; nil takes the generic wording.
+	VersionMessage func(VersionGap) (summary, detail string)
 	// Elem binds the object of a nested attribute: each list element, or the
 	// single object.
 	Elem     *Binding
@@ -236,21 +239,22 @@ func (bb *binder) field(object, path, name string, a schema.Attribute, inst, sin
 		opt.used = true
 	}
 	f := &Field{
-		Path:        path,
-		Name:        name,
-		Type:        a.GetType(),
-		Mode:        opt.mode,
-		Reason:      opt.reason,
-		NullClears:  a.IsOptional() && !a.IsComputed(),
-		ReadOnly:    a.IsComputed() && !a.IsOptional() && !a.IsRequired(),
-		ReadMissing: opt.readMissing,
+		Path:           path,
+		Name:           name,
+		Type:           a.GetType(),
+		Mode:           opt.mode,
+		Reason:         opt.reason,
+		NullClears:     a.IsOptional() && !a.IsComputed(),
+		ReadOnly:       a.IsComputed() && !a.IsOptional() && !a.IsRequired(),
+		ReadMissing:    opt.readMissing,
+		VersionMessage: opt.versionMsg,
 	}
 	if opt.readMissing != nil && !opt.readMissing.Type(context.Background()).Equal(f.Type) {
 		bb.errorf("%s: ReadMissingAs gives a %s, but the attribute is a %s", path, opt.readMissing.Type(context.Background()), f.Type)
 	}
 	if !f.Mode.hasKey() {
-		if opt.key != "" || opt.codec != nil || opt.mergeKey != "" || opt.carryKey != "" || opt.readMissing != nil {
-			bb.errorf("%s is %s, so it takes no key, codec, list or read option", path, f.Mode)
+		if opt.key != "" || opt.codec != nil || opt.mergeKey != "" || opt.carryKey != "" || opt.readMissing != nil || opt.versionMsg != nil {
+			bb.errorf("%s is %s, so it takes no key, codec, list, read or version option", path, f.Mode)
 		}
 		return f
 	}
@@ -305,6 +309,9 @@ func (bb *binder) field(object, path, name string, a schema.Attribute, inst, sin
 	nestedSince := since
 	if nestedSince == "" {
 		nestedSince = f.Since
+	}
+	if opt.versionMsg != nil && f.Since == "" && f.Until == "" {
+		bb.errorf("%s: VersionMessage names an attribute VersionErrors never reports, as it has no since or until version of its own", path)
 	}
 
 	if _, nested := a.(schema.NestedAttribute); nested && opt.codec != nil {

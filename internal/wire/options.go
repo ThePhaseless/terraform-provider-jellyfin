@@ -35,6 +35,7 @@ type attrOption struct {
 	carryKey    string
 	carryBy     string
 	readMissing attr.Value
+	versionMsg  func(VersionGap) (summary, detail string)
 	used        bool
 }
 
@@ -155,6 +156,13 @@ func CarryServed(listPath, jsonKey, byAttr string) Option {
 // or of the wrong type.
 func ReadMissingAs(attrPath string, v attr.Value) Option {
 	return func(o *options) { o.attr(attrPath).readMissing = v }
+}
+
+// VersionMessage words the error VersionErrors reports for a configured value
+// of the attribute, which some Jellyfin version lacks, in place of the generic
+// wording, so a resource keeps the message its users already know.
+func VersionMessage(attrPath string, message func(VersionGap) (summary, detail string)) Option {
+	return func(o *options) { o.attr(attrPath).versionMsg = message }
 }
 
 // Unmanaged lets a rebuilt element of object leave out key, which no

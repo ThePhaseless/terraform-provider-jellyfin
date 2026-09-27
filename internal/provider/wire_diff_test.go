@@ -785,12 +785,14 @@ func TestUnitWireDroppedMatchesSimilarItemCheck(t *testing.T) {
 	}
 }
 
-func diagPaths(diags diag.Diagnostics) []string {
+func diagLines(diags diag.Diagnostics) []string {
 	var out []string
-	for _, e := range diags.Errors() {
+	for _, e := range diags {
+		p := "(no path)"
 		if pe, ok := e.(diag.DiagnosticWithPath); ok {
-			out = append(out, pe.Path().String())
+			p = pe.Path().String()
 		}
+		out = append(out, fmt.Sprintf("%s | %s | %s | %s", p, e.Severity(), e.Summary(), e.Detail()))
 	}
 	sort.Strings(out)
 	return out
@@ -819,10 +821,13 @@ func TestUnitWireVersionErrorsMatchTheHandWrittenChecks(t *testing.T) {
 	libConfig := tfsdk.Config{Schema: libSchema, Raw: tfValue}
 	for _, version := range []string{"10.9.11", "10.10.0", "10.11.11", "12.0.0", "12.1.0", "unstable"} {
 		similar, network := configuredVersionedAttributes(ctx, libConfig)
-		old := diagPaths(versionedAttributeErrors(version, similar, network))
-		got := diagPaths(libRoot.VersionErrors(ctx, libConfig, func() (string, error) { return version, nil }))
+		old := diagLines(versionedAttributeErrors(version, similar, network))
+		got := diagLines(libRoot.VersionErrors(ctx, libConfig, func() (string, error) { return version, nil }))
 		if !reflect.DeepEqual(old, got) {
-			t.Errorf("library on %s: old %v, new %v", version, old, got)
+			t.Errorf("library on %s:\nold %q\nnew %q", version, old, got)
+		}
+		if version == "10.11.11" && len(old) != 6 {
+			t.Errorf("library on %s: %d errors, want one per similar item setting and network path of the two synthesized elements", version, len(old))
 		}
 	}
 
@@ -847,10 +852,13 @@ func TestUnitWireVersionErrorsMatchTheHandWrittenChecks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		old := diagPaths(checkJellyfin12EncodingKeys(parseDoc(t, string(served)), &encModel))
-		got := diagPaths(encRoot.VersionErrors(ctx, encConfig, func() (string, error) { return version, nil }))
+		old := diagLines(checkJellyfin12EncodingKeys(parseDoc(t, string(served)), &encModel))
+		got := diagLines(encRoot.VersionErrors(ctx, encConfig, func() (string, error) { return version, nil }))
 		if !reflect.DeepEqual(old, got) {
-			t.Errorf("encoding on %s: old %v, new %v", version, old, got)
+			t.Errorf("encoding on %s:\nold %q\nnew %q", version, old, got)
+		}
+		if version == "10.11.11" && len(old) != 2 {
+			t.Errorf("encoding on %s: %d errors, want one per 12.0 field", version, len(old))
 		}
 	}
 }

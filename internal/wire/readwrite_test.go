@@ -418,17 +418,30 @@ func TestUnitDroppedNamesEachAttributeReadBackAsNull(t *testing.T) {
 	}
 }
 
+func configOf(t *testing.T, attrs map[string]schema.Attribute, v attr.Value) tfsdk.Config {
+	t.Helper()
+	raw, err := v.ToTerraformValue(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tfsdk.Config{Schema: schema.Schema{Attributes: attrs}, Raw: raw}
+}
+
+func versionErrorLines(diags diag.Diagnostics) []string {
+	var out []string
+	for _, e := range diags {
+		if pe, ok := e.(diag.DiagnosticWithPath); ok {
+			out = append(out, pe.Path().String()+" | "+e.Summary()+" | "+e.Detail())
+		}
+	}
+	return out
+}
+
 func TestUnitVersionErrors(t *testing.T) {
 	ctx := context.Background()
 	b := testBinding(t)
 	full, _ := b.Flatten(ctx, doc(t, testServed), types.ObjectNull(b.AttrTypes))
-	config := func(v attr.Value) tfsdk.Config {
-		raw, err := v.ToTerraformValue(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return tfsdk.Config{Schema: schema.Schema{Attributes: testAttrs()}, Raw: raw}
-	}
+	config := func(v attr.Value) tfsdk.Config { return configOf(t, testAttrs(), v) }
 	unset := with(t, with(t, full, "fresh", types.StringNull()), "legacy", types.StringNull())
 
 	for _, c := range []struct {
@@ -462,6 +475,38 @@ func TestUnitVersionErrors(t *testing.T) {
 	diags := b.VersionErrors(ctx, config(full), func() (string, error) { return "", fmt.Errorf("offline") })
 	if !diags.HasError() || !strings.Contains(diags[0].Summary(), "Jellyfin version") {
 		t.Errorf("a failed version read is not reported: %v", diags)
+	}
+
+	for version, want := range map[string]string{
+		"1.9.3": "fresh | Unsupported Jellyfin server version | fresh requires Jellyfin 2.0 or later: the server runs Jellyfin 1.9.3, which has no Fresh field, so it would discard the value. Remove fresh from the configuration or upgrade the server.",
+		"2.0.0": "legacy | Unsupported Jellyfin server version | The server runs Jellyfin 2.0.0. Jellyfin 2.0 removed it. Remove legacy from the configuration.",
+	} {
+		got := versionErrorLines(b.VersionErrors(ctx, config(full), func() (string, error) { return version, nil }))
+		if len(got) != 1 || got[0] != want {
+			t.Errorf("on %s: %q\nwant %q", version, got, want)
+		}
+	}
+}
+
+func TestUnitVersionErrorsUseTheDeclaredMessage(t *testing.T) {
+	ctx := context.Background()
+	message := func(g VersionGap) (string, string) {
+		return "No " + g.Key, fmt.Sprintf("%s since=%s until=%s server=%s", g.Path, g.Since, g.Until, g.ServerVersion)
+	}
+	b, err := testCatalog().bind(schema.Schema{Attributes: testAttrs()}, "Doc",
+		append(testOptions(), VersionMessage("fresh", message), VersionMessage("legacy", message))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, _ := b.Flatten(ctx, doc(t, testServed), types.ObjectNull(b.AttrTypes))
+	for version, want := range map[string]string{
+		"1.9.3": "fresh | No Fresh | fresh since=2.0 until= server=1.9.3",
+		"2.0.0": "legacy | No OldPath | legacy since= until=2.0 server=2.0.0",
+	} {
+		got := versionErrorLines(b.VersionErrors(ctx, configOf(t, testAttrs(), full), func() (string, error) { return version, nil }))
+		if len(got) != 1 || got[0] != want {
+			t.Errorf("on %s: %q\nwant %q", version, got, want)
+		}
 	}
 }
 

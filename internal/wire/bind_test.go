@@ -267,6 +267,14 @@ func TestUnitBindRejects(t *testing.T) {
 			base: optionsWithoutUnmanaged(),
 			want: `rebuilding each Hosts[] drops Host.Extra, which no attribute claims; bind it or declare Unmanaged("Host", "Extra", reason)`,
 		},
+		"a version message for an attribute every version has": {
+			opts: []Option{VersionMessage("name", func(VersionGap) (string, string) { return "", "" })},
+			want: "name: VersionMessage names an attribute VersionErrors never reports",
+		},
+		"a version message for a keyless attribute": {
+			opts: []Option{VersionMessage("gone", func(VersionGap) (string, string) { return "", "" })},
+			want: "gone is never sent, so it takes no key, codec, list, read or version option",
+		},
 		"unmanaged on a merged object": {
 			opts: []Option{Unmanaged("TypeOpt", "Fetchers", "because")},
 			want: `Unmanaged("TypeOpt", "Fetchers"): no attribute rebuilds TypeOpt`,

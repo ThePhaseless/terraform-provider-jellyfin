@@ -6,6 +6,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -20,7 +21,10 @@ import (
 // each moves into its resource's Wire method when the resource switches.
 var pendingWireMigration = map[string]func() (*wire.Binding, error){
 	"jellyfin_encoding_configuration": func() (*wire.Binding, error) {
-		return wire.Bind(schemaOf(NewEncodingConfigurationResource()), "EncodingOptions", wire.Identity("id"))
+		return wire.Bind(schemaOf(NewEncodingConfigurationResource()), "EncodingOptions",
+			wire.Identity("id"),
+			wire.VersionMessage("hls_audio_seek_strategy", encodingVersionMessage),
+			wire.VersionMessage("subtitle_extraction_timeout_minutes", encodingVersionMessage))
 	},
 	"jellyfin_networking_configuration": func() (*wire.Binding, error) {
 		return wire.Bind(schemaOf(NewNetworkingConfigurationResource()), "NetworkConfiguration", wire.Identity("id"))
@@ -65,6 +69,12 @@ var pendingWireMigration = map[string]func() (*wire.Binding, error){
 			wire.NeverSent("library_options.path_infos.password", unsupportedLibraryOptionMessage),
 			wire.MergeByKey("library_options.type_options", "type"),
 			wire.MergeByKey("library_options.type_options.image_options", "type"),
+			wire.VersionMessage("library_options.type_options.similar_item_providers", similarItemsVersionMessage),
+			wire.VersionMessage("library_options.type_options.similar_item_provider_order", similarItemsVersionMessage),
+			wire.VersionMessage("library_options.path_infos.network_path", func(g wire.VersionGap) (string, string) {
+				return "Network paths not supported",
+					fmt.Sprintf("The server runs Jellyfin %s, and Jellyfin %s removed network paths, so the server would drop the value. Remove %s from the configuration.", g.ServerVersion, g.Until, g.Path)
+			}),
 		}
 		for _, name := range []string{
 			"enable_emby_photos", "enable_photo_subtitle", "chapter_image_interval_seconds",
@@ -100,6 +110,16 @@ var pendingWireMigration = map[string]func() (*wire.Binding, error){
 		}
 		return wire.Bind(schemaOf(NewJellyfinSecurityPluginConfigurationResource()), wire.SecurityPluginRoot, opts...)
 	},
+}
+
+func encodingVersionMessage(g wire.VersionGap) (string, string) {
+	return "Unsupported Jellyfin server version",
+		fmt.Sprintf("%s requires Jellyfin %s or later: the server's encoding configuration has no %s field, so it would discard the value. Remove %s from the configuration or upgrade the server.", g.Path, g.Since, g.Key, g.Path)
+}
+
+func similarItemsVersionMessage(g wire.VersionGap) (string, string) {
+	return "Similar item settings not supported",
+		fmt.Sprintf("The server runs Jellyfin %s, and similar item providers need Jellyfin 12 or later. Remove %s for this server.", g.ServerVersion, g.Path)
 }
 
 func scheduledTaskTriggerObjectType() types.ObjectType {
