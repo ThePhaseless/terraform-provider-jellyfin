@@ -467,12 +467,7 @@ var testAccLibrarySimilarItemsRejected = regexp.MustCompile(`similar\s+item\s+pr
 
 func testAccLibrarySimilarItemsSupported(t *testing.T) bool {
 	t.Helper()
-
-	info, err := client.NewClient(os.Getenv("JELLYFIN_ENDPOINT"), "").GetPublicSystemInfo(context.Background())
-	if err != nil {
-		t.Fatalf("reading the Jellyfin version: %v", err)
-	}
-	return compareDottedVersions(info.Version, "12") >= 0
+	return testAccJellyfinVersionAtLeast(t, "12")
 }
 
 // testAccCheckLibraryTypeOptions checks string lists of the server's type

@@ -49,3 +49,13 @@ func testAccClient(t *testing.T) *client.Client {
 	}
 	return c
 }
+
+func testAccJellyfinVersionAtLeast(t *testing.T, minVersion string) bool {
+	t.Helper()
+
+	info, err := client.NewClient(os.Getenv("JELLYFIN_ENDPOINT"), "").GetPublicSystemInfo(context.Background())
+	if err != nil {
+		t.Fatalf("reading the Jellyfin version: %v", err)
+	}
+	return compareDottedVersions(info.Version, minVersion) >= 0
+}
