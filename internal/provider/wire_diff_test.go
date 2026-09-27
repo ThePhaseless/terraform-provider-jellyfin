@@ -36,54 +36,26 @@ import (
 type wireDiffCase struct {
 	name     string
 	resource resource.Resource
-	// document names the Document view the resource writes, if any.
-	document string
 	// object is the golden object the payloads are synthesized from.
 	object string
 	// captured lists files under testdata/wire_diff/<version>/.
 	captured []string
-	// extract takes the document out of a captured file.
-	extract func(raw []byte) (string, bool)
-	// extra adds keys the goldens lack to a synthesized payload.
-	extra func(payload map[string]any)
 	// servedBase is false for a document written from nothing.
 	servedBase bool
 	// docKey limits the written comparison to one key of the document.
-	docKey string
-	// priorTweak derives one more prior value to flatten against.
-	priorTweak func(ctx context.Context, prior types.Object) types.Object
-	// accepted lists attribute paths where the old and new reads may
-	// differ, with the reason.
-	accepted   map[string]string
+	docKey     string
 	oldFlatten func(ctx context.Context, raw string, prior types.Object) (types.Object, diag.Diagnostics)
 	oldOverlay func(ctx context.Context, doc map[string]json.RawMessage, obj types.Object) diag.Diagnostics
 }
 
-// modelOf reads the named nested objects as null when unknown, as the
-// resources do, since a pointer field of their models cannot hold unknown.
-func modelOf[T any](ctx context.Context, obj types.Object, unknownToNull ...string) (T, diag.Diagnostics) {
+func modelOf[T any](ctx context.Context, obj types.Object) (T, diag.Diagnostics) {
 	var m T
-	for _, name := range unknownToNull {
-		if v, ok := obj.Attributes()[name]; ok && v.IsUnknown() {
-			obj = withAttr(ctx, obj, name, nullValue(ctx, v.Type(ctx)))
-		}
-	}
 	d := obj.As(ctx, &m, basetypes.ObjectAsOptions{})
 	return m, d
 }
 
 func objectOf(ctx context.Context, attrTypes map[string]attr.Type, model any) (types.Object, diag.Diagnostics) {
 	return types.ObjectValueFrom(ctx, attrTypes, model)
-}
-
-func withAttr(ctx context.Context, obj types.Object, name string, v attr.Value) types.Object {
-	attrs := map[string]attr.Value{}
-	for k, old := range obj.Attributes() {
-		attrs[k] = old
-	}
-	attrs[name] = v
-	out, _ := types.ObjectValue(obj.AttributeTypes(ctx), attrs)
-	return out
 }
 
 func nullValue(ctx context.Context, t attr.Type) attr.Value {
@@ -179,19 +151,6 @@ func wireDiffCases() []wireDiffCase {
 			},
 		},
 	}
-}
-
-func (c wireDiffCase) binding(t *testing.T) *wire.Binding {
-	t.Helper()
-	root := wireOf(t, c.resource)
-	if c.document == "" {
-		return root
-	}
-	b, err := root.Document(c.document)
-	if err != nil {
-		t.Fatalf("document: %v", err)
-	}
-	return b
 }
 
 // wireOf returns the binding a resource declares once it has switched to it,
@@ -301,9 +260,6 @@ type namedPayload struct {
 func (c wireDiffCase) payloads(t *testing.T) []namedPayload {
 	t.Helper()
 	full := synthesize(wire.Pinned(), c.object, c.name, 0)
-	if c.extra != nil {
-		c.extra(full)
-	}
 	nulls := map[string]any{}
 	for k := range full {
 		nulls[k] = nil
@@ -337,14 +293,7 @@ func (c wireDiffCase) payloads(t *testing.T) []namedPayload {
 			if err != nil {
 				continue
 			}
-			doc := string(raw)
-			if c.extract != nil {
-				var ok bool
-				if doc, ok = c.extract(raw); !ok {
-					t.Fatalf("%s/%s holds no %s document", version, file, c.object)
-				}
-			}
-			out = append(out, namedPayload{version + "/" + file, doc})
+			out = append(out, namedPayload{version + "/" + file, string(raw)})
 		}
 	}
 	return out
@@ -490,7 +439,7 @@ func TestUnitWireReadsAndWritesLikeTheHandWrittenMappings(t *testing.T) {
 	ctx := context.Background()
 	for _, c := range wireDiffCases() {
 		t.Run(c.name, func(t *testing.T) {
-			b := c.binding(t)
+			b := wireOf(t, c.resource)
 			s := schemaOf(c.resource)
 			attrTypes := b.AttrTypes
 			required := map[string]bool{}
@@ -513,9 +462,6 @@ func TestUnitWireReadsAndWritesLikeTheHandWrittenMappings(t *testing.T) {
 				t.Fatalf("old read of the synthesized payload: %v", d)
 			}
 			priors := []types.Object{nullPrior, fullModel}
-			if c.priorTweak != nil {
-				priors = append(priors, c.priorTweak(ctx, fullModel))
-			}
 
 			reads, writes := 0, 0
 			for _, p := range payloads {
@@ -530,11 +476,6 @@ func TestUnitWireReadsAndWritesLikeTheHandWrittenMappings(t *testing.T) {
 					var diffs []string
 					valueDiffs(ctx, oldObj, newObj, "", &diffs)
 					for _, diff := range diffs {
-						at, _, _ := strings.Cut(diff, ":")
-						if reason, ok := c.accepted[withoutIndexes(at)]; ok {
-							t.Logf("read %s: accepted difference at %s: %s", p.name, at, reason)
-							continue
-						}
 						t.Errorf("read %s (prior %d): %s", p.name, pi, diff)
 					}
 				}
