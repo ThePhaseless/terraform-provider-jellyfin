@@ -436,7 +436,7 @@ func (c wireDiffCase) payloads(t *testing.T) []namedPayload {
 			if c.extract != nil {
 				var ok bool
 				if doc, ok = c.extract(raw); !ok {
-					continue
+					t.Fatalf("%s/%s holds no %s document", version, file, c.object)
 				}
 			}
 			out = append(out, namedPayload{version + "/" + file, doc})
