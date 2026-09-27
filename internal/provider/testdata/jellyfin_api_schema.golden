@@ -1,6 +1,6 @@
 op DELETE /Auth/Keys/{key} | params=key:path:required=true
 op DELETE /Library/VirtualFolders | params=name:query:required=false,refreshLibrary:query:required=false
-op DELETE /Plugins/{pluginId} | params=pluginId:path:required=true
+op DELETE /Plugins/{pluginId}/{version} | params=pluginId:path:required=true,version:path:required=true
 op DELETE /Users/{userId} | params=userId:path:required=true
 op GET /Auth/Keys | resp=#AuthenticationInfoQueryResult
 op GET /Library/VirtualFolders | resp=[]#VirtualFolderInfo
@@ -33,8 +33,10 @@ op POST /System/Configuration | body=#ServerConfiguration
 op POST /System/Configuration/Branding | body=#BrandingOptionsDto
 op POST /System/Configuration/{key} | params=key:path:required=true | body=any
 op POST /System/Restart
+op POST /Users | params=userId:query:required=false | body=#UserDto
 op POST /Users/AuthenticateByName | body=#AuthenticateUserByName | resp=#AuthenticationResult
 op POST /Users/New | body=#CreateUserByName | resp=#UserDto
+op POST /Users/Password | params=userId:query:required=false | body=#UpdateUserPassword
 op POST /Users/{userId}/Policy | params=userId:path:required=true | body=#UserPolicy
 schema AccessSchedule.DayOfWeek: #DynamicDayOfWeek
 schema AccessSchedule.EndHour: number:double
@@ -441,6 +443,10 @@ schema TypeOptions.Type: string
 schema UnratedItem: string enum(Book|ChannelContent|LiveTvChannel|LiveTvProgram|Movie|Music|Other|Series|Trailer)
 schema UpdateLibraryOptionsDto.Id: string:uuid
 schema UpdateLibraryOptionsDto.LibraryOptions: #LibraryOptions
+schema UpdateUserPassword.CurrentPassword: string
+schema UpdateUserPassword.CurrentPw: string
+schema UpdateUserPassword.NewPw: string
+schema UpdateUserPassword.ResetPassword: boolean
 schema UserConfiguration.AudioLanguagePreference: string
 schema UserConfiguration.CastReceiverId: string
 schema UserConfiguration.DisplayCollectionsView: boolean
@@ -536,5 +542,3 @@ schema VirtualFolderInfo.PrimaryImageItemId: string
 schema VirtualFolderInfo.RefreshProgress: number:double
 schema VirtualFolderInfo.RefreshStatus: string
 undocumented GET /api-docs/openapi.json
-undocumented POST /Users/{}
-undocumented POST /Users/{}/Password
