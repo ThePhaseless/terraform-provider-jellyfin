@@ -6,12 +6,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1136,10 +1138,12 @@ func terraformFmtCheck(t *testing.T, dir string) {
 	}
 }
 
-// seedEscapingFixtures gives the server strings that HCL would interpolate
-// or reject unless the importer escapes them, and puts the server back when
-// the test ends.
-func seedEscapingFixtures(t *testing.T, c *client.Client) {
+// seedFixtures gives the server what the importer has to handle for the
+// generated files to validate, and puts the server back when the test ends:
+// strings that HCL would interpolate or reject unless escaped, API keys whose
+// names sanitize to the same resource name or to its suffixed form, and
+// libraries jellyfin_library cannot import, whose names it returns.
+func seedFixtures(t *testing.T, c *client.Client) []string {
 	t.Helper()
 
 	ctx := context.Background()
@@ -1176,16 +1180,28 @@ func seedEscapingFixtures(t *testing.T, c *client.Client) {
 		t.Fatalf("seeding branding configuration: %v", err)
 	}
 
-	if err := c.CreateAPIKey(ctx, tricky); err != nil {
-		t.Fatalf("seeding API key: %v", err)
-	}
-	key, err := c.GetAPIKeyByAppName(ctx, tricky)
+	keysBefore, err := c.GetAPIKeys(ctx)
 	if err != nil {
-		t.Fatalf("finding seeded API key: %v", err)
+		t.Fatalf("reading API keys: %v", err)
 	}
 	restore = append(restore, func(c *client.Client) error {
-		return c.DeleteAPIKey(ctx, key.AccessToken)
+		keys, err := c.GetAPIKeys(ctx)
+		if err != nil {
+			return err
+		}
+		var errs []error
+		for _, key := range keys {
+			if !slices.ContainsFunc(keysBefore, func(k client.APIKey) bool { return k.AccessToken == key.AccessToken }) {
+				errs = append(errs, c.DeleteAPIKey(ctx, key.AccessToken))
+			}
+		}
+		return errors.Join(errs...)
 	})
+	for _, appName := range []string{tricky, "import-e2e dup", "import-e2e dup", "import-e2e dup 1"} {
+		if err := c.CreateAPIKey(ctx, appName); err != nil {
+			t.Fatalf("seeding API key %q: %v", appName, err)
+		}
+	}
 
 	repos, err := c.GetPluginRepositories(ctx)
 	if err != nil {
@@ -1204,14 +1220,23 @@ func seedEscapingFixtures(t *testing.T, c *client.Client) {
 		t.Fatalf("seeding plugin repository: %v", err)
 	}
 
-	// Library names cannot hold quotes or backslashes.
-	const library = "import-e2e ${lib} %{x} $${y}"
-	if err := c.AddVirtualFolder(ctx, library, "movies", []string{"/media/movies"}, &client.LibraryOptions{RawJSON: "{}"}); err != nil {
-		t.Fatalf("seeding library: %v", err)
+	// Library names cannot hold quotes or backslashes. An empty collection
+	// type leaves the library without one, as the web UI's "Mixed Movies and
+	// Shows" does.
+	libraries := []struct{ name, collectionType string }{
+		{"import-e2e ${lib} %{x} $${y}", "movies"},
+		{"import-e2e clips", "musicvideos"},
+		{"import-e2e untyped", ""},
 	}
-	restore = append(restore, func(c *client.Client) error {
-		return c.RemoveVirtualFolder(ctx, library)
-	})
+	for _, lib := range libraries {
+		if err := c.AddVirtualFolder(ctx, lib.name, lib.collectionType, []string{"/media/movies"}, &client.LibraryOptions{RawJSON: "{}"}); err != nil {
+			t.Fatalf("seeding library %q: %v", lib.name, err)
+		}
+		restore = append(restore, func(c *client.Client) error {
+			return c.RemoveVirtualFolder(ctx, lib.name)
+		})
+	}
+	return []string{libraries[1].name, libraries[2].name}
 }
 
 // TestAccImportToolE2E runs the import tool against a real Jellyfin instance,
@@ -1223,7 +1248,7 @@ func seedEscapingFixtures(t *testing.T, c *client.Client) {
 func TestAccImportToolE2E(t *testing.T) {
 	outputDir := t.TempDir()
 	c := testAccImportClient(t)
-	seedEscapingFixtures(t, c)
+	skippedLibraries := seedFixtures(t, c)
 
 	var warnings strings.Builder
 	g := &generator{
@@ -1304,6 +1329,11 @@ func TestAccImportToolE2E(t *testing.T) {
 	t.Logf("Generated %d import blocks and %d resource blocks", importBlocks, resourceBlocks)
 	if warnings.Len() > 0 {
 		t.Logf("Generator warnings:\n%s", warnings.String())
+	}
+	for _, name := range skippedLibraries {
+		if !strings.Contains(warnings.String(), fmt.Sprintf("skipping library %q", name)) {
+			t.Errorf("expected a warning that library %q is skipped", name)
+		}
 	}
 
 	terraformFmtCheck(t, outputDir)
