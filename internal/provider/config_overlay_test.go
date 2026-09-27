@@ -141,33 +141,6 @@ func TestConfigOverlayStringList(t *testing.T) {
 	}
 }
 
-func TestConfigOverlayInt64List(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-
-	m := map[string]json.RawMessage{}
-	list, d := types.ListValueFrom(ctx, types.Int64Type, []int64{1, 2, 3})
-	if d.HasError() {
-		t.Fatalf("creating list: %v", d)
-	}
-	if d := putJSONInt64List(ctx, m, "list", list); d.HasError() {
-		t.Fatalf("putJSONInt64List: %v", d)
-	}
-
-	got, d := getJSONInt64List(ctx, m, "list")
-	if d.HasError() {
-		t.Fatalf("getJSONInt64List: %v", d)
-	}
-
-	var values []int64
-	if d := got.ElementsAs(ctx, &values, false); d.HasError() {
-		t.Fatalf("ElementsAs: %v", d)
-	}
-	if !reflect.DeepEqual(values, []int64{1, 2, 3}) {
-		t.Errorf("list = %v, want [1 2 3]", values)
-	}
-}
-
 func TestConfigOverlayStringMap(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

@@ -91,30 +91,6 @@ func putJSONStringList(ctx context.Context, m map[string]json.RawMessage, key st
 	return diags
 }
 
-// putJSONInt64List writes a list of int64 into the JSON object map unless it is null or unknown.
-func putJSONInt64List(ctx context.Context, m map[string]json.RawMessage, key string, v types.List) diag.Diagnostics {
-	var diags diag.Diagnostics
-
-	if v.IsNull() || v.IsUnknown() {
-		return diags
-	}
-
-	var elements []types.Int64
-	if diagsExtend(&diags, v.ElementsAs(ctx, &elements, false)); diagsHasError(diags) {
-		return diags
-	}
-
-	values := make([]int64, len(elements))
-	for i, elem := range elements {
-		values[i] = elem.ValueInt64()
-	}
-
-	b, _ := json.Marshal(values)
-	m[key] = b
-
-	return diags
-}
-
 // putJSONStringMap writes a map of strings into the JSON object map unless it is null or unknown.
 func putJSONStringMap(ctx context.Context, m map[string]json.RawMessage, key string, v types.Map) diag.Diagnostics {
 	var diags diag.Diagnostics
@@ -254,34 +230,6 @@ func getJSONStringList(ctx context.Context, m map[string]json.RawMessage, key st
 	return list, append(diags, listDiags...)
 }
 
-// getJSONInt64List reads a list of int64 from the JSON object map.
-// Returns null when the key is missing or the JSON value is null.
-func getJSONInt64List(ctx context.Context, m map[string]json.RawMessage, key string) (types.List, diag.Diagnostics) {
-	var diags diag.Diagnostics
-
-	raw, ok := m[key]
-	if !ok {
-		return types.ListNull(types.Int64Type), diags
-	}
-
-	if isJSONNull(raw) {
-		return types.ListNull(types.Int64Type), diags
-	}
-
-	var values []int64
-	if err := json.Unmarshal(raw, &values); err != nil {
-		return types.ListNull(types.Int64Type), diags
-	}
-
-	elements := make([]types.Int64, len(values))
-	for i, v := range values {
-		elements[i] = types.Int64Value(v)
-	}
-
-	list, listDiags := types.ListValueFrom(ctx, types.Int64Type, elements)
-	return list, append(diags, listDiags...)
-}
-
 // getJSONStringMap reads a map of strings from the JSON object map.
 // Returns null when the key is missing or the JSON value is null.
 func getJSONStringMap(ctx context.Context, m map[string]json.RawMessage, key string) (types.Map, diag.Diagnostics) {
@@ -318,9 +266,4 @@ func isJSONNull(raw json.RawMessage) bool {
 // diagsExtend appends diagnostics from d to diags.
 func diagsExtend(diags *diag.Diagnostics, d diag.Diagnostics) {
 	*diags = append(*diags, d...)
-}
-
-// diagsHasError returns true if the diagnostics contain any errors.
-func diagsHasError(diags diag.Diagnostics) bool {
-	return diags.HasError()
 }

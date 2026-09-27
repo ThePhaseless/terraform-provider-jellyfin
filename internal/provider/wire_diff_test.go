@@ -48,8 +48,6 @@ type wireDiffCase struct {
 	extra func(payload map[string]any)
 	// servedBase is false for a document written from nothing.
 	servedBase bool
-	// docKey limits the written comparison to one key of the document.
-	docKey string
 	// priorTweak derives one more prior value to flatten against.
 	priorTweak func(ctx context.Context, prior types.Object) types.Object
 	// accepted lists attribute paths where the old and new reads may
@@ -610,10 +608,6 @@ func TestUnitWireReadsAndWritesLikeTheHandWrittenMappings(t *testing.T) {
 					if oldDiags.HasError() != newDiags.HasError() {
 						t.Errorf("write %s onto %s: old errors %v, new errors %v", mname, base.name, oldDiags, newDiags)
 						continue
-					}
-					if c.docKey != "" {
-						oldDoc = map[string]json.RawMessage{c.docKey: oldDoc[c.docKey]}
-						newDoc = map[string]json.RawMessage{c.docKey: newDoc[c.docKey]}
 					}
 					if got, want := canonicalJSON(t, newDoc), canonicalJSON(t, oldDoc); !reflect.DeepEqual(got, want) {
 						o, _ := json.Marshal(oldDoc)
