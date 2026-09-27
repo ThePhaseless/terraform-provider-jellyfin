@@ -21,6 +21,8 @@ type ScheduledTask struct {
 	IsHidden    bool              `json:"IsHidden"`
 	Key         string            `json:"Key"`
 	Triggers    []json.RawMessage `json:"Triggers"`
+	// RawJSON is the task as served. Only GetScheduledTask sets it.
+	RawJSON string `json:"-"`
 }
 
 // GetScheduledTasks retrieves all scheduled tasks.
@@ -36,12 +38,15 @@ func (c *Client) GetScheduledTasks(ctx context.Context) ([]ScheduledTask, error)
 
 // GetScheduledTask retrieves a single scheduled task by ID.
 func (c *Client) GetScheduledTask(ctx context.Context, id string) (*ScheduledTask, error) {
-	var task ScheduledTask
-	if err := c.get(ctx, fmt.Sprintf("/ScheduledTasks/%s", url.PathEscape(id)), func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&task)
-	}); err != nil {
+	raw, err := c.getRaw(ctx, fmt.Sprintf("/ScheduledTasks/%s", url.PathEscape(id)))
+	if err != nil {
 		return nil, fmt.Errorf("getting scheduled task %s: %w", id, err)
 	}
+	var task ScheduledTask
+	if err := json.Unmarshal([]byte(raw), &task); err != nil {
+		return nil, fmt.Errorf("decoding scheduled task %s: %w", id, err)
+	}
+	task.RawJSON = raw
 	return &task, nil
 }
 

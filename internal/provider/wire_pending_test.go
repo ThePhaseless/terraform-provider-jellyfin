@@ -20,12 +20,6 @@ import (
 // their keys by hand. TestUnitWireBindings checks them like the others, and
 // each moves into its resource's Wire method when the resource switches.
 var pendingWireMigration = map[string]func() (*wire.Binding, error){
-	"jellyfin_scheduled_task": func() (*wire.Binding, error) {
-		return wire.Bind(schemaOf(NewScheduledTaskResource()), "TaskInfo",
-			wire.Identity("id", "task_id"),
-			// The typed client reads missing or null triggers as an empty list.
-			wire.ReadMissingAs("triggers", types.ListValueMust(scheduledTaskTriggerObjectType(), []attr.Value{})))
-	},
 	"jellyfin_user": func() (*wire.Binding, error) {
 		return wire.Bind(schemaOf(NewUserResource()), "UserDto",
 			wire.Identity("id"),
@@ -100,13 +94,6 @@ var pendingWireMigration = map[string]func() (*wire.Binding, error){
 func similarItemsVersionMessage(g wire.VersionGap) (string, string) {
 	return "Similar item settings not supported",
 		fmt.Sprintf("The server runs Jellyfin %s, and similar item providers need Jellyfin 12 or later. Remove %s for this server.", g.ServerVersion, g.Path)
-}
-
-func scheduledTaskTriggerObjectType() types.ObjectType {
-	attrs := schemaOf(NewScheduledTaskResource()).Attributes["triggers"].GetType()
-	lt, _ := attrs.(types.ListType)
-	ot, _ := lt.ElemType.(types.ObjectType)
-	return ot
 }
 
 // sameInstantCodec reads a date-time back as its prior value when both name

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -18,16 +19,20 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 var (
 	_ resource.Resource                   = &ScheduledTaskResource{}
 	_ resource.ResourceWithImportState    = &ScheduledTaskResource{}
 	_ resource.ResourceWithValidateConfig = &ScheduledTaskResource{}
+	_ resource.ResourceWithModifyPlan     = &ScheduledTaskResource{}
+	_ wireBound                           = &ScheduledTaskResource{}
 )
 
 const (
@@ -59,6 +64,18 @@ type ScheduledTaskResourceModel struct {
 	TaskID   types.String `tfsdk:"task_id"`
 	Triggers types.List   `tfsdk:"triggers"`
 }
+
+var scheduledTaskWire = sync.OnceValues(func() (*wire.Binding, error) {
+	s := schemaOf(&ScheduledTaskResource{})
+	triggers, _ := s.Attributes["triggers"].GetType().(types.ListType)
+	return wire.Bind(s, "TaskInfo",
+		wire.Identity("id", "task_id"),
+		// A task without triggers must read as the empty list its
+		// configuration holds, whether Jellyfin serves [], null or no key.
+		wire.ReadMissingAs("triggers", types.ListValueMust(triggers.ElemType, nil)))
+})
+
+func (r *ScheduledTaskResource) Wire() (*wire.Binding, error) { return scheduledTaskWire() }
 
 // ScheduledTaskTriggerModel describes one trigger element.
 type ScheduledTaskTriggerModel struct {
@@ -221,38 +238,17 @@ func (r *ScheduledTaskResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
-	triggersJSON, err := marshalTriggers(ctx, data.Triggers)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to serialize triggers", err.Error())
-		return
-	}
-
-	if err := r.client.UpdateScheduledTaskTriggers(ctx, data.TaskID.ValueString(), triggersJSON); err != nil {
-		resp.Diagnostics.AddError("Failed to update scheduled task triggers", err.Error())
-		return
-	}
-
-	task, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to read scheduled task after create", err.Error())
-		return
-	}
-
-	triggers, diags := flattenTriggers(ctx, task.Triggers)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	data.Triggers = triggers
-	data.ID = data.TaskID
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	r.writeTriggers(ctx, &data, "create", &resp.Diagnostics, &resp.State)
 }
 
 func (r *ScheduledTaskResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var data ScheduledTaskResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+	b := wireBinding(&resp.Diagnostics, scheduledTaskWire)
+	if b == nil {
 		return
 	}
 
@@ -266,13 +262,11 @@ func (r *ScheduledTaskResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
-	triggers, diags := flattenTriggers(ctx, task.Triggers)
-	resp.Diagnostics.Append(diags...)
+	resp.Diagnostics.Append(b.FlattenInto(ctx, task.RawJSON, &data)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	data.Triggers = triggers
 	// task_id keeps the configured spelling: Jellyfin matches task IDs
 	// case-insensitively but returns them in lowercase, so copying task.ID would
 	// force a replacement on every plan for an uppercase task_id.
@@ -288,33 +282,47 @@ func (r *ScheduledTaskResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
-	triggersJSON, err := marshalTriggers(ctx, data.Triggers)
+	r.writeTriggers(ctx, &data, "update", &resp.Diagnostics, &resp.State)
+}
+
+// ModifyPlan gates each configured field on the Jellyfin version it needs, so
+// a field a later pin adds is checked without a change here.
+func (r *ScheduledTaskResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	if b := wireBinding(&resp.Diagnostics, scheduledTaskWire); b != nil {
+		resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
+	}
+}
+
+func (r *ScheduledTaskResource) writeTriggers(ctx context.Context, data *ScheduledTaskResourceModel, operation string, diags *diag.Diagnostics, state *tfsdk.State) {
+	b := wireBinding(diags, scheduledTaskWire)
+	if b == nil {
+		return
+	}
+
+	// The triggers endpoint takes the task's Triggers list on its own.
+	task := map[string]json.RawMessage{}
+	if d := b.OverlayModel(ctx, task, data); d.HasError() {
+		diags.Append(d...)
+		return
+	}
+
+	if err := r.client.UpdateScheduledTaskTriggers(ctx, data.TaskID.ValueString(), string(task["Triggers"])); err != nil {
+		diags.AddError("Failed to update scheduled task triggers", err.Error())
+		return
+	}
+
+	updated, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to serialize triggers", err.Error())
+		diags.AddError("Failed to read scheduled task after "+operation, err.Error())
 		return
 	}
 
-	if err := r.client.UpdateScheduledTaskTriggers(ctx, data.TaskID.ValueString(), triggersJSON); err != nil {
-		resp.Diagnostics.AddError("Failed to update scheduled task triggers", err.Error())
-		return
-	}
-
-	task, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to read scheduled task after update", err.Error())
-		return
-	}
-
-	triggers, diags := flattenTriggers(ctx, task.Triggers)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	data.Triggers = triggers
+	diags.Append(b.FlattenAfterApply(ctx, updated.RawJSON, data)...)
 	data.ID = data.TaskID
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	diags.Append(state.Set(ctx, data)...)
 }
 
 func (r *ScheduledTaskResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {

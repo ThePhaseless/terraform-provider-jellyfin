@@ -257,6 +257,37 @@ func TestUserUpdatesRejectBlankIDWithoutSendingRequest(t *testing.T) {
 	}
 }
 
+func TestGetScheduledTaskKeepsTheServedDocumentAndReportsAMissingTask(t *testing.T) {
+	t.Parallel()
+
+	const served = `{"Id":"task-1","Name":"Clean Logs","Triggers":[{"Type":"StartupTrigger"}],"LastExecutionResult":{"Status":"Completed"}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ScheduledTasks/task-1" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, served)
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "test-key")
+	task, err := c.GetScheduledTask(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("GetScheduledTask() error = %v", err)
+	}
+	if task.RawJSON != served {
+		t.Errorf("RawJSON = %s, want %s", task.RawJSON, served)
+	}
+	if task.ID != "task-1" || len(task.Triggers) != 1 {
+		t.Errorf("task = %+v, want Id task-1 with one trigger", task)
+	}
+
+	if _, err := c.GetScheduledTask(context.Background(), "missing"); !IsNotFound(err) {
+		t.Errorf("GetScheduledTask(missing) error = %v, want a not-found error", err)
+	}
+}
+
 func TestRestartServerPostsSystemRestart(t *testing.T) {
 	t.Parallel()
 
