@@ -6,6 +6,8 @@ package provider
 import (
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/types"
+
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
@@ -83,6 +85,30 @@ func TestPickReleaseBuild(t *testing.T) {
 				t.Errorf("pickReleaseBuild(%v, %q) = %q, want %q", c.offered, c.want, got, c.pick)
 			}
 		})
+	}
+}
+
+func TestVersionDescribes(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		version   types.String
+		installed string
+		describes bool
+	}{
+		{types.StringValue("latest"), "15.0.0.0", true},
+		{types.StringValue("supported"), "2.6.3.1", true},
+		{types.StringValue("13.0.0.0"), "13.0.0.0", true},
+		{types.StringValue("2.5.22"), "2.5.22.0", true},
+		{types.StringValue("12.0.0.0"), "13.0.0.0", false}, // Jellyfin updated the plugin
+		{types.StringValue(""), "13.0.0.0", true},          // configured empty, installed as if omitted
+		{types.StringNull(), "13.0.0.0", false},            // imported
+	}
+
+	for _, c := range cases {
+		if got := versionDescribes(c.version, c.installed); got != c.describes {
+			t.Errorf("versionDescribes(%s, %q) = %t, want %t", c.version, c.installed, got, c.describes)
+		}
 	}
 }
 

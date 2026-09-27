@@ -30,11 +30,12 @@ resource "jellyfin_plugin" "example" {
 ### Optional
 
 - `repository_url` (String) The repository URL from which to install the plugin. Required when creating the resource and resolved automatically on import when the exact package version is still available.
-- `version` (String) The plugin version to install. Omit to install the latest available version from the repository, or for Jellyfin Security the release this provider was tested against, in the build the server accepts.
+- `version` (String) The plugin version to install, as the repository lists it (e.g. `13.0.0.0`), or a keyword: `latest` installs the newest version the repositories offer, and `supported` installs the Jellyfin Security release this provider was tested against, in the build the server accepts. A keyword is resolved only when the plugin is installed and stays in state as written; `installed_version` holds the result. Omitted, it installs as `supported` does for Jellyfin Security and as `latest` does for any other plugin, and then holds the installed version. Changing the value reinstalls the plugin.
 
 ### Read-Only
 
 - `id` (String) The plugin ID assigned by Jellyfin after installation.
+- `installed_version` (String) The version Jellyfin lists for the plugin. While an update waits for a restart Jellyfin lists both versions, and this keeps the one it held before.
 
 ## Import
 

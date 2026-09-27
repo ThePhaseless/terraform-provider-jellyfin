@@ -109,6 +109,40 @@ func TestAccSecurityPluginConfigurationResource(t *testing.T) {
 	})
 }
 
+// Destroying jellyfin_plugin uninstalls JellyfinSecurity, so this shares the
+// gate of the tests that install it.
+func TestAccSecurityPluginSupportedVersionKeyword(t *testing.T) {
+	testAccSecurityPluginPreCheck(t)
+	testAccRegisterRepository(t, "JellyfinSecurity", securityPluginRepoURL)
+
+	installer := &PluginResource{client: testAccClient(t)}
+	build, err := installer.resolvePluginVersion(t.Context(), securityPluginName, types.StringValue(pluginVersionSupported))
+	if err != nil {
+		t.Fatalf("resolving the supported JellyfinSecurity build: %v", err)
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+resource "jellyfin_plugin" "test" {
+  name           = %q
+  version        = "supported"
+  repository_url = %q
+}
+`, securityPluginName, securityPluginRepoURL),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "id", normalizeGUID(jellyfinSecurityPluginID)),
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", "supported"),
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "installed_version", build),
+				),
+			},
+		},
+	})
+}
+
 type securityPluginTestValues struct {
 	pluginID           string
 	publicBaseURL      string

@@ -36,6 +36,7 @@ resource "jellyfin_plugin" "test" {
 					resource.TestCheckResourceAttrSet("jellyfin_plugin.test", "id"),
 					resource.TestCheckResourceAttr("jellyfin_plugin.test", "name", pluginName),
 					resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", pluginVersion),
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "installed_version", pluginVersion),
 				),
 			},
 			// ImportState by the resource's own ID (round-trip verification).
@@ -134,7 +135,42 @@ resource "jellyfin_plugin" "test" {
 					}
 				},
 				Config: config,
-				Check:  resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", older),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", older),
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "installed_version", older),
+				),
+			},
+		},
+	})
+}
+
+func TestAccPluginResourceLatestVersion(t *testing.T) {
+	pluginName, latest := testAccFindInstallablePlugin(t, stableRepoURL)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+resource "jellyfin_plugin" "test" {
+  name           = %q
+  version        = "latest"
+  repository_url = %q
+}
+`, pluginName, stableRepoURL),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", "latest"),
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "installed_version", latest),
+				),
+			},
+			// An import has no keyword to keep, so version holds the installed
+			// version instead.
+			{
+				ResourceName:            "jellyfin_plugin.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"version"},
 			},
 		},
 	})
@@ -157,6 +193,34 @@ func testAccCheckPluginNotListed(t *testing.T, name string) resource.TestCheckFu
 	}
 }
 
+// testAccRegisterRepository registers the plugin repository for the rest of the
+// test unless it already is, and puts the previous list back afterwards.
+func testAccRegisterRepository(t *testing.T, name, repoURL string) {
+	t.Helper()
+
+	c := testAccClient(t)
+	repos, err := c.GetPluginRepositories(t.Context())
+	if err != nil {
+		t.Fatalf("failed to get plugin repositories: %v", err)
+	}
+	for _, r := range repos {
+		if r.URL == repoURL {
+			return
+		}
+	}
+
+	if err := c.SetPluginRepositories(t.Context(), append(repos, client.PluginRepository{Name: name, URL: repoURL, Enabled: true})); err != nil {
+		t.Fatalf("failed to register repository %s: %v", repoURL, err)
+	}
+	t.Cleanup(func() {
+		// t.Context() is done by now, and the provider's sign-in has signed c
+		// out, since both share a device ID.
+		if err := testAccClient(t).SetPluginRepositories(context.Background(), repos); err != nil {
+			t.Errorf("failed to restore plugin repositories: %v", err)
+		}
+	})
+}
+
 // testAccFindInstallablePlugin temporarily registers the given repository, queries
 // available packages, and returns the name and version of the first package that is
 // not already installed. The repository is restored to its original state after the test.
@@ -173,35 +237,9 @@ func testAccFindUninstalledPackage(t *testing.T, repoURL string, minVersions int
 	t.Helper()
 
 	testAccPreCheck(t)
+	testAccRegisterRepository(t, "jellyfin-stable-temp", repoURL)
 	c := testAccClient(t)
 	ctx := t.Context()
-
-	// Get currently registered repos.
-	repos, err := c.GetPluginRepositories(ctx)
-	if err != nil {
-		t.Fatalf("failed to get plugin repositories: %v", err)
-	}
-
-	// Register the stable repo temporarily if it's not already there.
-	repoAlreadyRegistered := false
-	for _, r := range repos {
-		if r.URL == repoURL {
-			repoAlreadyRegistered = true
-			break
-		}
-	}
-
-	if !repoAlreadyRegistered {
-		tempRepo := client.PluginRepository{Name: "jellyfin-stable-temp", URL: repoURL, Enabled: true}
-		if err := c.SetPluginRepositories(ctx, append(repos, tempRepo)); err != nil {
-			t.Fatalf("failed to register stable repository for package listing: %v", err)
-		}
-		t.Cleanup(func() {
-			if err := c.SetPluginRepositories(ctx, repos); err != nil {
-				t.Errorf("failed to restore plugin repositories: %v", err)
-			}
-		})
-	}
 
 	// Query available packages.
 	pkgs, err := c.GetAvailablePackages(ctx)
