@@ -67,8 +67,9 @@ var userWire = sync.OnceValues(func() (*wire.Binding, error) {
 		wire.Key("is_administrator", "Policy.IsAdministrator"),
 		wire.Key("is_disabled", "Policy.IsDisabled"),
 		wire.Key("enable_all_folders", "Policy.EnableAllFolders"),
-		// Earlier versions read these three through a typed struct, which
-		// reads a missing or null flag as false.
+		// Each has a default, so the plan always holds a value: reading a
+		// missing or null flag as null would plan a change where earlier
+		// releases, which read it as false, planned none.
 		wire.ReadMissingAs("is_administrator", types.BoolValue(false)),
 		wire.ReadMissingAs("is_disabled", types.BoolValue(false)),
 		wire.ReadMissingAs("enable_all_folders", types.BoolValue(false)),
