@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Every JSON-backed resource now maps its attributes to Jellyfin's keys from the committed Jellyfin OpenAPI and JellyfinSecurity schema goldens, instead of about 340 key names typed by hand in the provider and again in `jellyfin-import`. A CI test proves each attribute resolves to exactly one real key, so a misspelt key (the kind that left `enable_case_sensitive_item_ids` always null) now fails CI instead of shipping. Schema, state and the payloads sent to Jellyfin are unchanged; an acceptance test applies each resource with v0.3.8 and plans it with this version to prove it.
+- `jellyfin_encoding_configuration`: setting `subtitle_extraction_timeout_minutes` or `hls_audio_seek_strategy` against a server older than Jellyfin 12.0 now fails at plan instead of apply, with the same message. The check uses the server version, so it also catches a value the server would have omitted. While such a value stays in the configuration, a destroy fails the same way.
+- When Jellyfin does not keep a value the plan set, apply now reports "Value not kept by Jellyfin" at that attribute instead of Terraform's generic "inconsistent result after apply". On `jellyfin_library` this replaces the combined "Similar item settings not supported" error.
+- `jellyfin-import` renders every configuration and scheduled task from the provider's own read, so its output cannot drift from what the provider reads.
+
+### Fixed
+
+- `jellyfin_system_configuration`, `jellyfin_livetv_configuration`, `jellyfin_scheduled_task`: an attribute left unset inside a list element (for example a tuner host's `source` or a trigger's `day_of_week`) that Jellyfin serves back as an empty string or list now stays null instead of failing the apply.
+
 ## [0.3.8] - 2026-09-27
 
 ### Changed
