@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -277,7 +278,7 @@ func TestUnitReduceSecurityPluginPayload(t *testing.T) {
 	}
 
 	want := []string{
-		"Cidrs: array",
+		"Cidrs: []string",
 		"Deadline: null",
 		"Empty: array",
 		"Enabled: boolean",
@@ -290,6 +291,21 @@ func TestUnitReduceSecurityPluginPayload(t *testing.T) {
 	}
 	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected lines:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestUnitFillEmptyPayloadLists(t *testing.T) {
+	filled, paths, err := fillEmptyPayloadLists(`{"Enabled":true,"Entries":9007199254740993,"Empty":[],"Cidrs":["10.0.0.0/8"],"Ports":[587],"Smtp":{"Recipients":[]},"Providers":[{"Scopes":[],"Maps":[{"Role":"r","Libraries":[]}]}]}`)
+	if err != nil {
+		t.Fatalf("fill: %v", err)
+	}
+
+	if want := []string{"Empty", "Providers[].Maps[].Libraries", "Providers[].Scopes", "Smtp.Recipients"}; !slices.Equal(paths, want) {
+		t.Errorf("filled paths = %v, want %v", paths, want)
+	}
+	want := `{"Cidrs":["10.0.0.0/8"],"Empty":["1"],"Enabled":true,"Entries":9007199254740993,"Ports":[587],"Providers":[{"Maps":[{"Libraries":["1"],"Role":"r"}],"Scopes":["1"]}],"Smtp":{"Recipients":["1"]}}`
+	if filled != want {
+		t.Errorf("filled payload:\n%s\nwant:\n%s", filled, want)
 	}
 }
 
@@ -395,17 +411,63 @@ func reducePayloadObject(obj map[string]any, prefix string, out *[]string) {
 	}
 }
 
-// payloadArrayType names only lists of objects by their elements. The probe
-// leaves scalar lists at the plugin's defaults, and an empty default carries no
-// element type, so naming theirs would move the golden whenever a default list
-// gained or lost its entries.
 func payloadArrayType(v []any) string {
-	if len(v) > 0 {
-		if _, ok := v[0].(map[string]any); ok {
-			return "[]object"
+	if len(v) == 0 {
+		return "array"
+	}
+	switch v[0].(type) {
+	case map[string]any:
+		return "[]object"
+	case []any:
+		return "[]array"
+	default:
+		return "[]" + payloadScalarType(v[0])
+	}
+}
+
+// payloadListPlaceholder is the entry the probe writes into each list the
+// plugin serves empty. Jellyfin reads a numeric string into a list of strings
+// and into a list of numbers alike, so either comes back typed by its element.
+const payloadListPlaceholder = "1"
+
+// fillEmptyPayloadLists puts payloadListPlaceholder in every empty list and
+// returns their paths. An empty list carries no element type, so without this
+// a list's line in the golden would depend on whether the plugin's default for
+// it happens to be empty. A list that already holds entries types itself.
+func fillEmptyPayloadLists(raw string) (string, []string, error) {
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.UseNumber()
+	var root map[string]any
+	if err := dec.Decode(&root); err != nil {
+		return "", nil, fmt.Errorf("parsing plugin configuration: %w", err)
+	}
+
+	var filled []string
+	fillEmptyObjectLists(root, "", &filled)
+	sort.Strings(filled)
+	out, err := json.Marshal(root)
+	return string(out), filled, err
+}
+
+func fillEmptyObjectLists(obj map[string]any, prefix string, filled *[]string) {
+	for key, value := range obj {
+		path := prefix + key
+		switch v := value.(type) {
+		case map[string]any:
+			fillEmptyObjectLists(v, path+".", filled)
+		case []any:
+			if len(v) == 0 {
+				obj[key] = []any{payloadListPlaceholder}
+				*filled = append(*filled, path)
+				continue
+			}
+			for _, elem := range v {
+				if m, ok := elem.(map[string]any); ok {
+					fillEmptyObjectLists(m, path+"[].", filled)
+				}
+			}
 		}
 	}
-	return "array"
 }
 
 func payloadScalarType(v any) string {
@@ -479,6 +541,8 @@ func samplePayloadValue(typ string) any {
 		return []any{}
 	case "[]object":
 		return []any{map[string]any{}}
+	case "[]string", "[]number", "[]boolean":
+		return []any{samplePayloadValue(strings.TrimPrefix(typ, "[]"))}
 	default:
 		return nil
 	}

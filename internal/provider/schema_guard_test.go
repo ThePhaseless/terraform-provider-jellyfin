@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/parser"
 	"go/token"
 	"go/types"
@@ -34,6 +35,52 @@ const (
 	namedConfigurationPath = "/System/Configuration/{key}"
 )
 
+// schemaGuard is what a mismatch against one golden file has to tell the
+// maintainer: what the lines record, which acceptance test regenerates them
+// and with what environment, and what has to change along with them.
+type schemaGuard struct {
+	golden   string
+	test     string
+	ciStep   string
+	env      string
+	records  string
+	followUp string
+}
+
+var jellyfinAPISchemaGuard = schemaGuard{
+	golden: jellyfinAPISchemaGolden,
+	test:   "TestAccJellyfinAPISchemaGuard",
+	ciStep: "Run acceptance tests",
+	records: `Each line is an endpoint internal/client calls ("op", or "undocumented" when
+the server's OpenAPI document does not describe it) or a property of a schema
+those endpoints send or return ("schema"), as that document describes it. The
+golden changes when a Jellyfin release changes one of those, or when
+internal/client starts or stops calling an endpoint.`,
+	followUp: `A changed line can break a resource even though the test passes again, so fix
+the affected resources in the same change.`,
+}
+
+var securityPluginPayloadGuard = schemaGuard{
+	golden: securityPluginPayloadGolden,
+	test:   "TestAccSecurityPluginConfigSchemaGuard",
+	ciStep: "Run restart acceptance tests (isolated)",
+	env:    "JELLYFIN_RESTART_ACC=1",
+	records: `Each line is a key of the configuration that the JellyfinSecurity build pinned
+in internal/provider/supported_security_plugin_version.env serves, with its JSON
+type. The test first writes ` + strconv.Quote(payloadListPlaceholder) + ` into every list the plugin serves empty, so a
+list is typed by the element the plugin serves back, not by whether its default
+is empty. That relies on the plugin keeping the entry; when it rejects or
+drops it, the test fails saying so, and an entry the plugin accepts for that
+list in the probe in testAccSecurityPluginPayloadShape fixes it. The golden
+changes when a new pin adds, removes or retypes a key. The test installs the
+plugin and restarts the server to load it, which it does only with
+JELLYFIN_RESTART_ACC=1, so CI runs it in a step of its own.`,
+	followUp: `jellyfin_security_plugin_configuration maps each key by hand, so update it in
+the same change: TestUnitJellyfinSecurityWritesBackExactlyTheServedKeys fails
+until the resource writes back exactly the keys the golden lists, less those
+securityPluginUnmanagedKeys excuses.`,
+}
+
 // The spec types /System/Configuration/{key} as an opaque blob, so the schema
 // behind each key the client reads or writes has to be named by hand.
 var namedConfigurationSchemas = map[string]string{
@@ -54,6 +101,8 @@ var unexpandedSchemas = map[string]bool{
 // formatVerb matches a whole fmt verb, with any flags, argument index, width
 // and precision, so "%[1]s" and "%5d" each print one argument.
 var formatVerb = regexp.MustCompile(`%[-+# 0]*(?:\[\d+\])?(?:\*|\d+)?(?:\.(?:\[\d+\])?(?:\*|\d+)?)?(?:\[\d+\])?[a-zA-Z%]`)
+
+var formatArgIndex = regexp.MustCompile(`\[\d+\]`)
 
 // A resolved request path writes a runtime value as "{}" and, when the value
 // is computed from parameters of the enclosing function, lists their indexes
@@ -102,7 +151,7 @@ func TestAccJellyfinAPISchemaGuard(t *testing.T) {
 		t.Fatalf("reducing OpenAPI spec: %v", err)
 	}
 
-	checkSchemaGolden(t, jellyfinAPISchemaGolden, lines)
+	checkSchemaGolden(t, jellyfinAPISchemaGuard, lines)
 }
 
 // reduceOpenAPISpec keeps only the operations the client calls and the schemas
@@ -530,15 +579,36 @@ func clientAPICalls(dir string) ([]apiCall, error) {
 
 // packageAPICalls finds request helpers instead of listing them: a function
 // that passes a parameter on as the whole request path becomes a request site
-// for its callers, repeated until none turns up. A parameter built into a
-// larger path is recorded as a runtime value, which is right for the IDs
-// callers pass to exported methods. A call in the package that passes path text
-// for such a parameter, or a request site used as a value, fails instead,
-// since the guard would record the wrong endpoint or none.
+// for its callers, repeated until none turns up. Requests start where they
+// enter net/http through netHTTPRequestSites. A parameter built into a larger
+// path, including every argument of a variadic one, is recorded as a runtime
+// value. The guard fails instead of recording the wrong endpoint or none when
+// a call in the package passes path text for such a parameter, when a request
+// site is used other than by calling it from a function declaration or is
+// called as a method expression, and when a method named like a request site
+// is called through an interface or on a value whose type comes from an
+// import.
+//
+// Three cases still record the wrong endpoint or none. Only this package is
+// read, so path text that a caller elsewhere passes to an exported method,
+// such as "Counts" for an item ID, selects a route the guard does not see. A
+// path operand is read as text only when it is a constant or a local variable
+// whose assignments it can read; anything else, such as a call result, a
+// field, an index expression or a package variable, is recorded as a runtime
+// value even when it always holds the same text. So is a constant format
+// argument that fmt may not print as its value: one of a named type, which
+// may have a String method, or one whose verb takes a width or precision
+// from another argument. And a request that enters net/http any other way,
+// such as through an aliased import of net/http or an http.Request built by
+// hand, is not seen at all.
 func packageAPICalls(fset *token.FileSet, files []*ast.File) ([]apiCall, error) {
-	info := &types.Info{Defs: map[*ast.Ident]types.Object{}, Uses: map[*ast.Ident]types.Object{}}
-	// Only the scopes of local names are needed, so imports stay unresolved and
-	// the type errors that causes are ignored.
+	info := &types.Info{
+		Defs:  map[*ast.Ident]types.Object{},
+		Uses:  map[*ast.Ident]types.Object{},
+		Types: map[ast.Expr]types.TypeAndValue{},
+	}
+	// Only the package's own names, methods and constants are needed, so imports
+	// stay unresolved and the type errors that causes are ignored.
 	conf := types.Config{Error: func(error) {}}
 	_, _ = conf.Check("client", fset, files, info)
 
@@ -551,10 +621,10 @@ func packageAPICalls(fset *token.FileSet, files []*ast.File) ([]apiCall, error) 
 		}
 	}
 
-	f := &requestFinder{fset: fset, info: info, sites: map[string][]requestSite{}, embeds: map[string][]int{}}
+	f := &requestFinder{fset: fset, info: info, sites: map[types.Object][]requestSite{}, embeds: map[types.Object][]int{}}
 	for {
 		var calls []apiCall
-		f.reached = map[string]bool{}
+		f.reached = map[types.Object]bool{}
 		changed := false
 		for _, fn := range funcs {
 			fnCalls, fnSites, fnEmbeds, err := f.requestsIn(fn)
@@ -562,7 +632,7 @@ func packageAPICalls(fset *token.FileSet, files []*ast.File) ([]apiCall, error) 
 				return nil, err
 			}
 			calls = append(calls, fnCalls...)
-			key := siteKey(fn)
+			key := info.Defs[fn.Name]
 			for _, site := range fnSites {
 				if !slices.Contains(f.sites[key], site) {
 					f.sites[key] = append(f.sites[key], site)
@@ -580,13 +650,15 @@ func packageAPICalls(fset *token.FileSet, files []*ast.File) ([]apiCall, error) 
 			continue
 		}
 
-		for _, fn := range funcs {
-			if err := f.siteValues(fn); err != nil {
-				return nil, err
+		for _, file := range files {
+			for _, decl := range file.Decls {
+				if err := f.siteValues(decl); err != nil {
+					return nil, err
+				}
 			}
 		}
 		for _, fn := range funcs {
-			if key := siteKey(fn); len(f.sites[key]) > 0 && !f.reached[key] {
+			if key := info.Defs[fn.Name]; len(f.sites[key]) > 0 && !f.reached[key] {
 				return nil, fmt.Errorf("%s: %s passes a parameter on as a request path, but nothing in its package calls it, so the guard cannot see the endpoints it requests", fset.Position(fn.Pos()), fn.Name.Name)
 			}
 		}
@@ -613,39 +685,61 @@ var netHTTPRequestSites = map[string]requestSite{
 	"PostForm":              {method: http.MethodPost, pathArg: 0},
 }
 
-// requestFinder holds, by siteKey, the request sites found so far and the
-// parameters each function builds into a request path.
+// requestFinder holds, by the function's object, the request sites found so
+// far and the parameters each function builds into a request path. Keying by
+// object keeps a method of another type, or the builtin delete, apart from a
+// request helper of the same name.
 type requestFinder struct {
 	fset    *token.FileSet
 	info    *types.Info
-	sites   map[string][]requestSite
-	embeds  map[string][]int
-	reached map[string]bool
+	sites   map[types.Object][]requestSite
+	embeds  map[types.Object][]int
+	reached map[types.Object]bool
 }
 
-// siteKey names a function the way a call spells it, so the client's delete
-// method stays apart from the builtin delete.
-func siteKey(fn *ast.FuncDecl) string {
-	if fn.Recv != nil {
-		return "." + fn.Name.Name
-	}
-	return fn.Name.Name
-}
-
-func (f *requestFinder) callSites(call *ast.CallExpr) (string, []requestSite) {
+func (f *requestFinder) callSites(call *ast.CallExpr) (types.Object, []requestSite, error) {
 	switch fun := call.Fun.(type) {
 	case *ast.SelectorExpr:
 		if isNetHTTP(fun.X) {
 			if site, ok := netHTTPRequestSites[fun.Sel.Name]; ok {
-				return "", []requestSite{site}
+				return nil, []requestSite{site}, nil
 			}
-			return "", nil
+			return nil, nil, nil
 		}
-		return "." + fun.Sel.Name, f.sites["."+fun.Sel.Name]
+		obj := f.info.Uses[fun.Sel]
+		if len(f.sites[obj]) > 0 && f.info.Types[fun.X].IsType() {
+			return nil, nil, fmt.Errorf("%s is called as a method expression, which takes the receiver as its first argument, so the guard would read the path from the wrong argument; call it on the client instead", types.ExprString(fun))
+		}
+		if err := f.unresolvedSite(fun); err != nil {
+			return nil, nil, err
+		}
+		return obj, f.sites[obj], nil
 	case *ast.Ident:
-		return fun.Name, f.sites[fun.Name]
+		obj := f.info.Uses[fun]
+		return obj, f.sites[obj], nil
 	}
-	return "", nil
+	return nil, nil, nil
+}
+
+// unresolvedSite rejects a method named like a request helper when the type
+// check cannot tell which method it is: one called through an interface, or on
+// a value whose type comes from an import, which the check does not load.
+func (f *requestFinder) unresolvedSite(sel *ast.SelectorExpr) error {
+	switch obj := f.info.Uses[sel.Sel].(type) {
+	case nil:
+	case *types.Func:
+		if recv := obj.Signature().Recv(); recv == nil || !types.IsInterface(recv.Type()) {
+			return nil
+		}
+	default:
+		return nil
+	}
+	for site := range f.sites {
+		if site.Name() == sel.Sel.Name {
+			return fmt.Errorf("the guard cannot tell whether %s is the request helper %s, since it is called through an interface or on a value whose type comes from an import; call the request helper on the client directly", types.ExprString(sel), site.Name())
+		}
+	}
+	return nil
 }
 
 func isNetHTTP(expr ast.Expr) bool {
@@ -673,7 +767,11 @@ func (f *requestFinder) requestsIn(fn *ast.FuncDecl) ([]apiCall, []requestSite, 
 		if !ok {
 			return true
 		}
-		key, callee := f.callSites(call)
+		key, callee, err := f.callSites(call)
+		if err != nil {
+			firstErr = fmt.Errorf("%s: %w", f.fset.Position(call.Pos()), err)
+			return false
+		}
 		if len(callee) > 0 {
 			f.reached[key] = true
 		}
@@ -688,7 +786,7 @@ func (f *requestFinder) requestsIn(fn *ast.FuncDecl) ([]apiCall, []requestSite, 
 			embeds = append(embeds, embedded...)
 		}
 		for _, i := range f.embeds[key] {
-			embedded, err := r.embeddedArg(call, strings.TrimPrefix(key, "."), i)
+			embedded, err := r.embeddedArg(call, key, i)
 			if err != nil {
 				firstErr = fmt.Errorf("%s: %w", f.fset.Position(call.Pos()), err)
 				return false
@@ -700,14 +798,19 @@ func (f *requestFinder) requestsIn(fn *ast.FuncDecl) ([]apiCall, []requestSite, 
 	return calls, sites, embeds, firstErr
 }
 
-// siteValues rejects a request site that fn uses other than by calling it, as
-// in f := c.get, since the guard cannot tell what is requested through it.
-func (f *requestFinder) siteValues(fn *ast.FuncDecl) error {
+// siteValues rejects a request site that decl uses other than by calling it
+// from a function declaration, as in f := c.get or a package variable's
+// initializer, since the guard cannot see what is requested through it.
+func (f *requestFinder) siteValues(decl ast.Decl) error {
+	fn, inFunc := decl.(*ast.FuncDecl)
+	if inFunc && fn.Body == nil {
+		return nil
+	}
 	skip := map[ast.Node]bool{}
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
+	ast.Inspect(decl, func(n ast.Node) bool {
 		switch e := n.(type) {
 		case *ast.CallExpr:
-			skip[e.Fun] = true
+			skip[e.Fun] = inFunc
 		case *ast.SelectorExpr:
 			skip[e.Sel] = true
 		}
@@ -715,23 +818,28 @@ func (f *requestFinder) siteValues(fn *ast.FuncDecl) error {
 	})
 
 	var err error
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
+	ast.Inspect(decl, func(n ast.Node) bool {
 		if err != nil || skip[n] {
 			return err == nil
 		}
 		var name string
 		switch e := n.(type) {
 		case *ast.SelectorExpr:
-			if _, ok := netHTTPRequestSites[e.Sel.Name]; (ok && isNetHTTP(e.X)) || len(f.sites["."+e.Sel.Name]) > 0 {
+			if _, ok := netHTTPRequestSites[e.Sel.Name]; (ok && isNetHTTP(e.X)) || len(f.sites[f.info.Uses[e.Sel]]) > 0 {
 				name = types.ExprString(e)
+			} else if unresolved := f.unresolvedSite(e); unresolved != nil {
+				err = fmt.Errorf("%s: %w", f.fset.Position(n.Pos()), unresolved)
 			}
 		case *ast.Ident:
-			if _, ok := f.info.Uses[e].(*types.Func); ok && len(f.sites[e.Name]) > 0 {
+			if len(f.sites[f.info.Uses[e]]) > 0 {
 				name = e.Name
 			}
 		}
-		if name != "" {
+		switch {
+		case name != "" && inFunc:
 			err = fmt.Errorf("%s: %s sends requests but is used here as a value, so the guard cannot see what it requests; call it directly", f.fset.Position(n.Pos()), name)
+		case name != "":
+			err = fmt.Errorf("%s: %s sends requests but is used here outside a function declaration, where the guard does not look; call it from a function", f.fset.Position(n.Pos()), name)
 		}
 		return err == nil
 	})
@@ -813,26 +921,37 @@ func (r *pathResolver) request(call *ast.CallExpr, site requestSite) ([]apiCall,
 
 // embeddedArg checks argument i of a call to callee, which builds that
 // argument into a request path, and returns the parameters of fn it is
-// computed from, which fn then builds into a request path as well.
-func (r *pathResolver) embeddedArg(call *ast.CallExpr, callee string, i int) ([]int, error) {
-	if i >= len(call.Args) {
-		return nil, fmt.Errorf("call %s has too few arguments", types.ExprString(call))
-	}
-	values, err := r.operand(call.Args[i])
-	if err != nil {
-		return nil, err
-	}
-	var params []int
-	for _, v := range values {
-		if text := untagPath(v); strings.ReplaceAll(text, "{}", "") != "" {
-			return nil, fmt.Errorf("%s builds argument %d into a request path and the guard records it as a runtime value, so it cannot see which endpoint %q selects; pass the whole path to a request helper instead", callee, i, text)
+// computed from, which fn then builds into a request path as well. For a
+// variadic parameter, that is every argument from i on.
+func (r *pathResolver) embeddedArg(call *ast.CallExpr, callee types.Object, i int) ([]int, error) {
+	args := call.Args
+	if sig, ok := callee.Type().(*types.Signature); !ok || !sig.Variadic() || i != sig.Params().Len()-1 {
+		if i >= len(args) {
+			return nil, fmt.Errorf("call %s has too few arguments", types.ExprString(call))
 		}
-		params = append(params, placeholderParams(v)...)
+		args = args[:i+1]
+	}
+
+	var params []int
+	for j := i; j < len(args); j++ {
+		values, err := r.operand(args[j])
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range values {
+			if text := untagPath(v); strings.ReplaceAll(text, "{}", "") != "" {
+				return nil, fmt.Errorf("%s builds argument %d into a request path and the guard records it as a runtime value, so it cannot see which endpoint %q selects; pass the whole path to a request helper instead", callee.Name(), j, text)
+			}
+			params = append(params, placeholderParams(v)...)
+		}
 	}
 	return params, nil
 }
 
 func (r *pathResolver) values(expr ast.Expr) ([]string, error) {
+	if tv := r.info.Types[expr]; tv.Value != nil && tv.Value.Kind() == constant.String {
+		return []string{constant.StringVal(tv.Value)}, nil
+	}
 	switch e := expr.(type) {
 	case *ast.BasicLit:
 		if e.Kind == token.STRING {
@@ -877,7 +996,9 @@ func (r *pathResolver) sprintfValues(format string, args []ast.Expr) ([]string, 
 		printed := []string{"%"}
 		if i := argIndexes[n]; i >= 0 {
 			printed = []string{"{}"}
-			if i < len(args) {
+			if i < len(args) && r.info.Types[args[i]].Value != nil {
+				printed = []string{formatConstant(format[loc[0]:loc[1]], r.info.Types[args[i]])}
+			} else if i < len(args) {
 				var err error
 				if printed, err = r.operand(args[i]); err != nil {
 					return nil, err
@@ -888,6 +1009,36 @@ func (r *pathResolver) sprintfValues(format string, args []ast.Expr) ([]string, 
 		last = loc[1]
 	}
 	return concatEach(out, []string{format[last:]}), nil
+}
+
+// formatConstant prints a constant format argument the way fmt prints it with
+// verb, so a number in a path reads as its text. It prints a runtime value
+// instead for a constant of a named type, since fmt calls any String method
+// that type has, and for a verb that takes its width or precision from
+// another argument.
+func formatConstant(verb string, tv types.TypeAndValue) string {
+	basic, ok := types.Unalias(tv.Type).(*types.Basic)
+	if !ok || strings.Contains(verb, "*") {
+		return "{}"
+	}
+	var v any
+	switch info := basic.Info(); {
+	case info&types.IsString != 0:
+		v = constant.StringVal(tv.Value)
+	case info&types.IsBoolean != 0:
+		v = constant.BoolVal(tv.Value)
+	case info&types.IsInteger != 0:
+		n, exact := constant.Int64Val(tv.Value)
+		if !exact {
+			return "{}"
+		}
+		v = n
+	case info&types.IsFloat != 0:
+		v, _ = constant.Float64Val(tv.Value)
+	default:
+		return "{}"
+	}
+	return fmt.Sprintf(formatArgIndex.ReplaceAllString(verb, ""), v)
 }
 
 // formatArgs returns the index of the argument each verb of format prints, or
@@ -1132,28 +1283,26 @@ func jsonBool(m map[string]json.RawMessage, key string) bool {
 	return b
 }
 
-func checkSchemaGolden(t *testing.T, goldenPath string, actual []string) {
+func checkSchemaGolden(t *testing.T, guard schemaGuard, actual []string) {
 	t.Helper()
 
 	sort.Strings(actual)
 	actual = dedupStrings(actual)
 
 	if os.Getenv("SCHEMA_GUARD_UPDATE") == "1" {
-		if err := os.MkdirAll(filepath.Dir(goldenPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(guard.golden), 0755); err != nil {
 			t.Fatalf("creating golden directory: %v", err)
 		}
-		if err := os.WriteFile(goldenPath, []byte(strings.Join(actual, "\n")+"\n"), 0600); err != nil {
+		if err := os.WriteFile(guard.golden, []byte(strings.Join(actual, "\n")+"\n"), 0600); err != nil {
 			t.Fatalf("writing golden file: %v", err)
 		}
-		t.Logf("updated golden file: %s", goldenPath)
+		t.Logf("updated golden file: %s", guard.golden)
 		return
 	}
 
-	regenerate := schemaGuardRegenerateHelp(t.Name(), goldenPath)
-
-	wantBytes, err := os.ReadFile(goldenPath)
+	wantBytes, err := os.ReadFile(guard.golden)
 	if err != nil {
-		t.Fatalf("reading golden file %s: %v\n\n%s", goldenPath, err, regenerate)
+		t.Fatalf("reading golden file %s: %v\n\n%s", guard.golden, err, guard.regenerateHelp())
 	}
 
 	want := strings.Split(strings.TrimSpace(string(wantBytes)), "\n")
@@ -1181,9 +1330,9 @@ func checkSchemaGolden(t *testing.T, goldenPath string, actual []string) {
 
 	if len(missing) > 0 || len(unexpected) > 0 {
 		var msg strings.Builder
-		msg.WriteString("schema guard mismatch against " + goldenPath + ":\n")
+		msg.WriteString("schema guard mismatch against " + guard.golden + ":\n")
 		if len(missing) > 0 {
-			msg.WriteString("\nremoved or renamed (in golden, not served):\n")
+			msg.WriteString("\nin the golden, not served now:\n")
 			for _, line := range missing {
 				msg.WriteString("  - ")
 				msg.WriteString(line)
@@ -1191,7 +1340,7 @@ func checkSchemaGolden(t *testing.T, goldenPath string, actual []string) {
 			}
 		}
 		if len(unexpected) > 0 {
-			msg.WriteString("\nadded (served, not in golden):\n")
+			msg.WriteString("\nserved now, not in the golden:\n")
 			for _, line := range unexpected {
 				msg.WriteString("  + ")
 				msg.WriteString(line)
@@ -1199,31 +1348,38 @@ func checkSchemaGolden(t *testing.T, goldenPath string, actual []string) {
 			}
 		}
 		msg.WriteString("\n")
-		msg.WriteString(regenerate)
+		msg.WriteString(guard.regenerateHelp())
 		t.Fatal(msg.String())
 	}
 }
 
-func schemaGuardRegenerateHelp(testName, goldenPath string) string {
-	return fmt.Sprintf(`The golden records what the provider sends to or reads from the server, so it
-changes when the server changes any of that or when the provider starts or
-stops using part of it. Regenerate it from the repository root against a fresh
-server of the supported Jellyfin version (down -v drops the volumes a previous
-run left behind), adding any environment variables .github/workflows/test.yml
-sets for %[1]s:
+func (g schemaGuard) regenerateHelp() string {
+	env := "SCHEMA_GUARD_UPDATE=1 TF_ACC=1"
+	if g.env != "" {
+		env += " " + g.env
+	}
+	return fmt.Sprintf(`%[1]s
+
+CI checks the golden in this step of .github/workflows/test.yml:
+
+  %[3]s
+
+To regenerate it, run from the repository root against a fresh server of the
+supported Jellyfin version (down -v drops the volumes a previous run left
+behind):
 
   docker compose --env-file internal/provider/supported_jellyfin_version.env down -v
   docker compose --env-file internal/provider/supported_jellyfin_version.env up -d
   eval "$(./scripts/setup_jellyfin.sh | grep '^export ')"
-  SCHEMA_GUARD_UPDATE=1 TF_ACC=1 go test -count=1 -run '^%[1]s$' ./internal/provider/
+  %[4]s \
+    go test -count=1 -run '^%[2]s$' ./internal/provider/
 
 A maintainer must review the resulting diff before it is committed:
 
-  git diff internal/provider/%[2]s
+  git diff internal/provider/%[5]s
 
-A changed line can break a resource even though the test passes again, so fix
-the affected resources in the same change.
-`, testName, goldenPath)
+%[6]s
+`, g.records, g.test, g.ciStep, env, g.golden, g.followUp)
 }
 
 func dedupStrings(in []string) []string {
@@ -1242,7 +1398,7 @@ func TestAccSecurityPluginConfigSchemaGuard(t *testing.T) {
 	testAccSecurityPluginPreCheck(t)
 	c := testAccInstallSecurityPlugin(t)
 
-	checkSchemaGolden(t, securityPluginPayloadGolden, testAccSecurityPluginPayloadShape(t, c))
+	checkSchemaGolden(t, securityPluginPayloadGuard, testAccSecurityPluginPayloadShape(t, c))
 }
 
 func TestUnitReduceOpenAPISpec(t *testing.T) {
@@ -1371,6 +1527,11 @@ func TestUnitReduceOpenAPISpecRejectsUnmappedNamedConfiguration(t *testing.T) {
 
 const testClientHelpersSource = `package client
 
+type Client struct {
+	BaseURL    string
+	HTTPClient *http.Client
+}
+
 func (c *Client) doRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
 	url := c.BaseURL + path
 	return http.NewRequestWithContext(ctx, method, url, body)
@@ -1414,10 +1575,28 @@ func parseTestClient(t *testing.T, sources ...string) (*token.FileSet, []*ast.Fi
 func TestUnitPackageAPICalls(t *testing.T) {
 	calls := `package client
 
-func (c *Client) Calls(ctx context.Context, id string, existing bool) {
+const (
+	countsSegment = "Counts"
+	pingPath      = "/System/" + "Ping"
+	primaryIndex  = 0
+)
+
+type imageType string
+
+func (t imageType) String() string { return "Primary" }
+
+const backdrop imageType = "Backdrop"
+
+type cache struct{}
+
+func (k *cache) get(ctx context.Context, key string, v any) error {
+	return nil
+}
+
+func (c *Client) Calls(ctx context.Context, id string, existing bool, index int, k *cache) {
 	c.get(ctx, "/System/Info", nil)
 	c.getRaw(ctx, fmt.Sprintf("/Users/%s/Items?limit=%d", url.PathEscape(id), 5))
-	c.get(ctx, fmt.Sprintf("/Items/%[1]s/Images/%-5d", id, 1), nil)
+	c.get(ctx, fmt.Sprintf("/Items/%[1]s/Images/%-5d", id, index), nil)
 	c.delete(ctx, "/Items/"+id)
 	apiPath := "/Library/VirtualFolders?" + params.Encode()
 	c.postRaw(ctx, apiPath, "")
@@ -1436,6 +1615,13 @@ func (c *Client) Calls(ctx context.Context, id string, existing bool) {
 	c.getRaw(ctx, fmt.Sprintf("/System/Info/%s", name))
 	c.getItem(ctx, id)
 	c.createKey(ctx, "Terraform")
+	c.get(ctx, "/Items/"+countsSegment, nil)
+	c.getRaw(ctx, pingPath)
+	c.getRaw(ctx, fmt.Sprintf("/Items/%s/Images/%s/%[3]d", id, "Backdrop", primaryIndex))
+	c.getRaw(ctx, fmt.Sprintf("/Items/%s/Images/%s", id, backdrop))
+	c.getRaw(ctx, "/Items/"+id+"/Images/"+string(backdrop))
+	k.get(ctx, "/not/a/request", nil)
+	delete(map[string]string{}, "/not/a/request")
 }
 
 func (c *Client) Scoped(ctx context.Context, id string) {
@@ -1494,6 +1680,11 @@ func (c *Client) createKey(ctx context.Context, app string) error {
 		{http.MethodHead, "/System/Ping"},
 		{http.MethodGet, "/Health"},
 		{http.MethodGet, "/System/Info/Public"},
+		{http.MethodGet, "/Items/Counts"},
+		{http.MethodGet, "/System/Ping"},
+		{http.MethodGet, "/Items/{}/Images/Backdrop/0"},
+		{http.MethodGet, "/Items/{}/Images/{}"},
+		{http.MethodGet, "/Items/{}/Images/Backdrop"},
 		{http.MethodGet, "/Startup/User"},
 		{http.MethodDelete, "/Plugins/{}"},
 		{http.MethodGet, "/Items/{}"},
@@ -1560,6 +1751,86 @@ func (c *Client) Counts(ctx context.Context) error {
 }
 `,
 			wantErr: `getItem builds argument 1 into a request path and the guard records it as a runtime value, so it cannot see which endpoint "Counts" selects`,
+		},
+		"constant path text for a parameter built into a path": {
+			src: `package client
+
+const countsSegment = "Counts"
+
+func (c *Client) getItem(ctx context.Context, sub string) error {
+	return c.get(ctx, "/Items/"+sub, nil)
+}
+
+func (c *Client) Counts(ctx context.Context) error {
+	return c.getItem(ctx, countsSegment)
+}
+`,
+			wantErr: `getItem builds argument 1 into a request path and the guard records it as a runtime value, so it cannot see which endpoint "Counts" selects`,
+		},
+		"path text for a later variadic argument built into a path": {
+			src: `package client
+
+func (c *Client) getPath(ctx context.Context, parts ...string) error {
+	return c.get(ctx, "/"+strings.Join(parts, "/"), nil)
+}
+
+func (c *Client) Counts(ctx context.Context, id string) error {
+	return c.getPath(ctx, id, "Counts")
+}
+`,
+			wantErr: `getPath builds argument 2 into a request path and the guard records it as a runtime value, so it cannot see which endpoint "Counts" selects`,
+		},
+		"request helper called through an interface": {
+			src: `package client
+
+type getter interface {
+	get(ctx context.Context, path string, decode func(io.Reader) error) error
+}
+
+func (c *Client) Hidden(ctx context.Context) {
+	var g getter = c
+	g.get(ctx, "/Hidden", nil)
+}
+`,
+			wantErr: "the guard cannot tell whether g.get is the request helper get",
+		},
+		"request helper called on a value whose type comes from an import": {
+			src: `package client
+
+func (c *Client) Hidden(ctx context.Context) {
+	lo.Must(c, nil).get(ctx, "/Hidden", nil)
+}
+`,
+			wantErr: `the guard cannot tell whether lo.Must(c, nil).get is the request helper get`,
+		},
+		"request helper called as a method expression": {
+			src: `package client
+
+func (c *Client) Hidden(ctx context.Context) {
+	(*Client).get(c, ctx, "/Hidden", nil)
+}
+`,
+			wantErr: "(*Client).get is called as a method expression",
+		},
+		"request helper held by a package variable": {
+			src: `package client
+
+var getHidden = (*Client).get
+
+func (c *Client) Hidden(ctx context.Context) {
+	getHidden(c, ctx, "/Hidden", nil)
+}
+`,
+			wantErr: "(*Client).get sends requests but is used here outside a function declaration",
+		},
+		"request helper called from a package variable's function literal": {
+			src: `package client
+
+var hidden = func(ctx context.Context, c *Client) error {
+	return c.get(ctx, "/Hidden", nil)
+}
+`,
+			wantErr: "c.get sends requests but is used here outside a function declaration",
 		},
 		"path text passed on to a parameter built into a path": {
 			src: `package client
@@ -1673,8 +1944,203 @@ func TestUnitJellyfinAPISchemaGoldenMatchesClientCalls(t *testing.T) {
 	}
 
 	if drift := goldenClientDrift(strings.Split(strings.TrimSpace(string(golden)), "\n"), calls); len(drift) > 0 {
-		t.Fatalf("%s does not match the endpoints internal/client calls:\n\n%s\n\n%s", jellyfinAPISchemaGolden, strings.Join(drift, "\n"), schemaGuardRegenerateHelp("TestAccJellyfinAPISchemaGuard", jellyfinAPISchemaGolden))
+		t.Fatalf("%s does not match the endpoints internal/client calls:\n\n%s\n\n%s", jellyfinAPISchemaGolden, strings.Join(drift, "\n"), jellyfinAPISchemaGuard.regenerateHelp())
 	}
+}
+
+func TestUnitSchemaGuardsRunInTheWorkflowStepTheyName(t *testing.T) {
+	raw, err := os.ReadFile("../../.github/workflows/test.yml")
+	if err != nil {
+		t.Fatalf("reading the workflow: %v", err)
+	}
+
+	for _, g := range []schemaGuard{jellyfinAPISchemaGuard, securityPluginPayloadGuard} {
+		step := workflowStep(string(raw), g.ciStep)
+		if step == "" {
+			t.Errorf("%s: .github/workflows/test.yml has no step named %q", g.test, g.ciStep)
+			continue
+		}
+		if runs, err := stepRunsTest(step, g.test); err != nil {
+			t.Errorf("%s: step %q: %v", g.test, g.ciStep, err)
+		} else if !runs {
+			t.Errorf("%s: no go test command in step %q runs it in ./internal/provider/", g.test, g.ciStep)
+		}
+		for _, kv := range strings.Fields("TF_ACC=1 " + g.env) {
+			key, value, _ := strings.Cut(kv, "=")
+			if !strings.Contains(step, fmt.Sprintf("%s: %q", key, value)) {
+				t.Errorf("%s: step %q does not set %s", g.test, g.ciStep, kv)
+			}
+		}
+	}
+}
+
+func workflowStep(workflow, name string) string {
+	lines := strings.Split(workflow, "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) != "- name: "+name {
+			continue
+		}
+		indent := line[:len(line)-len(strings.TrimLeft(line, " "))]
+		end := i + 1
+		for end < len(lines) && (strings.TrimSpace(lines[end]) == "" || strings.HasPrefix(lines[end], indent+"  ")) {
+			end++
+		}
+		return strings.Join(lines[i:end], "\n")
+	}
+	return ""
+}
+
+func TestUnitStepRunsTestReadsRunAndSkip(t *testing.T) {
+	tests := map[string]struct {
+		step string
+		want bool
+	}{
+		"no filter":            {"run: go test -count=1 -v -timeout 10m ./internal/provider/", true},
+		"single-quoted -run":   {"run: go test -run 'TestAccRestartResource|TestAccSecurityPlugin' ./internal/provider/", true},
+		"double-quoted -run":   {`run: go test -run "TestAccRestartResource" ./internal/provider/`, false},
+		"-run=":                {"run: go test -run=TestAccRestartResource ./internal/provider/", false},
+		"--test.run":           {"run: go test --test.run TestAccRestartResource ./internal/provider/", false},
+		"-run of subtests":     {"run: go test -run 'TestAccSecurityPlugin.*/Sub' ./internal/provider/", true},
+		"-skip":                {"run: go test -skip TestAccSecurityPluginConfigSchemaGuard ./internal/provider/", false},
+		"-skip of subtests":    {"run: go test -skip 'TestAccSecurityPluginConfigSchemaGuard/Sub' ./internal/provider/", true},
+		"later -run wins":      {"run: go test -run TestAccSecurityPlugin -run TestAccRestartResource ./internal/provider/", false},
+		"other package":        {"run: go test -run TestAccSecurityPlugin ./cmd/jellyfin-import/", false},
+		"second command":       {"run: go vet ./... && go test -run TestAccSecurityPlugin ./internal/provider/", true},
+		"continued line":       {"run: |\n  go test -v \\\n    -run TestAccRestartResource ./internal/provider/", false},
+		"commented-out filter": {"run: go test ./internal/provider/ # -run TestAccRestartResource", true},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := stepRunsTest(tt.step, "TestAccSecurityPluginConfigSchemaGuard")
+			if err != nil {
+				t.Fatalf("stepRunsTest: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("stepRunsTest = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+// stepRunsTest reports whether a go test command in a workflow step runs the
+// top-level test name in ./internal/provider/.
+func stepRunsTest(step, name string) (bool, error) {
+	for _, cmd := range goTestCommands(step) {
+		if !slices.Contains(cmd.args, "./internal/provider/") {
+			continue
+		}
+		if ok, err := cmd.selects(name); err != nil || ok {
+			return ok, err
+		}
+	}
+	return false, nil
+}
+
+// goTestCommand is one go test invocation: the words that are not flags, among
+// them the packages, and the last -run and -skip patterns.
+type goTestCommand struct {
+	args      []string
+	run, skip string
+}
+
+// goTestCommands reads -run and -skip in every spelling the go command takes:
+// one or two dashes, with or without the test. prefix, and the pattern after
+// "=" or as the next word.
+func goTestCommands(script string) []goTestCommand {
+	var cmds []goTestCommand
+	for _, line := range strings.Split(strings.ReplaceAll(script, "\\\n", " "), "\n") {
+		words := shellWords(line)
+		for i := 0; i+1 < len(words); i++ {
+			if words[i] != "go" || words[i+1] != "test" {
+				continue
+			}
+			var cmd goTestCommand
+			for i += 2; i < len(words) && !slices.Contains([]string{"&&", "||", ";", "|"}, words[i]); i++ {
+				if !strings.HasPrefix(words[i], "-") {
+					cmd.args = append(cmd.args, words[i])
+					continue
+				}
+				flag, value, hasValue := strings.Cut(strings.TrimLeft(words[i], "-"), "=")
+				flag = strings.TrimPrefix(flag, "test.")
+				if flag != "run" && flag != "skip" {
+					continue
+				}
+				if !hasValue && i+1 < len(words) {
+					i++
+					value = words[i]
+				}
+				if flag == "run" {
+					cmd.run = value
+				} else {
+					cmd.skip = value
+				}
+			}
+			cmds = append(cmds, cmd)
+		}
+	}
+	return cmds
+}
+
+// selects follows go test for a top-level test: a pattern holds one regexp per
+// level, split at "/", so -run matches its first level against the name, while
+// -skip with more than one level skips only subtests. go test does not split
+// at a "/" inside brackets or parentheses; this does, which no step needs.
+func (c goTestCommand) selects(name string) (bool, error) {
+	if c.run != "" {
+		top, _, _ := strings.Cut(c.run, "/")
+		re, err := regexp.Compile(top)
+		if err != nil {
+			return false, fmt.Errorf("-run %q: %w", c.run, err)
+		}
+		if !re.MatchString(name) {
+			return false, nil
+		}
+	}
+	if c.skip != "" && !strings.Contains(c.skip, "/") {
+		re, err := regexp.Compile(c.skip)
+		if err != nil {
+			return false, fmt.Errorf("-skip %q: %w", c.skip, err)
+		}
+		if re.MatchString(name) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// shellWords splits a line into words at blanks outside quotes, strips single
+// and double quotes and drops a comment. Unlike sh it expands nothing and reads
+// no backslash escapes, which the workflow's go test commands do not use.
+func shellWords(line string) []string {
+	var words []string
+	var word strings.Builder
+	inWord := false
+	var quote rune
+	for _, c := range line {
+		switch {
+		case quote != 0 && c == quote:
+			quote = 0
+		case quote != 0:
+			word.WriteRune(c)
+		case c == '\'' || c == '"':
+			quote, inWord = c, true
+		case c == ' ' || c == '\t':
+			if inWord {
+				words = append(words, word.String())
+				word.Reset()
+				inWord = false
+			}
+		case c == '#' && !inWord:
+			return words
+		default:
+			word.WriteRune(c)
+			inWord = true
+		}
+	}
+	if inWord {
+		words = append(words, word.String())
+	}
+	return words
 }
 
 func TestUnitClientAPICallsNamedConfigurationsAreMapped(t *testing.T) {

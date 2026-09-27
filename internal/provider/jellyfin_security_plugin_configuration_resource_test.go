@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -280,7 +282,9 @@ func findSecurityPlugin(ctx context.Context, c *client.Client) (*client.Installe
 
 // testAccSecurityPluginPayloadShape reduces the payload the plugin serves for
 // its defaults plus one entry in each list of objects, so that the nested
-// models' keys are served too. It puts back the configuration it found.
+// models' keys are served too, and payloadListPlaceholder in every list still
+// empty, so that each list is served with an element to type it by. It puts
+// back the configuration it found.
 func testAccSecurityPluginPayloadShape(t *testing.T, c *client.Client) []string {
 	t.Helper()
 
@@ -296,19 +300,42 @@ func testAccSecurityPluginPayloadShape(t *testing.T, c *client.Client) []string 
 	})
 
 	// Properties left out take the plugin's defaults, and a null one is not
-	// served at all, so the deadline is set to make it part of the shape.
+	// served at all, so the deadline is set to make it part of the shape. A
+	// list given an entry here is not filled with payloadListPlaceholder.
 	probe := `{"UserEmails":[{}],"OidcProviders":[{"RoleLibraryMappings":[{}]}],"EnrollmentDeadline":"2030-01-01T00:00:00Z"}`
 	if err := c.UpdatePluginConfiguration(ctx, jellyfinSecurityPluginID, probe); err != nil {
 		t.Fatalf("writing the probe configuration: %v", err)
 	}
+	defaults, err := c.GetPluginConfiguration(ctx, jellyfinSecurityPluginID)
+	if err != nil {
+		t.Fatalf("reading the probe configuration back: %v", err)
+	}
+
+	filled, lists, err := fillEmptyPayloadLists(defaults)
+	if err != nil {
+		t.Fatalf("filling the empty lists: %v", err)
+	}
+	if err := c.UpdatePluginConfiguration(ctx, jellyfinSecurityPluginID, filled); err != nil {
+		t.Fatalf("writing %q into each list the plugin serves empty (%s): %v\n\nOne of them no longer takes that entry: it holds objects or values a numeric string cannot be read as, or the plugin now checks its entries. The server log names the list, for a type mismatch as the Path of the JsonException:\n\n  docker compose --env-file internal/provider/supported_jellyfin_version.env logs jellyfin\n\nGive that list an entry the plugin accepts in the probe in testAccSecurityPluginPayloadShape.", payloadListPlaceholder, strings.Join(lists, ", "), err)
+	}
 
 	served, err := c.GetPluginConfiguration(ctx, jellyfinSecurityPluginID)
 	if err != nil {
-		t.Fatalf("reading the probe configuration back: %v", err)
+		t.Fatalf("reading the filled configuration back: %v", err)
 	}
 	lines, err := reduceSecurityPluginPayload(served)
 	if err != nil {
 		t.Fatalf("reducing the served configuration: %v", err)
+	}
+
+	var dropped []string
+	for _, line := range lines {
+		if list, ok := strings.CutSuffix(line, ": array"); ok && slices.Contains(lists, list) {
+			dropped = append(dropped, list)
+		}
+	}
+	if len(dropped) > 0 {
+		t.Fatalf("the plugin serves %s empty after %q was written into each, so the golden cannot type them. It now drops entries it does not accept: give each an entry the plugin keeps in the probe in testAccSecurityPluginPayloadShape.", strings.Join(dropped, ", "), payloadListPlaceholder)
 	}
 	return lines
 }
