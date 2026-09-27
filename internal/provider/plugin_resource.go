@@ -273,46 +273,72 @@ func (r *PluginResource) Delete(ctx context.Context, req resource.DeleteRequest,
 		return
 	}
 
-	if err := r.uninstall(ctx, data.ID.ValueString()); err != nil {
+	kept, err := r.uninstall(ctx, data.ID.ValueString())
+	if err != nil {
 		resp.Diagnostics.AddError("Failed to uninstall plugin", err.Error())
+		return
+	}
+	if len(kept) > 0 {
+		resp.Diagnostics.AddWarning(
+			"Plugin left installed",
+			fmt.Sprintf("Jellyfin bundles %s %s and does not let users uninstall it, so it stays installed; it is only removed from Terraform state.", kept[0].Name, strings.Join(pluginVersions(kept), ", ")),
+		)
 	}
 }
 
-// uninstall removes every listed version of the plugin with the given id.
+// uninstall removes every listed version of the plugin with the given id that
+// Jellyfin lets users uninstall, and returns the versions it does not, which
+// are the ones Jellyfin bundles.
 //
 // DELETE /Plugins/{id} removes one version, and after an update Jellyfin lists
 // both the running version and the one that loads at the next restart;
 // removing only one leaves the other to load at that restart. A failed request
 // still counts once the plugin is no longer listed, which is how an uninstall
 // that raced another one for the same plugin ends.
-func (r *PluginResource) uninstall(ctx context.Context, id string) error {
-	listed, err := r.listedVersions(ctx, id)
+func (r *PluginResource) uninstall(ctx context.Context, id string) ([]client.InstalledPlugin, error) {
+	listed, err := r.listedPlugins(ctx, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for len(listed) > 0 {
-		uninstallErr := r.client.UninstallPlugin(ctx, id)
-		if client.IsNotFound(uninstallErr) {
-			return nil
+	for {
+		var removable, bundled []client.InstalledPlugin
+		for _, p := range listed {
+			if p.CanUninstall {
+				removable = append(removable, p)
+			} else {
+				bundled = append(bundled, p)
+			}
 		}
-		remaining, err := r.listedVersions(ctx, id)
+		// Jellyfin answers 204 to the DELETE of a plugin it does not let users
+		// uninstall and leaves it in place.
+		if len(removable) == 0 {
+			return bundled, nil
+		}
+
+		uninstallErr := r.client.UninstallPlugin(ctx, id)
+		remaining, err := r.listedPlugins(ctx, id)
 		if err != nil {
-			return errors.Join(uninstallErr, err)
+			return nil, errors.Join(uninstallErr, err)
 		}
 		if len(remaining) == 0 {
-			return nil
+			return nil, nil
 		}
 		if uninstallErr != nil {
-			return uninstallErr
+			return nil, uninstallErr
 		}
-		// Jellyfin answers 204 without removing a plugin it does not let users
-		// uninstall, so stop instead of asking again.
 		if len(remaining) >= len(listed) {
-			return fmt.Errorf("plugin %s is still listed at version %s after uninstalling it", id, strings.Join(remaining, ", "))
+			return nil, fmt.Errorf("plugin %s is still listed at version %s after uninstalling it", id, strings.Join(pluginVersions(remaining), ", "))
 		}
 		listed = remaining
 	}
-	return nil
+}
+
+func pluginVersions(plugins []client.InstalledPlugin) []string {
+	versions := make([]string, len(plugins))
+	for i, p := range plugins {
+		versions[i] = p.Version
+	}
+	return versions
 }
 
 // selectInstalledPlugin returns the entry GET /Plugins lists for the plugin
@@ -338,20 +364,20 @@ func selectInstalledPlugin(plugins []client.InstalledPlugin, id, name, version s
 	return selected, found
 }
 
-// listedVersions returns the versions GET /Plugins lists for the plugin with
-// the given id, leaving out those Jellyfin deletes at the next restart.
-func (r *PluginResource) listedVersions(ctx context.Context, id string) ([]string, error) {
+// listedPlugins returns the entries GET /Plugins lists for the plugin with
+// the given id, leaving out versions Jellyfin deletes at the next restart.
+func (r *PluginResource) listedPlugins(ctx context.Context, id string) ([]client.InstalledPlugin, error) {
 	plugins, err := r.client.GetInstalledPlugins(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var versions []string
+	var listed []client.InstalledPlugin
 	for _, p := range plugins {
 		if normalizeGUID(p.ID) == normalizeGUID(id) && p.Status != pluginStatusDeleted {
-			versions = append(versions, p.Version)
+			listed = append(listed, p)
 		}
 	}
-	return versions, nil
+	return listed, nil
 }
 
 // waitForPlugin blocks until name is installed at version and returns the

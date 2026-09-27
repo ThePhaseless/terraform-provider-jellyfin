@@ -13,23 +13,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 const bookshelfID = "9c4e63f1031b4f25988b4f7d78a8b53e"
 
 // fakePluginServer stands in for Jellyfin's plugin endpoints. DELETE
-// /Plugins/{id} removes the last listed version of the plugin, and answers 400
-// while another install or uninstall is in flight, as Jellyfin's unsynchronised
-// plugin list can.
+// /Plugins/{id} removes the last listed version of the plugin that users may
+// uninstall, answers 204 without removing anything when there is none, as
+// Jellyfin does for a plugin it bundles, and answers 400 while another install
+// or uninstall is in flight, as Jellyfin's unsynchronised plugin list can.
 type fakePluginServer struct {
 	mu          sync.Mutex
 	plugins     []client.InstalledPlugin
 	inFlight    int
 	maxInFlight int
 	deletes     int
-	// keep answers DELETE without removing anything, as Jellyfin does for a
-	// plugin it does not let users uninstall.
+	// keep answers DELETE without removing even a version users may
+	// uninstall.
 	keep bool
 	// status, when set, replaces the 204 DELETE answers with.
 	status int
@@ -71,8 +77,13 @@ func (f *fakePluginServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (f *fakePluginServer) uninstall(id string) int {
 	f.deletes++
+	listed := false
 	for i := len(f.plugins) - 1; i >= 0; i-- {
 		if f.plugins[i].ID != id {
+			continue
+		}
+		listed = true
+		if !f.plugins[i].CanUninstall {
 			continue
 		}
 		if !f.keep {
@@ -81,6 +92,9 @@ func (f *fakePluginServer) uninstall(id string) int {
 		if f.status != 0 {
 			return f.status
 		}
+		return http.StatusNoContent
+	}
+	if listed {
 		return http.StatusNoContent
 	}
 	return http.StatusNotFound
@@ -97,6 +111,25 @@ func newFakePluginResource(t *testing.T, fake *fakePluginServer) *PluginResource
 	server := httptest.NewServer(fake)
 	t.Cleanup(server.Close)
 	return &PluginResource{client: client.NewClient(server.URL, "test-key")}
+}
+
+func pluginResourceSchema(t *testing.T) schema.Schema {
+	t.Helper()
+	var resp resource.SchemaResponse
+	NewPluginResource().Schema(context.Background(), resource.SchemaRequest{}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("schema: %v", resp.Diagnostics.Errors())
+	}
+	return resp.Schema
+}
+
+func pluginResourceState(t *testing.T, m PluginResourceModel) tfsdk.State {
+	t.Helper()
+	state := tfsdk.State{Schema: pluginResourceSchema(t)}
+	if diags := state.Set(context.Background(), &m); diags.HasError() {
+		t.Fatalf("state: %v", diags.Errors())
+	}
+	return state
 }
 
 func TestUnitPluginInstallsAndUninstallsDoNotOverlap(t *testing.T) {
@@ -130,13 +163,13 @@ func TestUnitPluginInstallsAndUninstallsDoNotOverlap(t *testing.T) {
 
 func TestUnitPluginUninstallRemovesEveryListedVersion(t *testing.T) {
 	fake := &fakePluginServer{plugins: []client.InstalledPlugin{
-		{ID: bookshelfID, Name: "Bookshelf", Version: "12.0.0.0", Status: "Superseded"},
-		{ID: bookshelfID, Name: "Bookshelf", Version: "13.0.0.0", Status: "Restart"},
-		{ID: "170a157fac6c437aabddca9c25cebd39", Name: "Fanart", Version: "15.0.0.0", Status: "Active"},
+		{ID: bookshelfID, Name: "Bookshelf", Version: "12.0.0.0", Status: "Superseded", CanUninstall: true},
+		{ID: bookshelfID, Name: "Bookshelf", Version: "13.0.0.0", Status: "Restart", CanUninstall: true},
+		{ID: "170a157fac6c437aabddca9c25cebd39", Name: "Fanart", Version: "15.0.0.0", Status: "Active", CanUninstall: true},
 	}}
 	r := newFakePluginResource(t, fake)
 
-	if err := r.uninstall(context.Background(), bookshelfID); err != nil {
+	if _, err := r.uninstall(context.Background(), bookshelfID); err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}
 	if got := fake.listed(); len(got) != 1 || got[0].Name != "Fanart" {
@@ -146,11 +179,11 @@ func TestUnitPluginUninstallRemovesEveryListedVersion(t *testing.T) {
 
 func TestUnitPluginUninstallSkipsVersionPendingDeletion(t *testing.T) {
 	fake := &fakePluginServer{plugins: []client.InstalledPlugin{
-		{ID: bookshelfID, Name: "Bookshelf", Version: "13.0.0.0", Status: pluginStatusDeleted},
+		{ID: bookshelfID, Name: "Bookshelf", Version: "13.0.0.0", Status: pluginStatusDeleted, CanUninstall: true},
 	}}
 	r := newFakePluginResource(t, fake)
 
-	if err := r.uninstall(context.Background(), bookshelfID); err != nil {
+	if _, err := r.uninstall(context.Background(), bookshelfID); err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}
 	if fake.deletes != 0 {
@@ -160,38 +193,120 @@ func TestUnitPluginUninstallSkipsVersionPendingDeletion(t *testing.T) {
 
 func TestUnitPluginUninstallAcceptsFailureOncePluginIsGone(t *testing.T) {
 	fake := &fakePluginServer{
-		plugins: []client.InstalledPlugin{{ID: bookshelfID, Name: "Bookshelf", Version: "13.0.0.0", Status: "Restart"}},
+		plugins: []client.InstalledPlugin{{ID: bookshelfID, Name: "Bookshelf", Version: "13.0.0.0", Status: "Restart", CanUninstall: true}},
 		status:  http.StatusBadRequest,
 	}
 	r := newFakePluginResource(t, fake)
 
-	if err := r.uninstall(context.Background(), bookshelfID); err != nil {
+	if _, err := r.uninstall(context.Background(), bookshelfID); err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}
 }
 
 func TestUnitPluginUninstallReportsFailureWhilePluginIsListed(t *testing.T) {
 	fake := &fakePluginServer{
-		plugins: []client.InstalledPlugin{{ID: bookshelfID, Name: "Bookshelf", Version: "13.0.0.0", Status: "Restart"}},
+		plugins: []client.InstalledPlugin{{ID: bookshelfID, Name: "Bookshelf", Version: "13.0.0.0", Status: "Restart", CanUninstall: true}},
 		keep:    true,
 		status:  http.StatusBadRequest,
 	}
 	r := newFakePluginResource(t, fake)
 
-	err := r.uninstall(context.Background(), bookshelfID)
+	_, err := r.uninstall(context.Background(), bookshelfID)
 	if err == nil || !strings.Contains(err.Error(), "400") {
 		t.Fatalf("uninstall error = %v, want the 400 Jellyfin answered", err)
 	}
 }
 
+// A 404 while the plugin is still listed is a request that failed, such as
+// one that raced an uninstall from another process and found meta.json gone.
+func TestUnitPluginUninstallReportsNotFoundWhilePluginIsListed(t *testing.T) {
+	fake := &fakePluginServer{
+		plugins: []client.InstalledPlugin{{ID: bookshelfID, Name: "Bookshelf", Version: "13.0.0.0", Status: "Active", CanUninstall: true}},
+		keep:    true,
+		status:  http.StatusNotFound,
+	}
+	r := newFakePluginResource(t, fake)
+
+	_, err := r.uninstall(context.Background(), bookshelfID)
+	if !client.IsNotFound(err) {
+		t.Fatalf("uninstall error = %v, want the 404 Jellyfin answered", err)
+	}
+}
+
+func TestUnitPluginUninstallLeavesBundledPlugin(t *testing.T) {
+	const tmdbID = "b8715ed16c4745289ad3f72deb539cd4"
+	fake := &fakePluginServer{plugins: []client.InstalledPlugin{
+		{ID: tmdbID, Name: "TMDb", Version: "12.1.0.0", Status: "Active"},
+	}}
+	r := newFakePluginResource(t, fake)
+
+	kept, err := r.uninstall(context.Background(), tmdbID)
+	if err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+	if len(kept) != 1 || kept[0].Version != "12.1.0.0" {
+		t.Errorf("kept = %+v, want TMDb 12.1.0.0", kept)
+	}
+	if fake.deletes != 0 {
+		t.Errorf("DELETE requests = %d, want 0", fake.deletes)
+	}
+}
+
+func TestUnitPluginUninstallRemovesVersionInstalledOverBundledPlugin(t *testing.T) {
+	const tmdbID = "b8715ed16c4745289ad3f72deb539cd4"
+	fake := &fakePluginServer{plugins: []client.InstalledPlugin{
+		{ID: tmdbID, Name: "TMDb", Version: "12.1.0.0", Status: "Superseded"},
+		{ID: tmdbID, Name: "TMDb", Version: "12.2.0.0", Status: "Restart", CanUninstall: true},
+	}}
+	r := newFakePluginResource(t, fake)
+
+	kept, err := r.uninstall(context.Background(), tmdbID)
+	if err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+	if len(kept) != 1 || kept[0].Version != "12.1.0.0" {
+		t.Errorf("kept = %+v, want TMDb 12.1.0.0", kept)
+	}
+	if got := fake.listed(); len(got) != 1 || got[0].Version != "12.1.0.0" {
+		t.Errorf("plugins left = %+v, want only TMDb 12.1.0.0", got)
+	}
+}
+
+func TestUnitPluginDeleteWarnsWhenJellyfinKeepsBundledPlugin(t *testing.T) {
+	const tmdbID = "b8715ed16c4745289ad3f72deb539cd4"
+	fake := &fakePluginServer{plugins: []client.InstalledPlugin{
+		{ID: tmdbID, Name: "TMDb", Version: "12.1.0.0", Status: "Active"},
+	}}
+	r := newFakePluginResource(t, fake)
+	ctx := context.Background()
+
+	state := pluginResourceState(t, PluginResourceModel{
+		ID:               types.StringValue(tmdbID),
+		Name:             types.StringValue("TMDb"),
+		Version:          types.StringValue("12.1.0.0"),
+		InstalledVersion: types.StringValue("12.1.0.0"),
+		RepositoryURL:    types.StringNull(),
+	})
+	resp := &resource.DeleteResponse{State: state}
+	r.Delete(ctx, resource.DeleteRequest{State: state}, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("Delete: %v", resp.Diagnostics.Errors())
+	}
+	warnings := resp.Diagnostics.Warnings()
+	if len(warnings) != 1 || !strings.Contains(warnings[0].Detail(), "TMDb 12.1.0.0") {
+		t.Errorf("warnings = %v, want one naming TMDb 12.1.0.0", warnings)
+	}
+}
+
 func TestUnitPluginUninstallStopsWhenJellyfinKeepsPlugin(t *testing.T) {
 	fake := &fakePluginServer{
-		plugins: []client.InstalledPlugin{{ID: bookshelfID, Name: "Bookshelf", Version: "13.0.0.0", Status: "Active"}},
+		plugins: []client.InstalledPlugin{{ID: bookshelfID, Name: "Bookshelf", Version: "13.0.0.0", Status: "Active", CanUninstall: true}},
 		keep:    true,
 	}
 	r := newFakePluginResource(t, fake)
 
-	err := r.uninstall(context.Background(), bookshelfID)
+	_, err := r.uninstall(context.Background(), bookshelfID)
 	if err == nil || !strings.Contains(err.Error(), "13.0.0.0") {
 		t.Fatalf("uninstall error = %v, want one naming the version still listed", err)
 	}
@@ -202,7 +317,7 @@ func TestUnitPluginUninstallStopsWhenJellyfinKeepsPlugin(t *testing.T) {
 
 func TestUnitPluginConcurrentUninstallsOfOnePluginSucceed(t *testing.T) {
 	fake := &fakePluginServer{plugins: []client.InstalledPlugin{
-		{ID: bookshelfID, Name: "Bookshelf", Version: "13.0.0.0", Status: "Restart"},
+		{ID: bookshelfID, Name: "Bookshelf", Version: "13.0.0.0", Status: "Restart", CanUninstall: true},
 	}}
 	server := httptest.NewServer(fake)
 	defer server.Close()
@@ -212,7 +327,7 @@ func TestUnitPluginConcurrentUninstallsOfOnePluginSucceed(t *testing.T) {
 	for i := range 4 {
 		r := &PluginResource{client: client.NewClient(server.URL, "test-key")}
 		wg.Go(func() {
-			if err := r.uninstall(ctx, bookshelfID); err != nil {
+			if _, err := r.uninstall(ctx, bookshelfID); err != nil {
 				t.Errorf("uninstall %d: %v", i, err)
 			}
 		})

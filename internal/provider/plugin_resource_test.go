@@ -178,6 +178,33 @@ resource "jellyfin_plugin" "test" {
 	})
 }
 
+// Jellyfin answers 204 to the DELETE of a plugin it bundles without removing
+// it, and cmd/jellyfin-import writes a jellyfin_plugin for each of them.
+func TestAccPluginResourceDestroyLeavesBundledPlugin(t *testing.T) {
+	const name = "TMDb"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckPluginListed(t, name),
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+import {
+  to = jellyfin_plugin.test
+  id = %[1]q
+}
+
+resource "jellyfin_plugin" "test" {
+  name = %[1]q
+}
+`, name),
+				Check: resource.TestCheckResourceAttr("jellyfin_plugin.test", "name", name),
+			},
+		},
+	})
+}
+
 // TestAccPluginResourcePinSurvivesRestartWithoutUpdateTriggers follows the
 // resource's documented way to keep a pinned version: Jellyfin's plugin update
 // task runs at startup, so it only stays pinned across a restart with the
@@ -271,6 +298,22 @@ func testAccCheckPluginNotListed(t *testing.T, name string) resource.TestCheckFu
 			}
 		}
 		return nil
+	}
+}
+
+// testAccCheckPluginListed fails unless Jellyfin lists the named plugin.
+func testAccCheckPluginListed(t *testing.T, name string) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		plugins, err := testAccClient(t).GetInstalledPlugins(context.Background())
+		if err != nil {
+			return err
+		}
+		for _, p := range plugins {
+			if p.Name == name && p.Status != pluginStatusDeleted {
+				return nil
+			}
+		}
+		return fmt.Errorf("plugin %s is no longer listed", name)
 	}
 }
 
