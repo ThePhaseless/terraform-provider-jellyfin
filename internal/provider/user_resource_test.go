@@ -6,7 +6,9 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"regexp"
 	"testing"
@@ -343,11 +345,14 @@ func testAccCheckUserSubtitleLanguage(t *testing.T, want string) resource.TestCh
 func testAccCheckUserSignIn(name, password string, wantAccepted bool) resource.TestCheckFunc {
 	return func(*terraform.State) error {
 		_, err := client.NewClient(os.Getenv("JELLYFIN_ENDPOINT"), "").AuthenticateByName(context.Background(), name, password)
+		var httpErr *client.HTTPError
 		switch {
 		case wantAccepted && err != nil:
 			return fmt.Errorf("signing in as %s with password %q: %w", name, password, err)
 		case !wantAccepted && err == nil:
 			return fmt.Errorf("signing in as %s with password %q succeeded, want it rejected", name, password)
+		case !wantAccepted && (!errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusUnauthorized):
+			return fmt.Errorf("signing in as %s with password %q: %w, want it rejected with status 401", name, password, err)
 		}
 		return nil
 	}
