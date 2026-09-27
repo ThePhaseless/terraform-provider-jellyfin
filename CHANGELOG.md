@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-09-27
+
+### Changed
+
+- Declared support for Jellyfin 12.1 and JellyfinSecurity plugin 2.6.3.1 (versions tested in CI).
+
 ### Added
 
 - `jellyfin_encoding_configuration`: `hls_audio_seek_strategy` and `subtitle_extraction_timeout_minutes`, new in Jellyfin 12. Setting them against an older server fails with an error naming the Jellyfin 12 requirement.
