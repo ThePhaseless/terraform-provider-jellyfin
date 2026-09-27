@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -27,11 +28,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 var (
 	_ resource.Resource                = &SystemConfigurationResource{}
 	_ resource.ResourceWithImportState = &SystemConfigurationResource{}
+	_ resource.ResourceWithModifyPlan  = &SystemConfigurationResource{}
+	_ wireBound                        = &SystemConfigurationResource{}
 )
 
 // NewSystemConfigurationResource creates a new system configuration resource.
@@ -100,6 +104,12 @@ type SystemConfigurationResourceModel struct {
 	CachePath                           types.String `tfsdk:"cache_path"`
 	ServerName                          types.String `tfsdk:"server_name"`
 }
+
+var systemWire = sync.OnceValues(func() (*wire.Binding, error) {
+	return wire.Bind(schemaOf(&SystemConfigurationResource{}), "ServerConfiguration", wire.Identity("id"))
+})
+
+func (r *SystemConfigurationResource) Wire() (*wire.Binding, error) { return systemWire() }
 
 // MetadataOptionsModel describes a metadata options entry.
 type MetadataOptionsModel struct {
@@ -456,7 +466,23 @@ func (r *SystemConfigurationResource) ImportState(ctx context.Context, _ resourc
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("system"))...)
 }
 
+// ModifyPlan gates each configured field on the Jellyfin version it needs, so
+// a field a later pin adds is checked without a change here.
+func (r *SystemConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	if b := wireBinding(&resp.Diagnostics, systemWire); b != nil {
+		resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
+	}
+}
+
 func (r *SystemConfigurationResource) apply(ctx context.Context, data *SystemConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+	b := wireBinding(diags, systemWire)
+	if b == nil {
+		return
+	}
+
 	current, err := r.client.GetSystemConfiguration(ctx)
 	if err != nil {
 		diags.AddError("Failed to read current system configuration", err.Error())
@@ -469,7 +495,7 @@ func (r *SystemConfigurationResource) apply(ctx context.Context, data *SystemCon
 		return
 	}
 
-	if d := overlaySystemConfiguration(ctx, base, data); d.HasError() {
+	if d := b.OverlayModel(ctx, base, data); d.HasError() {
 		diags.Append(d...)
 		return
 	}
@@ -491,19 +517,24 @@ func (r *SystemConfigurationResource) apply(ctx context.Context, data *SystemCon
 		return
 	}
 
-	flattenSystemConfiguration(ctx, updated.RawJSON, data, diags)
+	diags.Append(b.FlattenAfterApply(ctx, updated.RawJSON, data)...)
 	data.ID = types.StringValue("system")
 	diags.Append(state.Set(ctx, data)...)
 }
 
 func (r *SystemConfigurationResource) read(ctx context.Context, data *SystemConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+	b := wireBinding(diags, systemWire)
+	if b == nil {
+		return
+	}
+
 	current, err := r.client.GetSystemConfiguration(ctx)
 	if err != nil {
 		diags.AddError("Failed to read system configuration", err.Error())
 		return
 	}
 
-	flattenSystemConfiguration(ctx, current.RawJSON, data, diags)
+	diags.Append(b.FlattenInto(ctx, current.RawJSON, data)...)
 	data.ID = types.StringValue("system")
 	diags.Append(state.Set(ctx, data)...)
 }
