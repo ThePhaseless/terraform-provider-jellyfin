@@ -106,20 +106,19 @@ func TestUnitUserRenameKeepsConfiguration(t *testing.T) {
 
 	var posted map[string]json.RawMessage
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/Users/user-1" {
-			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		if r.Method == http.MethodPost {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Users/user-1":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Id":"user-1","Name":"old","Configuration":{"SubtitleLanguagePreference":"fre"},"Policy":{"IsHidden":true}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/Users" && r.URL.Query().Get("userId") == "user-1":
 			if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
 				t.Errorf("decoding posted user: %v", err)
 			}
 			w.WriteHeader(http.StatusNoContent)
-			return
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusNotFound)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"Id":"user-1","Name":"old","Configuration":{"SubtitleLanguagePreference":"fre"},"Policy":{"IsHidden":true}}`))
 	}))
 	defer server.Close()
 

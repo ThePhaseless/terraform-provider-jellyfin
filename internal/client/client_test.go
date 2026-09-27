@@ -6,8 +6,12 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 )
 
@@ -154,6 +158,86 @@ func TestGetUserPolicyRawKeepsFieldsMissingFromUserPolicy(t *testing.T) {
 	}
 	if len(policy) != 2 {
 		t.Fatalf("policy = %s, want only the fields the server sent", raw)
+	}
+}
+
+func TestUpdateUserRawPostsBodyToUsersWithUserIDQuery(t *testing.T) {
+	t.Parallel()
+
+	var gotMethod, gotPath, gotUserID, gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotUserID = r.Method, r.URL.Path, r.URL.Query().Get("userId")
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("reading request body: %v", err)
+		}
+		gotBody = string(body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	userJSON := `{"Id":"user-1","Name":"renamed","Configuration":{"SubtitleLanguagePreference":"fre"}}`
+	if err := NewClient(server.URL, "test-key").UpdateUserRaw(context.Background(), "user-1", userJSON); err != nil {
+		t.Fatalf("UpdateUserRaw() error = %v", err)
+	}
+
+	if gotMethod != http.MethodPost || gotPath != "/Users" || gotUserID != "user-1" {
+		t.Fatalf("expected POST /Users?userId=user-1, got %s %s with userId %q", gotMethod, gotPath, gotUserID)
+	}
+	if gotBody != userJSON {
+		t.Fatalf("body = %s, want the user JSON passed in unchanged", gotBody)
+	}
+}
+
+func TestUpdateUserPasswordPostsPasswordsToUsersPasswordWithUserIDQuery(t *testing.T) {
+	t.Parallel()
+
+	var gotMethod, gotPath, gotUserID string
+	var gotBody map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotUserID = r.Method, r.URL.Path, r.URL.Query().Get("userId")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decoding request body: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	if err := NewClient(server.URL, "test-key").UpdateUserPassword(context.Background(), "user-1", "old", "new"); err != nil {
+		t.Fatalf("UpdateUserPassword() error = %v", err)
+	}
+
+	if gotMethod != http.MethodPost || gotPath != "/Users/Password" || gotUserID != "user-1" {
+		t.Fatalf("expected POST /Users/Password?userId=user-1, got %s %s with userId %q", gotMethod, gotPath, gotUserID)
+	}
+	want := map[string]string{"CurrentPw": `"old"`, "NewPw": `"new"`}
+	if len(gotBody) != len(want) {
+		t.Fatalf("body has fields %v, want only CurrentPw and NewPw", slices.Sorted(maps.Keys(gotBody)))
+	}
+	for field, value := range want {
+		if got := string(gotBody[field]); got != value {
+			t.Errorf("%s = %s, want %s", field, got, value)
+		}
+	}
+}
+
+func TestUserUpdatesRejectBlankIDWithoutSendingRequest(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected %s %s", r.Method, r.URL)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "test-key")
+	for _, id := range []string{"", " ", "\t"} {
+		if err := c.UpdateUserRaw(context.Background(), id, `{"Name":"renamed"}`); !errors.Is(err, errBlankUserID) {
+			t.Errorf("UpdateUserRaw(%q) error = %v, want errBlankUserID", id, err)
+		}
+		if err := c.UpdateUserPassword(context.Background(), id, "", "new"); !errors.Is(err, errBlankUserID) {
+			t.Errorf("UpdateUserPassword(%q) error = %v, want errBlankUserID", id, err)
+		}
 	}
 }
 
