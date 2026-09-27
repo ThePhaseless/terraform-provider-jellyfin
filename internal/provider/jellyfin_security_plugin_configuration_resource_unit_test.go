@@ -13,21 +13,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 func TestUnitJellyfinSecurityNotificationAuthRoundTrip(t *testing.T) {
 	ctx := context.Background()
+	b := testUnitSecurityPluginWire(t)
 	fixture := `{"NtfyToken":"tk_abc","NtfyUsername":"alice","NtfyPassword":"s3cret","WebhookHeaders":["X-Api-Key: k","Authorization: Bearer t"]}`
 
-	var data JellyfinSecurityPluginConfigurationResourceModel
-	var diags diag.Diagnostics
-	flattenJellyfinSecurity(ctx, fixture, &data, &diags)
-	if diags.HasError() {
-		t.Fatalf("flatten: %v", diags.Errors())
-	}
+	data := testUnitSecurityPluginRead(t, b, fixture)
 
 	if got := data.NtfyToken.ValueString(); got != "tk_abc" {
 		t.Errorf("ntfy_token = %q, want %q", got, "tk_abc")
@@ -47,7 +45,7 @@ func TestUnitJellyfinSecurityNotificationAuthRoundTrip(t *testing.T) {
 	}
 
 	base := map[string]json.RawMessage{}
-	if d := overlayJellyfinSecurity(ctx, base, &data); d.HasError() {
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
 		t.Fatalf("overlay: %v", d.Errors())
 	}
 
@@ -65,51 +63,42 @@ func TestUnitJellyfinSecurityNotificationAuthRoundTrip(t *testing.T) {
 
 func TestUnitOidcProviderRpInitiatedLogoutRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	m := map[string]json.RawMessage{
-		"RpInitiatedLogoutEnabled":     json.RawMessage(`true`),
-		"RpInitiatedLogoutRedirectUri": json.RawMessage(`"https://example.com/bye"`),
+	b := testUnitSecurityPluginWire(t)
+	data := testUnitSecurityPluginRead(t, b, `{"OidcProviders":[{"Id":"idp","RpInitiatedLogoutEnabled":true,"RpInitiatedLogoutRedirectUri":"https://example.com/bye"}]}`)
+
+	var providers []OidcProviderModel
+	if d := data.OidcProviders.ElementsAs(ctx, &providers, false); d.HasError() {
+		t.Fatalf("oidc_providers: %v", d.Errors())
+	}
+	if len(providers) != 1 || !providers[0].RpInitiatedLogoutEnabled.ValueBool() {
+		t.Fatalf("oidc_providers = %+v, want one provider with rp_initiated_logout_enabled", providers)
+	}
+	if got := providers[0].RpInitiatedLogoutRedirectURI.ValueString(); got != "https://example.com/bye" {
+		t.Errorf("rp_initiated_logout_redirect_uri = %q", got)
 	}
 
-	var diags diag.Diagnostics
-	attrs := oidcProviderAttrs(ctx, m, &diags)
-	if diags.HasError() {
-		t.Fatalf("attrs: %v", diags.Errors())
+	base := map[string]json.RawMessage{}
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
+		t.Fatalf("overlay: %v", d.Errors())
 	}
-
-	enabled, ok := attrs["rp_initiated_logout_enabled"].(types.Bool)
-	if !ok || !enabled.ValueBool() {
-		t.Errorf("rp_initiated_logout_enabled = %v, want true", attrs["rp_initiated_logout_enabled"])
+	var written []map[string]json.RawMessage
+	if err := json.Unmarshal(base["OidcProviders"], &written); err != nil {
+		t.Fatalf("OidcProviders: %v", err)
 	}
-	redirect, ok := attrs["rp_initiated_logout_redirect_uri"].(types.String)
-	if !ok || redirect.ValueString() != "https://example.com/bye" {
-		t.Errorf("rp_initiated_logout_redirect_uri = %v", attrs["rp_initiated_logout_redirect_uri"])
-	}
-
-	p := OidcProviderModel{
-		RpInitiatedLogoutEnabled:     types.BoolValue(true),
-		RpInitiatedLogoutRedirectURI: types.StringValue("https://example.com/bye"),
-	}
-	out := map[string]json.RawMessage{}
-	overlayOidcProvider(ctx, out, &p)
-
-	if got := string(out["RpInitiatedLogoutEnabled"]); got != "true" {
+	if got := string(written[0]["RpInitiatedLogoutEnabled"]); got != "true" {
 		t.Errorf("RpInitiatedLogoutEnabled = %s, want true", got)
 	}
-	if got := string(out["RpInitiatedLogoutRedirectUri"]); got != `"https://example.com/bye"` {
+	if got := string(written[0]["RpInitiatedLogoutRedirectUri"]); got != `"https://example.com/bye"` {
 		t.Errorf("RpInitiatedLogoutRedirectUri = %s", got)
 	}
 }
 
 func TestUnitJellyfinSecurityPlugin263FieldsRoundTrip(t *testing.T) {
 	ctx := context.Background()
+	b := testUnitSecurityPluginWire(t)
 	fixture := `{"PairDeviceOnSecondScreenApproval":true,"PublicBaseUrl":"https://jf.example.com","OidcProviders":[{"Id":"idp","LinkExistingUsersByUsername":true}]}`
 
-	var data JellyfinSecurityPluginConfigurationResourceModel
-	var diags diag.Diagnostics
-	flattenJellyfinSecurity(ctx, fixture, &data, &diags)
-	if diags.HasError() {
-		t.Fatalf("flatten: %v", diags.Errors())
-	}
+	data := testUnitSecurityPluginRead(t, b, fixture)
 
 	if !data.PairDeviceOnSecondScreenApproval.ValueBool() {
 		t.Errorf("pair_device_on_second_screen_approval = %v, want true", data.PairDeviceOnSecondScreenApproval)
@@ -126,7 +115,7 @@ func TestUnitJellyfinSecurityPlugin263FieldsRoundTrip(t *testing.T) {
 	}
 
 	base := map[string]json.RawMessage{}
-	if d := overlayJellyfinSecurity(ctx, base, &data); d.HasError() {
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
 		t.Fatalf("overlay: %v", d.Errors())
 	}
 	if got := string(base["PairDeviceOnSecondScreenApproval"]); got != "true" {
@@ -146,20 +135,16 @@ func TestUnitJellyfinSecurityPlugin263FieldsRoundTrip(t *testing.T) {
 
 func TestUnitJellyfinSecurityPlugin263FieldsAbsentStayNullAndUnwritten(t *testing.T) {
 	ctx := context.Background()
+	b := testUnitSecurityPluginWire(t)
 
-	var data JellyfinSecurityPluginConfigurationResourceModel
-	var diags diag.Diagnostics
-	flattenJellyfinSecurity(ctx, `{"Enabled":true}`, &data, &diags)
-	if diags.HasError() {
-		t.Fatalf("flatten: %v", diags.Errors())
-	}
+	data := testUnitSecurityPluginRead(t, b, `{"Enabled":true}`)
 
 	if !data.PairDeviceOnSecondScreenApproval.IsNull() || !data.PublicBaseURL.IsNull() {
 		t.Errorf("pair_device_on_second_screen_approval = %v, public_base_url = %v, want both null", data.PairDeviceOnSecondScreenApproval, data.PublicBaseURL)
 	}
 
 	base := map[string]json.RawMessage{}
-	if d := overlayJellyfinSecurity(ctx, base, &data); d.HasError() {
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
 		t.Fatalf("overlay: %v", d.Errors())
 	}
 	for _, key := range []string{"PairDeviceOnSecondScreenApproval", "PublicBaseUrl"} {
@@ -254,14 +239,9 @@ func TestUnitFillEmptyPayloadLists(t *testing.T) {
 	}
 }
 
-// securityPluginUnmanagedKeys are served keys the resource deliberately has no
-// attribute for; overlay leaves them as the server holds them.
-var securityPluginUnmanagedKeys = map[string]string{
-	"RequireForAllUsers": "legacy alias the plugin keeps for EnforcementScope=All",
-}
-
-func TestUnitJellyfinSecurityWritesBackExactlyTheServedKeys(t *testing.T) {
+func TestUnitJellyfinSecurityWriteKeepsTheServedShape(t *testing.T) {
 	ctx := context.Background()
+	b := testUnitSecurityPluginWire(t)
 
 	raw, err := os.ReadFile(securityPluginPayloadGolden)
 	if err != nil {
@@ -273,29 +253,21 @@ func TestUnitJellyfinSecurityWritesBackExactlyTheServedKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building payload from golden: %v", err)
 	}
+	data := testUnitSecurityPluginRead(t, b, payload)
 
-	var data JellyfinSecurityPluginConfigurationResourceModel
-	var diags diag.Diagnostics
-	flattenJellyfinSecurity(ctx, payload, &data, &diags)
-	if diags.HasError() {
-		t.Fatalf("flatten: %v", diags.Errors())
-	}
-
-	served, err := parseJSONObject(payload)
+	// Apply overlays the served configuration, as here, so a top-level key
+	// stays in the payload whether or not an attribute claims it; the
+	// bindings golden lists the unclaimed ones. What this checks is that each
+	// rebuilt OIDC provider, role mapping and user email keeps every served
+	// key, and that every value goes out as the JSON type the plugin serves.
+	written, err := parseJSONObject(payload)
 	if err != nil {
 		t.Fatalf("parsing payload: %v", err)
 	}
-	// Overlay rebuilds each OIDC provider and carries only the server-managed
-	// CreatedAt over from the entries already there.
-	written := map[string]json.RawMessage{"OidcProviders": served["OidcProviders"]}
-	if d := overlayJellyfinSecurity(ctx, written, &data); d.HasError() {
+	if d := b.OverlayModel(ctx, written, &data); d.HasError() {
 		t.Fatalf("overlay: %v", d.Errors())
 	}
-	out, err := json.Marshal(written)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	got, err := reduceSecurityPluginPayload(string(out))
+	got, err := reduceSecurityPluginPayload(string(mustJSON(written)))
 	if err != nil {
 		t.Fatalf("reduce: %v", err)
 	}
@@ -307,10 +279,6 @@ func TestUnitJellyfinSecurityWritesBackExactlyTheServedKeys(t *testing.T) {
 	goldenSet := map[string]bool{}
 	for _, line := range golden {
 		goldenSet[line] = true
-		path, _, _ := strings.Cut(line, ": ")
-		if _, unmanaged := securityPluginUnmanagedKeys[path]; unmanaged {
-			continue
-		}
 		if !gotSet[line] {
 			t.Errorf("served %q is not written back by the resource", line)
 		}
@@ -491,4 +459,32 @@ func samplePayloadValue(typ string) any {
 	default:
 		return nil
 	}
+}
+
+func testUnitSecurityPluginWire(t *testing.T) *wire.Binding {
+	t.Helper()
+	b, err := securityPluginWire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// testUnitSecurityPluginRead reads raw with no prior value to compare with.
+func testUnitSecurityPluginRead(t *testing.T, b *wire.Binding, raw string) JellyfinSecurityPluginConfigurationResourceModel {
+	t.Helper()
+	ctx := context.Background()
+	doc, err := parseJSONObject(raw)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	obj, d := b.Flatten(ctx, doc, types.ObjectNull(b.AttrTypes))
+	if d.HasError() {
+		t.Fatalf("read: %v", d.Errors())
+	}
+	var data JellyfinSecurityPluginConfigurationResourceModel
+	if d := obj.As(ctx, &data, basetypes.ObjectAsOptions{}); d.HasError() {
+		t.Fatalf("model: %v", d.Errors())
+	}
+	return data
 }

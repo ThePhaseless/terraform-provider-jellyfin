@@ -7,9 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -28,11 +28,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 var (
 	_ resource.Resource                = &UserResource{}
 	_ resource.ResourceWithImportState = &UserResource{}
+	_ resource.ResourceWithModifyPlan  = &UserResource{}
+	_ wireBound                        = &UserResource{}
 )
 
 // NewUserResource creates a new user resource.
@@ -55,6 +58,46 @@ type UserResourceModel struct {
 	EnableAllFolders types.Bool       `tfsdk:"enable_all_folders"`
 	Policy           *UserPolicyModel `tfsdk:"policy"`
 }
+
+var userWire = sync.OnceValues(func() (*wire.Binding, error) {
+	return wire.Bind(schemaOf(&UserResource{}), "UserDto",
+		wire.Identity("id"),
+		wire.Elsewhere("password", "written by POST /Users/Password"),
+		wire.Document("Policy"),
+		wire.Key("is_administrator", "Policy.IsAdministrator"),
+		wire.Key("is_disabled", "Policy.IsDisabled"),
+		wire.Key("enable_all_folders", "Policy.EnableAllFolders"),
+		// Each has a default, so the plan always holds a value: reading a
+		// missing or null flag as null would plan a change where earlier
+		// releases, which read it as false, planned none.
+		wire.ReadMissingAs("is_administrator", types.BoolValue(false)),
+		wire.ReadMissingAs("is_disabled", types.BoolValue(false)),
+		wire.ReadMissingAs("enable_all_folders", types.BoolValue(false)),
+		wire.Unmanaged("AccessSchedule", "Id", "Jellyfin numbers access schedules itself"),
+		wire.Unmanaged("AccessSchedule", "UserId", "Jellyfin fills in the user the policy belongs to"))
+})
+
+func (r *UserResource) Wire() (*wire.Binding, error) { return userWire() }
+
+// userPolicyWire writes POST /Users/{id}/Policy, which takes the policy with
+// the three top-level flags in it.
+var userPolicyWire = sync.OnceValues(func() (*wire.Binding, error) {
+	b, err := userWire()
+	if err != nil {
+		return nil, err
+	}
+	return b.Document("Policy")
+})
+
+// userNameWire writes a rename, which posts the whole user: selecting the
+// name keeps the policy and flags out of that request.
+var userNameWire = sync.OnceValues(func() (*wire.Binding, error) {
+	b, err := userWire()
+	if err != nil {
+		return nil, err
+	}
+	return b.Select("name")
+})
 
 // UserPolicyModel describes the typed user policy data model.
 // Top-level IsAdministrator, IsDisabled, and EnableAllFolders are managed outside
@@ -339,6 +382,11 @@ func (r *UserResource) Configure(_ context.Context, req resource.ConfigureReques
 }
 
 func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	b := wireBinding(&resp.Diagnostics, userWire)
+	if b == nil {
+		return
+	}
+
 	// policy is computed, so a plan without it carries an unknown object,
 	// which the pointer field of the model cannot hold. Read the attributes
 	// one by one and convert the policy only when it is known.
@@ -386,39 +434,37 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	// holds the user as the server has it rather than only its id. From the
 	// id alone, an untaint followed by an apply without refresh plans a null
 	// policy, and Update fails with an inconsistent result.
+	flatten := b.FlattenAfterApply
 	if err := r.applyPolicy(ctx, &data, user.ID, &resp.Diagnostics); err != nil {
 		resp.Diagnostics.AddError("Failed to update user policy", err.Error())
+		// Nothing was written, so a planned value the server lacks is not one
+		// it dropped.
+		flatten = b.FlattenInto
 	}
 
-	createdUser, err := r.client.GetUserByID(ctx, user.ID)
+	raw, err := r.client.GetUserRaw(ctx, user.ID)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read user after creation", err.Error())
 		return
 	}
-
-	data.Name = types.StringValue(createdUser.Name)
-	data.IsAdministrator = types.BoolValue(createdUser.Policy.IsAdministrator)
-	data.IsDisabled = types.BoolValue(createdUser.Policy.IsDisabled)
-	data.EnableAllFolders = types.BoolValue(createdUser.Policy.EnableAllFolders)
-
-	policyRaw, err := r.client.GetUserPolicyRaw(ctx, user.ID)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to read user policy after creation", err.Error())
-		return
-	}
-	data.Policy = policyFromRaw(ctx, policyRaw, &resp.Diagnostics)
+	resp.Diagnostics.Append(flatten(ctx, raw, &data)...)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	b := wireBinding(&resp.Diagnostics, userWire)
+	if b == nil {
+		return
+	}
+
 	var data UserResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	user, err := r.client.GetUserByID(ctx, data.ID.ValueString())
+	raw, err := r.client.GetUserRaw(ctx, data.ID.ValueString())
 	if err != nil {
 		if client.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)
@@ -427,24 +473,17 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		resp.Diagnostics.AddError("Failed to read user", err.Error())
 		return
 	}
-
-	data.Name = types.StringValue(user.Name)
-	data.IsAdministrator = types.BoolValue(user.Policy.IsAdministrator)
-	data.IsDisabled = types.BoolValue(user.Policy.IsDisabled)
-	data.EnableAllFolders = types.BoolValue(user.Policy.EnableAllFolders)
-
-	policyRaw, err := r.client.GetUserPolicyRaw(ctx, data.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to read user policy", err.Error())
-		return
-	}
-
-	data.Policy = policyFromRaw(ctx, policyRaw, &resp.Diagnostics)
+	resp.Diagnostics.Append(b.FlattenInto(ctx, raw, &data)...)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	b := wireBinding(&resp.Diagnostics, userWire)
+	if b == nil {
+		return
+	}
+
 	var data UserResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
@@ -477,24 +516,13 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		}
 	}
 
-	updatedUser, err := r.client.GetUserByID(ctx, state.ID.ValueString())
+	raw, err := r.client.GetUserRaw(ctx, state.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read user after update", err.Error())
 		return
 	}
-
 	data.ID = state.ID
-	data.Name = types.StringValue(updatedUser.Name)
-	data.IsAdministrator = types.BoolValue(updatedUser.Policy.IsAdministrator)
-	data.IsDisabled = types.BoolValue(updatedUser.Policy.IsDisabled)
-	data.EnableAllFolders = types.BoolValue(updatedUser.Policy.EnableAllFolders)
-
-	policyRaw, err := r.client.GetUserPolicyRaw(ctx, state.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to read user policy after update", err.Error())
-		return
-	}
-	data.Policy = policyFromRaw(ctx, policyRaw, &resp.Diagnostics)
+	resp.Diagnostics.Append(b.FlattenAfterApply(ctx, raw, &data)...)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -518,11 +546,27 @@ func (r *UserResource) ImportState(ctx context.Context, req resource.ImportState
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
+// ModifyPlan gates each configured field on the Jellyfin version it needs, so
+// a field a later pin adds is checked without a change here.
+func (r *UserResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	if b := wireBinding(&resp.Diagnostics, userWire); b != nil {
+		resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
+	}
+}
+
 // renameUser posts the user read from the server back with only Name changed.
 // The server also replaces the user's Configuration with the one in the body,
 // so sending just the name would reset per-user settings such as language
 // preferences.
 func (r *UserResource) renameUser(ctx context.Context, id, name string) error {
+	b, err := userNameWire()
+	if err != nil {
+		return err
+	}
+
 	raw, err := r.client.GetUserRaw(ctx, id)
 	if err != nil {
 		return err
@@ -532,7 +576,9 @@ func (r *UserResource) renameUser(ctx context.Context, id, name string) error {
 	if err != nil {
 		return fmt.Errorf("parsing user: %w", err)
 	}
-	putJSONString(user, "Name", types.StringValue(name))
+	if d := b.OverlayModel(ctx, user, &UserResourceModel{Name: types.StringValue(name)}); d.HasError() {
+		return fmt.Errorf("writing the name: %s", d.Errors()[0].Detail())
+	}
 
 	payloadBytes, err := json.Marshal(user)
 	if err != nil {
@@ -545,6 +591,11 @@ func (r *UserResource) renameUser(ctx context.Context, id, name string) error {
 // applyPolicy overlays the planned top-level booleans and typed policy onto the
 // existing server policy, then POSTs the result to /Users/{id}/Policy.
 func (r *UserResource) applyPolicy(ctx context.Context, data *UserResourceModel, id string, diags *diag.Diagnostics) error {
+	b, err := userPolicyWire()
+	if err != nil {
+		return err
+	}
+
 	base, err := r.client.GetUserPolicyRaw(ctx, id)
 	if err != nil {
 		return err
@@ -555,18 +606,9 @@ func (r *UserResource) applyPolicy(ctx context.Context, data *UserResourceModel,
 		return fmt.Errorf("parsing existing policy: %w", err)
 	}
 
-	// Write top-level managed booleans.
-	putJSONBool(baseMap, "IsAdministrator", data.IsAdministrator)
-	putJSONBool(baseMap, "IsDisabled", data.IsDisabled)
-	putJSONBool(baseMap, "EnableAllFolders", data.EnableAllFolders)
-
-	// Overlay typed policy fields, if the nested block is configured.
-	if data.Policy != nil {
-		d := overlayPolicyIntoJSON(ctx, baseMap, data.Policy)
-		if d.HasError() {
-			diags.Append(d...)
-			return fmt.Errorf("overlaying policy")
-		}
+	if d := b.OverlayModel(ctx, baseMap, data); d.HasError() {
+		diags.Append(d...)
+		return fmt.Errorf("overlaying policy")
 	}
 
 	payloadBytes, err := json.Marshal(baseMap)
@@ -575,223 +617,4 @@ func (r *UserResource) applyPolicy(ctx context.Context, data *UserResourceModel,
 	}
 
 	return r.client.UpdateUserPolicyRaw(ctx, id, string(payloadBytes))
-}
-
-func overlayPolicyIntoJSON(ctx context.Context, m map[string]json.RawMessage, policy *UserPolicyModel) diag.Diagnostics {
-	var diags diag.Diagnostics
-
-	putJSONBool(m, "IsHidden", policy.IsHidden)
-	putJSONBool(m, "EnableCollectionManagement", policy.EnableCollectionManagement)
-	putJSONBool(m, "EnableSubtitleManagement", policy.EnableSubtitleManagement)
-	putJSONBool(m, "EnableLyricManagement", policy.EnableLyricManagement)
-	putJSONNullableInt64(m, "MaxParentalRating", policy.MaxParentalRating)
-	putJSONNullableInt64(m, "MaxParentalSubRating", policy.MaxParentalSubRating)
-	if d := putJSONStringList(ctx, m, "BlockedTags", policy.BlockedTags); d.HasError() {
-		return append(diags, d...)
-	}
-	if d := putJSONStringList(ctx, m, "AllowedTags", policy.AllowedTags); d.HasError() {
-		return append(diags, d...)
-	}
-	putJSONBool(m, "EnableUserPreferenceAccess", policy.EnableUserPreferenceAccess)
-	if d := putAccessSchedules(ctx, m, policy.AccessSchedules); d.HasError() {
-		return append(diags, d...)
-	}
-	if d := putJSONStringList(ctx, m, "BlockUnratedItems", policy.BlockUnratedItems); d.HasError() {
-		return append(diags, d...)
-	}
-	putJSONBool(m, "EnableRemoteControlOfOtherUsers", policy.EnableRemoteControlOfOtherUsers)
-	putJSONBool(m, "EnableSharedDeviceControl", policy.EnableSharedDeviceControl)
-	putJSONBool(m, "EnableRemoteAccess", policy.EnableRemoteAccess)
-	putJSONBool(m, "EnableLiveTvManagement", policy.EnableLiveTvManagement)
-	putJSONBool(m, "EnableLiveTvAccess", policy.EnableLiveTvAccess)
-	putJSONBool(m, "EnableMediaPlayback", policy.EnableMediaPlayback)
-	putJSONBool(m, "EnableAudioPlaybackTranscoding", policy.EnableAudioPlaybackTranscoding)
-	putJSONBool(m, "EnableVideoPlaybackTranscoding", policy.EnableVideoPlaybackTranscoding)
-	putJSONBool(m, "EnablePlaybackRemuxing", policy.EnablePlaybackRemuxing)
-	putJSONBool(m, "ForceRemoteSourceTranscoding", policy.ForceRemoteSourceTranscoding)
-	putJSONBool(m, "EnableContentDeletion", policy.EnableContentDeletion)
-	if d := putJSONStringList(ctx, m, "EnableContentDeletionFromFolders", policy.EnableContentDeletionFromFolders); d.HasError() {
-		return append(diags, d...)
-	}
-	putJSONBool(m, "EnableContentDownloading", policy.EnableContentDownloading)
-	putJSONBool(m, "EnableSyncTranscoding", policy.EnableSyncTranscoding)
-	putJSONBool(m, "EnableMediaConversion", policy.EnableMediaConversion)
-	if d := putJSONStringList(ctx, m, "EnabledDevices", policy.EnabledDevices); d.HasError() {
-		return append(diags, d...)
-	}
-	putJSONBool(m, "EnableAllDevices", policy.EnableAllDevices)
-	if d := putJSONStringList(ctx, m, "EnabledChannels", policy.EnabledChannels); d.HasError() {
-		return append(diags, d...)
-	}
-	putJSONBool(m, "EnableAllChannels", policy.EnableAllChannels)
-	if d := putJSONStringList(ctx, m, "EnabledFolders", policy.EnabledFolders); d.HasError() {
-		return append(diags, d...)
-	}
-	putJSONInt64(m, "LoginAttemptsBeforeLockout", policy.LoginAttemptsBeforeLockout)
-	putJSONInt64(m, "MaxActiveSessions", policy.MaxActiveSessions)
-	putJSONBool(m, "EnablePublicSharing", policy.EnablePublicSharing)
-	if d := putJSONStringList(ctx, m, "BlockedMediaFolders", policy.BlockedMediaFolders); d.HasError() {
-		return append(diags, d...)
-	}
-	if d := putJSONStringList(ctx, m, "BlockedChannels", policy.BlockedChannels); d.HasError() {
-		return append(diags, d...)
-	}
-	putJSONInt64(m, "RemoteClientBitrateLimit", policy.RemoteClientBitrateLimit)
-	putJSONString(m, "AuthenticationProviderId", policy.AuthenticationProviderID)
-	putJSONString(m, "PasswordResetProviderId", policy.PasswordResetProviderID)
-	putJSONString(m, "SyncPlayAccess", policy.SyncPlayAccess)
-
-	return diags
-}
-
-// putJSONNullableInt64 is putJSONInt64 except that a null value is written as
-// JSON null, so that it clears the field on the server.
-func putJSONNullableInt64(m map[string]json.RawMessage, key string, v types.Int64) {
-	if v.IsNull() {
-		m[key] = json.RawMessage("null")
-		return
-	}
-	putJSONInt64(m, key, v)
-}
-
-func putAccessSchedules(ctx context.Context, m map[string]json.RawMessage, v types.List) diag.Diagnostics {
-	var diags diag.Diagnostics
-	if v.IsNull() || v.IsUnknown() {
-		return diags
-	}
-
-	var elements []UserAccessScheduleModel
-	if d := v.ElementsAs(ctx, &elements, false); d.HasError() {
-		return append(diags, d...)
-	}
-
-	rawEntries := make([]map[string]json.RawMessage, len(elements))
-	for i, e := range elements {
-		entry := map[string]json.RawMessage{}
-		putJSONString(entry, "DayOfWeek", e.DayOfWeek)
-		putJSONFloat64(entry, "StartHour", e.StartHour)
-		putJSONFloat64(entry, "EndHour", e.EndHour)
-		rawEntries[i] = entry
-	}
-
-	b, err := json.Marshal(rawEntries)
-	if err != nil {
-		return append(diags, diag.NewErrorDiagnostic("Failed to marshal access schedules", err.Error()))
-	}
-	m["AccessSchedules"] = b
-	return diags
-}
-
-func policyFromRaw(ctx context.Context, raw string, diags *diag.Diagnostics) *UserPolicyModel {
-	m, err := parseJSONObject(raw)
-	if err != nil {
-		return nil
-	}
-
-	policy := &UserPolicyModel{}
-	policy.IsHidden = getJSONBool(m, "IsHidden")
-	policy.EnableCollectionManagement = getJSONBool(m, "EnableCollectionManagement")
-	policy.EnableSubtitleManagement = getJSONBool(m, "EnableSubtitleManagement")
-	policy.EnableLyricManagement = getJSONBool(m, "EnableLyricManagement")
-	policy.MaxParentalRating = getJSONInt64(m, "MaxParentalRating")
-	policy.MaxParentalSubRating = getJSONInt64(m, "MaxParentalSubRating")
-	policy.BlockedTags, _ = getJSONStringList(ctx, m, "BlockedTags")
-	policy.AllowedTags, _ = getJSONStringList(ctx, m, "AllowedTags")
-	policy.EnableUserPreferenceAccess = getJSONBool(m, "EnableUserPreferenceAccess")
-	policy.AccessSchedules = getAccessSchedules(ctx, m, diags)
-	policy.BlockUnratedItems, _ = getJSONStringList(ctx, m, "BlockUnratedItems")
-	policy.EnableRemoteControlOfOtherUsers = getJSONBool(m, "EnableRemoteControlOfOtherUsers")
-	policy.EnableSharedDeviceControl = getJSONBool(m, "EnableSharedDeviceControl")
-	policy.EnableRemoteAccess = getJSONBool(m, "EnableRemoteAccess")
-	policy.EnableLiveTvManagement = getJSONBool(m, "EnableLiveTvManagement")
-	policy.EnableLiveTvAccess = getJSONBool(m, "EnableLiveTvAccess")
-	policy.EnableMediaPlayback = getJSONBool(m, "EnableMediaPlayback")
-	policy.EnableAudioPlaybackTranscoding = getJSONBool(m, "EnableAudioPlaybackTranscoding")
-	policy.EnableVideoPlaybackTranscoding = getJSONBool(m, "EnableVideoPlaybackTranscoding")
-	policy.EnablePlaybackRemuxing = getJSONBool(m, "EnablePlaybackRemuxing")
-	policy.ForceRemoteSourceTranscoding = getJSONBool(m, "ForceRemoteSourceTranscoding")
-	policy.EnableContentDeletion = getJSONBool(m, "EnableContentDeletion")
-	policy.EnableContentDeletionFromFolders, _ = getJSONStringList(ctx, m, "EnableContentDeletionFromFolders")
-	policy.EnableContentDownloading = getJSONBool(m, "EnableContentDownloading")
-	policy.EnableSyncTranscoding = getJSONBool(m, "EnableSyncTranscoding")
-	policy.EnableMediaConversion = getJSONBool(m, "EnableMediaConversion")
-	policy.EnabledDevices, _ = getJSONStringList(ctx, m, "EnabledDevices")
-	policy.EnableAllDevices = getJSONBool(m, "EnableAllDevices")
-	policy.EnabledChannels, _ = getJSONStringList(ctx, m, "EnabledChannels")
-	policy.EnableAllChannels = getJSONBool(m, "EnableAllChannels")
-	policy.EnabledFolders, _ = getJSONStringList(ctx, m, "EnabledFolders")
-	policy.LoginAttemptsBeforeLockout = getJSONInt64(m, "LoginAttemptsBeforeLockout")
-	policy.MaxActiveSessions = getJSONInt64(m, "MaxActiveSessions")
-	policy.EnablePublicSharing = getJSONBool(m, "EnablePublicSharing")
-	policy.BlockedMediaFolders, _ = getJSONStringList(ctx, m, "BlockedMediaFolders")
-	policy.BlockedChannels, _ = getJSONStringList(ctx, m, "BlockedChannels")
-	policy.RemoteClientBitrateLimit = getJSONInt64(m, "RemoteClientBitrateLimit")
-	policy.AuthenticationProviderID = getJSONString(m, "AuthenticationProviderId")
-	policy.PasswordResetProviderID = getJSONString(m, "PasswordResetProviderId")
-	policy.SyncPlayAccess = getJSONString(m, "SyncPlayAccess")
-
-	return policy
-}
-
-func getAccessSchedules(_ context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
-	raw, ok := m["AccessSchedules"]
-	if !ok {
-		return types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{
-			"day_of_week": types.StringType,
-			"start_hour":  types.Float64Type,
-			"end_hour":    types.Float64Type,
-		}})
-	}
-
-	var entries []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		diags.AddError("Failed to parse access schedules", err.Error())
-		return types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{
-			"day_of_week": types.StringType,
-			"start_hour":  types.Float64Type,
-			"end_hour":    types.Float64Type,
-		}})
-	}
-
-	objects := make([]types.Object, len(entries))
-	for i, entry := range entries {
-		attrs := map[string]attr.Value{
-			"day_of_week": getJSONString(entry, "DayOfWeek"),
-			"start_hour":  getJSONFloat64(entry, "StartHour"),
-			"end_hour":    getJSONFloat64(entry, "EndHour"),
-		}
-		obj, d := types.ObjectValue(map[string]attr.Type{
-			"day_of_week": types.StringType,
-			"start_hour":  types.Float64Type,
-			"end_hour":    types.Float64Type,
-		}, attrs)
-		if d.HasError() {
-			diags.Append(d...)
-			return types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{
-				"day_of_week": types.StringType,
-				"start_hour":  types.Float64Type,
-				"end_hour":    types.Float64Type,
-			}})
-		}
-		objects[i] = obj
-	}
-
-	values := make([]attr.Value, len(objects))
-	for i, obj := range objects {
-		values[i] = obj
-	}
-	list, d := types.ListValue(types.ObjectType{AttrTypes: map[string]attr.Type{
-		"day_of_week": types.StringType,
-		"start_hour":  types.Float64Type,
-		"end_hour":    types.Float64Type,
-	}}, values)
-	if d.HasError() {
-		diags.Append(d...)
-		return types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{
-			"day_of_week": types.StringType,
-			"start_hour":  types.Float64Type,
-			"end_hour":    types.Float64Type,
-		}})
-	}
-	return list
 }

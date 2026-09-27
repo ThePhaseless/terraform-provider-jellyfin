@@ -8,10 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -26,17 +26,18 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 var (
 	_ resource.Resource                = &LibraryResource{}
 	_ resource.ResourceWithImportState = &LibraryResource{}
 	_ resource.ResourceWithModifyPlan  = &LibraryResource{}
+	_ wireBound                        = &LibraryResource{}
 )
 
 // NewLibraryResource creates a new library resource.
@@ -57,6 +58,60 @@ type LibraryResourceModel struct {
 	Paths          types.List           `tfsdk:"paths"`
 	LibraryOptions *LibraryOptionsModel `tfsdk:"library_options"`
 	ItemID         types.String         `tfsdk:"item_id"`
+}
+
+var libraryWire = sync.OnceValues(func() (*wire.Binding, error) {
+	opts := []wire.Option{
+		wire.Identity("id"),
+		wire.Document("LibraryOptions"),
+		wire.Key("paths", "Locations"),
+		wire.Key("library_options.extract_chapters_during_library_scan", "ExtractChapterImagesDuringLibraryScan"),
+		wire.Inverted("library_options.disabled", "Enabled"),
+		wire.Legacy("library_options.path_infos.network_path", "NetworkPath", "10.10", networkPathRemovedMessage),
+		wire.MergeByKey("library_options.type_options", "type"),
+		wire.MergeByKey("library_options.type_options.image_options", "type"),
+		wire.VersionMessage("library_options.type_options.similar_item_providers", similarItemsVersionMessage),
+		wire.VersionMessage("library_options.type_options.similar_item_provider_order", similarItemsVersionMessage),
+		wire.VersionMessage("library_options.path_infos.network_path", networkPathVersionMessage),
+	}
+	for _, p := range []string{
+		"library_options.enable_emby_photos", "library_options.enable_photo_subtitle",
+		"library_options.chapter_image_interval_seconds",
+		"library_options.extract_media_information_during_library_scan",
+		"library_options.download_images_in_advance", "library_options.cache_images_in_library",
+		"library_options.enable_media_conversion", "library_options.disabled_metadata_savers",
+		"library_options.disabled_metadata_fetchers", "library_options.metadata_fetcher_order",
+		"library_options.disabled_image_fetchers", "library_options.image_fetcher_order",
+		"library_options.save_local_thumbnail_sets", "library_options.import_missing_episodes",
+		"library_options.metadata_refresh_mode",
+		"library_options.path_infos.username", "library_options.path_infos.password",
+	} {
+		opts = append(opts, wire.NeverSent(p, unsupportedLibraryOptionMessage))
+	}
+	return wire.Bind(schemaOf(&LibraryResource{}), "VirtualFolderInfo", opts...)
+})
+
+func (r *LibraryResource) Wire() (*wire.Binding, error) { return libraryWire() }
+
+// libraryOptionsWire writes POST /Library/VirtualFolders/LibraryOptions and
+// reads the options of the library listing; the rest of the library comes
+// from the typed folder.
+var libraryOptionsWire = sync.OnceValues(func() (*wire.Binding, error) {
+	b, err := libraryWire()
+	if err != nil {
+		return nil, err
+	}
+	return b.Document("LibraryOptions")
+})
+
+func similarItemsVersionMessage(g wire.VersionGap) (string, string) {
+	return "Similar item settings not supported",
+		fmt.Sprintf("The server runs Jellyfin %s, and similar item providers need Jellyfin 12 or later. Remove %s for this server.", g.ServerVersion, g.Path)
+}
+
+func networkPathVersionMessage(g wire.VersionGap) (string, string) {
+	return "Network paths not supported",
+		fmt.Sprintf("The server runs Jellyfin %s, and Jellyfin %s removed network paths, so the server would drop the value. Remove %s from the configuration.", g.ServerVersion, g.Until, g.Path)
 }
 
 // LibraryOptionsModel describes the typed library options.
@@ -497,36 +552,6 @@ func imageOptionsAttributes() map[string]schema.Attribute {
 	}
 }
 
-func pathInfoObjectType() types.ObjectType {
-	return types.ObjectType{AttrTypes: map[string]attr.Type{
-		"path":         types.StringType,
-		"network_path": types.StringType,
-		"username":     types.StringType,
-		"password":     types.StringType,
-	}}
-}
-
-func typeOptionsObjectType() types.ObjectType {
-	return types.ObjectType{AttrTypes: map[string]attr.Type{
-		"type":                        types.StringType,
-		"metadata_fetchers":           types.ListType{ElemType: types.StringType},
-		"metadata_fetcher_order":      types.ListType{ElemType: types.StringType},
-		"image_fetchers":              types.ListType{ElemType: types.StringType},
-		"image_options":               types.ListType{ElemType: imageOptionsObjectType()},
-		"image_fetcher_order":         types.ListType{ElemType: types.StringType},
-		"similar_item_providers":      types.ListType{ElemType: types.StringType},
-		"similar_item_provider_order": types.ListType{ElemType: types.StringType},
-	}}
-}
-
-func imageOptionsObjectType() types.ObjectType {
-	return types.ObjectType{AttrTypes: map[string]attr.Type{
-		"type":      types.StringType,
-		"limit":     types.Int64Type,
-		"min_width": types.Int64Type,
-	}}
-}
-
 func (r *LibraryResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
@@ -545,6 +570,11 @@ func (r *LibraryResource) Configure(_ context.Context, req resource.ConfigureReq
 }
 
 func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	b := wireBinding(&resp.Diagnostics, libraryOptionsWire)
+	if b == nil {
+		return
+	}
+
 	// library_options is computed, so a plan without it carries an unknown
 	// object, which the pointer field of the model cannot hold. Read the
 	// attributes one by one and convert the options only when they are known.
@@ -601,14 +631,15 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 	// Track the library before its options are applied: a failure below then
 	// leaves it in state as tainted, to be replaced, rather than on the server
 	// unmanaged, where the next create would refuse the duplicate name.
-	resp.Diagnostics.Append(resp.State.Set(ctx, &LibraryResourceModel{
+	tracked := LibraryResourceModel{
 		ID:             types.StringValue(folder.Name),
 		Name:           data.Name,
 		CollectionType: flattenCollectionType(folder.CollectionType),
 		Paths:          data.Paths,
-		LibraryOptions: flattenLibraryOptions(ctx, folder.GetLibraryOptions().RawJSON, &resp.Diagnostics),
 		ItemID:         types.StringValue(folder.ItemID),
-	})...)
+	}
+	resp.Diagnostics.Append(b.FlattenInto(ctx, folder.GetLibraryOptions().RawJSON, &tracked)...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &tracked)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -619,11 +650,9 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	if data.LibraryOptions != nil {
-		if d := overlayLibraryOptions(ctx, base, data.LibraryOptions); d.HasError() {
-			resp.Diagnostics.Append(d...)
-			return
-		}
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
+		resp.Diagnostics.Append(d...)
+		return
 	}
 
 	payload, err := json.Marshal(base)
@@ -649,14 +678,17 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, updated.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues
-	got := flattenLibraryOptions(ctx, updated.GetLibraryOptions().RawJSON, &resp.Diagnostics)
-	checkSimilarItemSettingsKept(ctx, data.LibraryOptions, got, &resp.Diagnostics)
-	data.LibraryOptions = keepPlannedNulls(ctx, data.LibraryOptions, got)
+	resp.Diagnostics.Append(b.FlattenAfterApply(ctx, updated.GetLibraryOptions().RawJSON, &data)...)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *LibraryResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	b := wireBinding(&resp.Diagnostics, libraryOptionsWire)
+	if b == nil {
+		return
+	}
+
 	var data LibraryResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
@@ -679,12 +711,17 @@ func (r *LibraryResource) Read(ctx context.Context, req resource.ReadRequest, re
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, folder.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues
-	data.LibraryOptions = flattenLibraryOptions(ctx, folder.GetLibraryOptions().RawJSON, &resp.Diagnostics)
+	resp.Diagnostics.Append(b.FlattenInto(ctx, folder.GetLibraryOptions().RawJSON, &data)...)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	b := wireBinding(&resp.Diagnostics, libraryOptionsWire)
+	if b == nil {
+		return
+	}
+
 	var data LibraryResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
@@ -725,11 +762,9 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	if data.LibraryOptions != nil {
-		if d := overlayLibraryOptions(ctx, base, data.LibraryOptions); d.HasError() {
-			resp.Diagnostics.Append(d...)
-			return
-		}
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
+		resp.Diagnostics.Append(d...)
+		return
 	}
 
 	payload, err := json.Marshal(base)
@@ -755,9 +790,7 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, updated.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues
-	got := flattenLibraryOptions(ctx, updated.GetLibraryOptions().RawJSON, &resp.Diagnostics)
-	checkSimilarItemSettingsKept(ctx, data.LibraryOptions, got, &resp.Diagnostics)
-	data.LibraryOptions = keepPlannedNulls(ctx, data.LibraryOptions, got)
+	resp.Diagnostics.Append(b.FlattenAfterApply(ctx, updated.GetLibraryOptions().RawJSON, &data)...)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -826,7 +859,15 @@ func (r *LibraryResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	if req.Plan.Raw.IsNull() {
 		return
 	}
-	resp.Diagnostics.Append(r.checkServerVersion(ctx, req.Config)...)
+	b := wireBinding(&resp.Diagnostics, libraryWire)
+	if b == nil {
+		return
+	}
+	// The version check runs at plan time because a server that lacks an
+	// option drops it only after the library is created, so the failure would
+	// taint the new library and every later apply would replace it before
+	// failing again.
+	resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
 	if resp.Diagnostics.HasError() || req.State.Raw.IsNull() {
 		return
 	}
@@ -851,77 +892,6 @@ func (r *LibraryResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, typeOptionsPath, planned)...)
 }
 
-// checkServerVersion runs at plan time because a server that lacks an option
-// drops it only after the library is created, so the failure would taint the
-// new library and every later apply would replace it before failing again.
-func (r *LibraryResource) checkServerVersion(ctx context.Context, config tfsdk.Config) diag.Diagnostics {
-	var diags diag.Diagnostics
-	similarItems, networkPaths := configuredVersionedAttributes(ctx, config)
-	if r.client == nil || (len(similarItems) == 0 && len(networkPaths) == 0) {
-		return diags
-	}
-	info, err := r.client.GetPublicSystemInfo(ctx)
-	if err != nil {
-		diags.AddError("Failed to read the Jellyfin version", err.Error())
-		return diags
-	}
-	return versionedAttributeErrors(info.Version, similarItems, networkPaths)
-}
-
-// configuredVersionedAttributes leaves out values unknown at plan time, which
-// may still turn out null. Terraform plans again during apply, once they are
-// known, so they are checked before the library is written.
-func configuredVersionedAttributes(ctx context.Context, config tfsdk.Config) (similarItems, networkPaths []path.Path) {
-	optionsPath := path.Root("library_options")
-	isSet := func(v attr.Value) bool { return !v.IsNull() && !v.IsUnknown() }
-
-	var typeOptions []TypeOptionsModel
-	var list types.List
-	if !config.GetAttribute(ctx, optionsPath.AtName("type_options"), &list).HasError() && isSet(list) &&
-		!list.ElementsAs(ctx, &typeOptions, false).HasError() {
-		for i, e := range typeOptions {
-			entry := optionsPath.AtName("type_options").AtListIndex(i)
-			if isSet(e.SimilarItemProviders) {
-				similarItems = append(similarItems, entry.AtName("similar_item_providers"))
-			}
-			if isSet(e.SimilarItemProviderOrder) {
-				similarItems = append(similarItems, entry.AtName("similar_item_provider_order"))
-			}
-		}
-	}
-
-	var pathInfos []PathInfoModel
-	if !config.GetAttribute(ctx, optionsPath.AtName("path_infos"), &list).HasError() && isSet(list) &&
-		!list.ElementsAs(ctx, &pathInfos, false).HasError() {
-		for i, e := range pathInfos {
-			if isSet(e.NetworkPath) {
-				networkPaths = append(networkPaths, optionsPath.AtName("path_infos").AtListIndex(i).AtName("network_path"))
-			}
-		}
-	}
-	return similarItems, networkPaths
-}
-
-func versionedAttributeErrors(version string, similarItems, networkPaths []path.Path) diag.Diagnostics {
-	var diags diag.Diagnostics
-	if !hasLeadingDigit(version) {
-		return diags
-	}
-	if compareDottedVersions(version, "12") < 0 {
-		for _, p := range similarItems {
-			diags.AddAttributeError(p, "Similar item settings not supported",
-				fmt.Sprintf("The server runs Jellyfin %s, and similar item providers need Jellyfin 12 or later. Remove %s for this server.", version, p))
-		}
-	}
-	if compareDottedVersions(version, "10.10") >= 0 {
-		for _, p := range networkPaths {
-			diags.AddAttributeError(p, "Network paths not supported",
-				fmt.Sprintf("The server runs Jellyfin %s, and Jellyfin 10.10 removed network paths, so the server would drop the value. Remove %s from the configuration.", version, p))
-		}
-	}
-	return diags
-}
-
 func planTypeOptionsByType(ctx context.Context, config, plan, state types.List) (types.List, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	var c, p, s []TypeOptionsModel
@@ -943,7 +913,7 @@ func planTypeOptionsByType(ctx context.Context, config, plan, state types.List) 
 		p[i].SimilarItemProviderOrder = unsetFromPrior(c[i].SimilarItemProviderOrder, p[i].SimilarItemProviderOrder, prior.SimilarItemProviderOrder, found, unknownList)
 
 		if c[i].ImageOptions.IsNull() {
-			p[i].ImageOptions = unsetFromPrior(c[i].ImageOptions, p[i].ImageOptions, prior.ImageOptions, found, types.ListUnknown(imageOptionsObjectType()))
+			p[i].ImageOptions = unsetFromPrior(c[i].ImageOptions, p[i].ImageOptions, prior.ImageOptions, found, types.ListUnknown(p[i].ImageOptions.ElementType(ctx)))
 			continue
 		}
 		imageOptions, d := planImageOptionsByType(ctx, c[i].ImageOptions, p[i].ImageOptions, prior.ImageOptions)
@@ -954,7 +924,7 @@ func planTypeOptionsByType(ctx context.Context, config, plan, state types.List) 
 		p[i].ImageOptions = imageOptions
 	}
 
-	out, d := types.ListValueFrom(ctx, typeOptionsObjectType(), p)
+	out, d := types.ListValueFrom(ctx, plan.ElementType(ctx), p)
 	diags.Append(d...)
 	return out, diags
 }
@@ -978,7 +948,7 @@ func planImageOptionsByType(ctx context.Context, config, plan, state types.List)
 		p[i].MinWidth = unsetFromPrior(c[i].MinWidth, p[i].MinWidth, prior.MinWidth, found, types.Int64Unknown())
 	}
 
-	out, d := types.ListValueFrom(ctx, imageOptionsObjectType(), p)
+	out, d := types.ListValueFrom(ctx, plan.ElementType(ctx), p)
 	diags.Append(d...)
 	return out, diags
 }
@@ -1009,410 +979,4 @@ func unsetFromPrior[T attr.Value](configured, planned, prior T, found bool, unkn
 	default:
 		return unknown
 	}
-}
-
-func overlayLibraryOptions(ctx context.Context, m map[string]json.RawMessage, opts *LibraryOptionsModel) diag.Diagnostics {
-	var diags diag.Diagnostics
-	if opts == nil {
-		return diags
-	}
-
-	putJSONBool(m, "EnablePhotos", opts.EnablePhotos)
-	putJSONBool(m, "EnableRealtimeMonitor", opts.EnableRealtimeMonitor)
-	putJSONBool(m, "ExtractChapterImagesDuringLibraryScan", opts.ExtractChaptersDuringLibraryScan)
-	putJSONBool(m, "EnableChapterImageExtraction", opts.EnableChapterImageExtraction)
-	if d := overlayPathInfos(ctx, m, opts.PathInfos); d.HasError() {
-		diags.Append(d...)
-		return diags
-	}
-	putJSONString(m, "PreferredMetadataLanguage", opts.PreferredMetadataLanguage)
-	putJSONString(m, "MetadataCountryCode", opts.MetadataCountryCode)
-	if d := putJSONStringList(ctx, m, "LocalMetadataReaderOrder", opts.LocalMetadataReaderOrder); d.HasError() {
-		diags.Append(d...)
-		return diags
-	}
-	if d := putJSONStringList(ctx, m, "DisabledSubtitleFetchers", opts.DisabledSubtitleFetchers); d.HasError() {
-		diags.Append(d...)
-		return diags
-	}
-	if d := putJSONStringList(ctx, m, "SubtitleFetcherOrder", opts.SubtitleFetcherOrder); d.HasError() {
-		diags.Append(d...)
-		return diags
-	}
-	putJSONBool(m, "SaveLocalMetadata", opts.SaveLocalMetadata)
-	putJSONBool(m, "EnableAutomaticSeriesGrouping", opts.EnableAutomaticSeriesGrouping)
-	putJSONString(m, "SeasonZeroDisplayName", opts.SeasonZeroDisplayName)
-	if !opts.Disabled.IsNull() && !opts.Disabled.IsUnknown() {
-		putJSONBool(m, "Enabled", types.BoolValue(!opts.Disabled.ValueBool()))
-	}
-	if d := overlayTypeOptions(ctx, m, opts.TypeOptions); d.HasError() {
-		diags.Append(d...)
-		return diags
-	}
-
-	return diags
-}
-
-func overlayPathInfos(ctx context.Context, m map[string]json.RawMessage, v types.List) diag.Diagnostics {
-	var diags diag.Diagnostics
-	if v.IsNull() || v.IsUnknown() {
-		return diags
-	}
-	var entries []PathInfoModel
-	if d := v.ElementsAs(ctx, &entries, false); d.HasError() {
-		diags.Append(d...)
-		return diags
-	}
-	rawEntries := make([]map[string]json.RawMessage, len(entries))
-	for i, e := range entries {
-		entry := map[string]json.RawMessage{}
-		putJSONString(entry, "Path", e.Path)
-		putJSONString(entry, "NetworkPath", e.NetworkPath)
-		rawEntries[i] = entry
-	}
-	b, err := json.Marshal(rawEntries)
-	if err != nil {
-		return append(diags, diag.NewErrorDiagnostic("Failed to marshal path infos", err.Error()))
-	}
-	m["PathInfos"] = b
-	return diags
-}
-
-func overlayTypeOptions(ctx context.Context, m map[string]json.RawMessage, v types.List) diag.Diagnostics {
-	var diags diag.Diagnostics
-	if v.IsNull() || v.IsUnknown() {
-		return diags
-	}
-	var entries []TypeOptionsModel
-	if d := v.ElementsAs(ctx, &entries, false); d.HasError() {
-		diags.Append(d...)
-		return diags
-	}
-	existing, err := parseJSONObjectList(m["TypeOptions"])
-	if err != nil {
-		return append(diags, diag.NewErrorDiagnostic("Failed to parse type options", err.Error()))
-	}
-	rawEntries := make([]map[string]json.RawMessage, len(entries))
-	for i, e := range entries {
-		entry := jsonEntryWithType(existing, e.Type)
-		putJSONString(entry, "Type", e.Type)
-		for key, list := range map[string]types.List{
-			"MetadataFetchers":         e.MetadataFetchers,
-			"MetadataFetcherOrder":     e.MetadataFetcherOrder,
-			"ImageFetchers":            e.ImageFetchers,
-			"ImageFetcherOrder":        e.ImageFetcherOrder,
-			"SimilarItemProviders":     e.SimilarItemProviders,
-			"SimilarItemProviderOrder": e.SimilarItemProviderOrder,
-		} {
-			if d := putJSONStringList(ctx, entry, key, list); d.HasError() {
-				diags.Append(d...)
-				return diags
-			}
-		}
-		if d := overlayImageOptions(ctx, entry, e.ImageOptions); d.HasError() {
-			diags.Append(d...)
-			return diags
-		}
-		rawEntries[i] = entry
-	}
-	b, err := json.Marshal(rawEntries)
-	if err != nil {
-		return append(diags, diag.NewErrorDiagnostic("Failed to marshal type options", err.Error()))
-	}
-	m["TypeOptions"] = b
-	return diags
-}
-
-func overlayImageOptions(ctx context.Context, m map[string]json.RawMessage, v types.List) diag.Diagnostics {
-	var diags diag.Diagnostics
-	if v.IsNull() || v.IsUnknown() {
-		return diags
-	}
-	var entries []ImageOptionsModel
-	if d := v.ElementsAs(ctx, &entries, false); d.HasError() {
-		diags.Append(d...)
-		return diags
-	}
-	existing, err := parseJSONObjectList(m["ImageOptions"])
-	if err != nil {
-		return append(diags, diag.NewErrorDiagnostic("Failed to parse image options", err.Error()))
-	}
-	rawEntries := make([]map[string]json.RawMessage, len(entries))
-	for i, e := range entries {
-		entry := jsonEntryWithType(existing, e.Type)
-		putJSONString(entry, "Type", e.Type)
-		putJSONInt64(entry, "Limit", e.Limit)
-		putJSONInt64(entry, "MinWidth", e.MinWidth)
-		rawEntries[i] = entry
-	}
-	b, err := json.Marshal(rawEntries)
-	if err != nil {
-		return append(diags, diag.NewErrorDiagnostic("Failed to marshal image options", err.Error()))
-	}
-	m["ImageOptions"] = b
-	return diags
-}
-
-func parseJSONObjectList(raw json.RawMessage) ([]map[string]json.RawMessage, error) {
-	if len(raw) == 0 || isJSONNull(raw) {
-		return nil, nil
-	}
-	var entries []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		return nil, err
-	}
-	return entries, nil
-}
-
-func jsonEntryWithType(entries []map[string]json.RawMessage, typ types.String) map[string]json.RawMessage {
-	entry := map[string]json.RawMessage{}
-	if e, ok := entryWithType(entries, typ, func(e map[string]json.RawMessage) types.String { return getJSONString(e, "Type") }); ok {
-		maps.Copy(entry, e)
-	}
-	return entry
-}
-
-func flattenLibraryOptions(ctx context.Context, raw string, diags *diag.Diagnostics) *LibraryOptionsModel {
-	m, err := parseJSONObject(raw)
-	if err != nil {
-		diags.AddError("Failed to parse library options", err.Error())
-		return nil
-	}
-
-	// The attributes with no Jellyfin library option behind them stay null.
-	opts := &LibraryOptionsModel{
-		DisabledMetadataSavers:   types.ListNull(types.StringType),
-		DisabledMetadataFetchers: types.ListNull(types.StringType),
-		MetadataFetcherOrder:     types.ListNull(types.StringType),
-		DisabledImageFetchers:    types.ListNull(types.StringType),
-		ImageFetcherOrder:        types.ListNull(types.StringType),
-	}
-	opts.EnablePhotos = getJSONBool(m, "EnablePhotos")
-	opts.EnableRealtimeMonitor = getJSONBool(m, "EnableRealtimeMonitor")
-	opts.ExtractChaptersDuringLibraryScan = getJSONBool(m, "ExtractChapterImagesDuringLibraryScan")
-	opts.EnableChapterImageExtraction = getJSONBool(m, "EnableChapterImageExtraction")
-	opts.PathInfos = flattenPathInfos(ctx, m, diags)
-	opts.PreferredMetadataLanguage = getJSONString(m, "PreferredMetadataLanguage")
-	opts.MetadataCountryCode = getJSONString(m, "MetadataCountryCode")
-	opts.LocalMetadataReaderOrder, _ = getJSONStringList(ctx, m, "LocalMetadataReaderOrder")
-	opts.DisabledSubtitleFetchers, _ = getJSONStringList(ctx, m, "DisabledSubtitleFetchers")
-	opts.SubtitleFetcherOrder, _ = getJSONStringList(ctx, m, "SubtitleFetcherOrder")
-	opts.SaveLocalMetadata = getJSONBool(m, "SaveLocalMetadata")
-	opts.EnableAutomaticSeriesGrouping = getJSONBool(m, "EnableAutomaticSeriesGrouping")
-	opts.SeasonZeroDisplayName = getJSONString(m, "SeasonZeroDisplayName")
-	if enabled := getJSONBool(m, "Enabled"); !enabled.IsNull() {
-		opts.Disabled = types.BoolValue(!enabled.ValueBool())
-	}
-	opts.TypeOptions = flattenTypeOptions(ctx, m, diags)
-	return opts
-}
-
-func flattenPathInfos(_ context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
-	raw, ok := m["PathInfos"]
-	if !ok || isJSONNull(raw) {
-		return types.ListNull(pathInfoObjectType())
-	}
-	var entries []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		diags.AddError("Failed to parse path infos", err.Error())
-		return types.ListNull(pathInfoObjectType())
-	}
-	objType := pathInfoObjectType()
-	objects := make([]attr.Value, len(entries))
-	for i, e := range entries {
-		attrs := map[string]attr.Value{
-			"path":         getJSONString(e, "Path"),
-			"network_path": getJSONString(e, "NetworkPath"),
-			"username":     types.StringNull(),
-			"password":     types.StringNull(),
-		}
-		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
-		if d.HasError() {
-			diags.Append(d...)
-			return types.ListNull(objType)
-		}
-		objects[i] = obj
-	}
-	list, d := types.ListValue(objType, objects)
-	if d.HasError() {
-		diags.Append(d...)
-		return types.ListNull(objType)
-	}
-	return list
-}
-
-func flattenTypeOptions(ctx context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
-	raw, ok := m["TypeOptions"]
-	if !ok || isJSONNull(raw) {
-		return types.ListNull(typeOptionsObjectType())
-	}
-	var entries []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		diags.AddError("Failed to parse type options", err.Error())
-		return types.ListNull(typeOptionsObjectType())
-	}
-	objType := typeOptionsObjectType()
-	objects := make([]attr.Value, len(entries))
-	for i, e := range entries {
-		attrs := map[string]attr.Value{
-			"type":          getJSONString(e, "Type"),
-			"image_options": flattenImageOptions(ctx, e, diags),
-		}
-		for name, key := range map[string]string{
-			"metadata_fetchers":           "MetadataFetchers",
-			"metadata_fetcher_order":      "MetadataFetcherOrder",
-			"image_fetchers":              "ImageFetchers",
-			"image_fetcher_order":         "ImageFetcherOrder",
-			"similar_item_providers":      "SimilarItemProviders",
-			"similar_item_provider_order": "SimilarItemProviderOrder",
-		} {
-			attrs[name] = types.ListNull(types.StringType)
-			if v, d := getJSONStringList(ctx, e, key); !d.HasError() {
-				attrs[name] = v
-			}
-		}
-		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
-		if d.HasError() {
-			diags.Append(d...)
-			return types.ListNull(objType)
-		}
-		objects[i] = obj
-	}
-	list, d := types.ListValue(objType, objects)
-	if d.HasError() {
-		diags.Append(d...)
-		return types.ListNull(objType)
-	}
-	return list
-}
-
-func flattenImageOptions(_ context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
-	raw, ok := m["ImageOptions"]
-	if !ok || isJSONNull(raw) {
-		return types.ListNull(imageOptionsObjectType())
-	}
-	var entries []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		diags.AddError("Failed to parse image options", err.Error())
-		return types.ListNull(imageOptionsObjectType())
-	}
-	objType := imageOptionsObjectType()
-	objects := make([]attr.Value, len(entries))
-	for i, e := range entries {
-		attrs := map[string]attr.Value{
-			"type":      getJSONString(e, "Type"),
-			"limit":     getJSONInt64(e, "Limit"),
-			"min_width": getJSONInt64(e, "MinWidth"),
-		}
-		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
-		if d.HasError() {
-			diags.Append(d...)
-			return types.ListNull(objType)
-		}
-		objects[i] = obj
-	}
-	list, d := types.ListValue(objType, objects)
-	if d.HasError() {
-		diags.Append(d...)
-		return types.ListNull(objType)
-	}
-	return list
-}
-
-// keepPlannedNulls returns got with, inside type_options and path_infos
-// elements, the attributes the plan left null set back to null where the
-// server returned an empty list or an empty string. Attributes left unset
-// inside list elements are planned from the prior state, where null is a
-// known value, so the value after apply has to match the plan exactly.
-func keepPlannedNulls(ctx context.Context, planned, got *LibraryOptionsModel) *LibraryOptionsModel {
-	if planned == nil || got == nil {
-		return got
-	}
-	got.TypeOptions = reconcileTypeOptions(ctx, planned.TypeOptions, got.TypeOptions)
-	got.PathInfos = reconcilePathInfos(ctx, planned.PathInfos, got.PathInfos)
-	return got
-}
-
-// checkSimilarItemSettingsKept exists because Jellyfin 10.x has no similar
-// item settings and drops them, and Terraform's own inconsistent-result error
-// cannot name the attribute: library_options holds a sensitive value.
-// ModifyPlan rejects configured values earlier, but not values planned from
-// the prior state, such as after a server downgrade.
-func checkSimilarItemSettingsKept(ctx context.Context, planned, got *LibraryOptionsModel, diags *diag.Diagnostics) {
-	if planned == nil || got == nil || planned.TypeOptions.IsNull() || planned.TypeOptions.IsUnknown() || got.TypeOptions.IsNull() || got.TypeOptions.IsUnknown() {
-		return
-	}
-	var p, g []TypeOptionsModel
-	if planned.TypeOptions.ElementsAs(ctx, &p, false).HasError() || got.TypeOptions.ElementsAs(ctx, &g, false).HasError() || len(p) != len(g) {
-		return
-	}
-	var dropped []string
-	for i := range g {
-		if !p[i].SimilarItemProviders.IsNull() && !p[i].SimilarItemProviders.IsUnknown() && g[i].SimilarItemProviders.IsNull() {
-			dropped = append(dropped, fmt.Sprintf("type_options[%d].similar_item_providers", i))
-		}
-		if !p[i].SimilarItemProviderOrder.IsNull() && !p[i].SimilarItemProviderOrder.IsUnknown() && g[i].SimilarItemProviderOrder.IsNull() {
-			dropped = append(dropped, fmt.Sprintf("type_options[%d].similar_item_provider_order", i))
-		}
-	}
-	if len(dropped) > 0 {
-		diags.AddError(
-			"Similar item settings not supported",
-			fmt.Sprintf("The Jellyfin server did not keep %s. Similar item providers need Jellyfin 12 or later; remove these attributes for older servers.", strings.Join(dropped, ", ")),
-		)
-	}
-}
-
-func nullIfPlannedNullList(planned types.List, got *types.List) {
-	if planned.IsNull() && !got.IsNull() && !got.IsUnknown() && len(got.Elements()) == 0 {
-		*got = types.ListNull(got.ElementType(context.Background()))
-	}
-}
-
-func nullIfPlannedNullString(planned types.String, got *types.String) {
-	if planned.IsNull() && !got.IsNull() && !got.IsUnknown() && got.ValueString() == "" {
-		*got = types.StringNull()
-	}
-}
-
-func reconcileTypeOptions(ctx context.Context, planned, got types.List) types.List {
-	if planned.IsNull() || planned.IsUnknown() || got.IsNull() || got.IsUnknown() {
-		return got
-	}
-	var p, g []TypeOptionsModel
-	if planned.ElementsAs(ctx, &p, false).HasError() || got.ElementsAs(ctx, &g, false).HasError() || len(p) != len(g) {
-		return got
-	}
-	for i := range g {
-		nullIfPlannedNullList(p[i].MetadataFetchers, &g[i].MetadataFetchers)
-		nullIfPlannedNullList(p[i].MetadataFetcherOrder, &g[i].MetadataFetcherOrder)
-		nullIfPlannedNullList(p[i].ImageFetchers, &g[i].ImageFetchers)
-		nullIfPlannedNullList(p[i].ImageOptions, &g[i].ImageOptions)
-		nullIfPlannedNullList(p[i].ImageFetcherOrder, &g[i].ImageFetcherOrder)
-		nullIfPlannedNullList(p[i].SimilarItemProviders, &g[i].SimilarItemProviders)
-		nullIfPlannedNullList(p[i].SimilarItemProviderOrder, &g[i].SimilarItemProviderOrder)
-	}
-	out, diags := types.ListValueFrom(ctx, typeOptionsObjectType(), g)
-	if diags.HasError() {
-		return got
-	}
-	return out
-}
-
-func reconcilePathInfos(ctx context.Context, planned, got types.List) types.List {
-	if planned.IsNull() || planned.IsUnknown() || got.IsNull() || got.IsUnknown() {
-		return got
-	}
-	var p, g []PathInfoModel
-	if planned.ElementsAs(ctx, &p, false).HasError() || got.ElementsAs(ctx, &g, false).HasError() || len(p) != len(g) {
-		return got
-	}
-	for i := range g {
-		nullIfPlannedNullString(p[i].NetworkPath, &g[i].NetworkPath)
-	}
-	out, diags := types.ListValueFrom(ctx, pathInfoObjectType(), g)
-	if diags.HasError() {
-		return got
-	}
-	return out
 }

@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -25,8 +25,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 const jellyfinSecurityPluginID = "94879a0c-da24-4eb1-aa06-f28b4b9333b1"
@@ -36,6 +38,7 @@ var isoDateTimePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2
 var (
 	_ resource.Resource                = &JellyfinSecurityPluginConfigurationResource{}
 	_ resource.ResourceWithImportState = &JellyfinSecurityPluginConfigurationResource{}
+	_ wireBound                        = &JellyfinSecurityPluginConfigurationResource{}
 )
 
 // JellyfinSecurityPluginConfigurationResource defines the resource implementation.
@@ -129,6 +132,37 @@ type JellyfinSecurityPluginConfigurationResourceModel struct {
 	OnboardingPasswordRequireLowercase types.Bool   `tfsdk:"onboarding_password_require_lowercase"`
 	OnboardingPasswordRequireDigit     types.Bool   `tfsdk:"onboarding_password_require_digit"`
 	OnboardingPasswordRequireSymbol    types.Bool   `tfsdk:"onboarding_password_require_symbol"`
+}
+
+// The plugin's golden has no older release to derive a Since from, so this
+// binding gates nothing on the plugin's version. No attribute claims the
+// plugin's RequireForAllUsers, a legacy alias it keeps for
+// EnforcementScope=All, so every write sends it back as served.
+var securityPluginWire = sync.OnceValues(func() (*wire.Binding, error) {
+	opts := []wire.Option{
+		wire.Identity("id", "plugin_id"),
+		wire.Delimited("oidc_providers.scopes", " "),
+		wire.Delimited("oidc_providers.acr_values", " "),
+		wire.Delimited("oidc_providers.allowed_groups", ","),
+		wire.Delimited("oidc_providers.admin_groups", ","),
+		wire.Delimited("oidc_providers.additional_allowed_cidrs", ","),
+		wire.Delimited("oidc_providers.role_library_mappings.library_ids", ","),
+		wire.CarryServed("oidc_providers", "CreatedAt", "id"),
+		wire.WithCodec("enrollment_deadline", sameInstantCodec{}),
+	}
+	// The plugin leaves these out when false.
+	for _, name := range []string{
+		"allow_indefinite_trust", "onboarding_password_require_uppercase",
+		"onboarding_password_require_lowercase", "onboarding_password_require_digit",
+		"onboarding_password_require_symbol",
+	} {
+		opts = append(opts, wire.ReadMissingAs(name, types.BoolValue(false)))
+	}
+	return wire.Bind(schemaOf(&JellyfinSecurityPluginConfigurationResource{}), wire.SecurityPluginRoot, opts...)
+})
+
+func (r *JellyfinSecurityPluginConfigurationResource) Wire() (*wire.Binding, error) {
+	return securityPluginWire()
 }
 
 // OidcProviderModel describes an OIDC provider configuration.
@@ -563,6 +597,11 @@ func (r *JellyfinSecurityPluginConfigurationResource) checkJellyfinSecurityVersi
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) apply(ctx context.Context, data *JellyfinSecurityPluginConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+	b := wireBinding(diags, securityPluginWire)
+	if b == nil {
+		return
+	}
+
 	current, err := r.client.GetPluginConfiguration(ctx, data.PluginID.ValueString())
 	if err != nil {
 		diags.AddError("Failed to read JellyfinSecurity plugin configuration", err.Error())
@@ -575,8 +614,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) apply(ctx context.Context,
 		return
 	}
 
-	d := overlayJellyfinSecurity(ctx, base, data)
-	if d.HasError() {
+	if d := b.OverlayModel(ctx, base, data); d.HasError() {
 		diags.Append(d...)
 		return
 	}
@@ -598,13 +636,18 @@ func (r *JellyfinSecurityPluginConfigurationResource) apply(ctx context.Context,
 		return
 	}
 
-	flattenJellyfinSecurity(ctx, updated, data, diags)
+	diags.Append(b.FlattenAfterApply(ctx, updated, data)...)
 	data.ID = data.PluginID
 
 	diags.Append(state.Set(ctx, data)...)
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) read(ctx context.Context, data *JellyfinSecurityPluginConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+	b := wireBinding(diags, securityPluginWire)
+	if b == nil {
+		return
+	}
+
 	current, err := r.client.GetPluginConfiguration(ctx, data.PluginID.ValueString())
 	if err != nil {
 		if client.IsNotFound(err) {
@@ -615,377 +658,10 @@ func (r *JellyfinSecurityPluginConfigurationResource) read(ctx context.Context, 
 		return
 	}
 
-	flattenJellyfinSecurity(ctx, current, data, diags)
+	diags.Append(b.FlattenInto(ctx, current, data)...)
 	data.ID = data.PluginID
 
 	diags.Append(state.Set(ctx, data)...)
-}
-
-// overlayJellyfinSecurity overlays the typed model onto the server config map.
-func overlayJellyfinSecurity(ctx context.Context, m map[string]json.RawMessage, data *JellyfinSecurityPluginConfigurationResourceModel) diag.Diagnostics {
-	var diags diag.Diagnostics
-
-	// Root scalar fields
-	putJSONBool(m, "Enabled", data.Enabled)
-	putJSONBool(m, "BlockEmptyPasswordLogin", data.BlockEmptyPasswordLogin)
-	putJSONBool(m, "RequireChallengeIpMatch", data.RequireChallengeIPMatch)
-	putJSONInt64(m, "RegisteredDeviceMaxAgeDays", data.RegisteredDeviceMaxAgeDays)
-	putJSONBool(m, "BareDeviceIdBypassEnabled", data.BareDeviceIDBypassEnabled)
-	putJSONBool(m, "PairDeviceOnSecondScreenApproval", data.PairDeviceOnSecondScreenApproval)
-	putJSONBool(m, "RequireTwoFactorToDisable", data.RequireTwoFactorToDisable)
-	putJSONString(m, "SelfServiceStepUpMode", data.SelfServiceStepUpMode)
-	putJSONString(m, "StepUpLevel", data.StepUpLevel)
-	putJSONInt64(m, "StepUpWindowSeconds", data.StepUpWindowSeconds)
-	putJSONBool(m, "AllowIndefiniteTrust", data.AllowIndefiniteTrust)
-	putJSONBool(m, "HideBuiltInTwoFactorButton", data.HideBuiltinTwoFactorButton)
-	putJSONBool(m, "HideBuiltInPasskeyButton", data.HideBuiltinPasskeyButton)
-	putJSONString(m, "EnforcementScope", data.EnforcementScope)
-	putJSONBool(m, "LanBypassEnabled", data.LanBypassEnabled)
-	putJSONBool(m, "TrustForwardedFor", data.TrustForwardedFor)
-	putJSONBool(m, "EmailOtpEnabled", data.EmailOtpEnabled)
-	putJSONBool(m, "HibpEnabled", data.HibpEnabled)
-	putJSONInt64(m, "EmailOtpTtlSeconds", data.EmailOTPTTLSeconds)
-	putJSONInt64(m, "ChallengeTokenTtlSeconds", data.ChallengeTokenTTLSeconds)
-	putJSONInt64(m, "PairingCodeTtlSeconds", data.PairingCodeTTLSeconds)
-	putJSONInt64(m, "MaxFailedAttempts", data.MaxFailedAttempts)
-	putJSONInt64(m, "LockoutDurationMinutes", data.LockoutDurationMinutes)
-	putJSONBool(m, "ExemptAdministratorsFromLockout", data.ExemptAdministratorsFromLockout)
-	putJSONBool(m, "DisablePasswordLogin", data.DisablePasswordLogin)
-	putJSONBool(m, "AllowAdminPasswordLogin", data.AllowAdminPasswordLogin)
-	putJSONBool(m, "AllowPasswordLoginOnLan", data.AllowPasswordLoginOnLan)
-	putJSONBool(m, "EnablePasswordRecovery", data.EnablePasswordRecovery)
-	putJSONBool(m, "HideBuiltInForgotPassword", data.HideBuiltinForgotPassword)
-	putJSONBool(m, "LoginLinksBelowQuickConnect", data.LoginLinksBelowQuickConnect)
-	putJSONInt64(m, "AuditLogMaxEntries", data.AuditLogMaxEntries)
-	putJSONString(m, "NtfyUrl", data.NtfyURL)
-	putJSONString(m, "NtfyTopic", data.NtfyTopic)
-	putJSONString(m, "NtfyToken", data.NtfyToken)
-	putJSONString(m, "NtfyUsername", data.NtfyUsername)
-	putJSONString(m, "NtfyPassword", data.NtfyPassword)
-	putJSONString(m, "GotifyUrl", data.GotifyURL)
-	putJSONString(m, "GotifyAppToken", data.GotifyAppToken)
-	putJSONBool(m, "AllowPrivateNotificationTargets", data.AllowPrivateNotificationTargets)
-	putJSONString(m, "SmtpHost", data.SMTPHost)
-	putJSONInt64(m, "SmtpPort", data.SMTPPort)
-	putJSONBool(m, "SmtpUseSsl", data.SMTPUseSsl)
-	putJSONString(m, "SmtpUsername", data.SMTPUsername)
-	putJSONString(m, "SmtpPassword", data.SMTPPassword)
-	putJSONString(m, "SmtpFromAddress", data.SMTPFromAddress)
-	putJSONString(m, "SmtpFromName", data.SMTPFromName)
-	putJSONString(m, "TotpIssuerName", data.TotpIssuerName)
-	putJSONString(m, "DefaultLanguage", data.DefaultLanguage)
-	putJSONInt64(m, "PreVerifyWindowSeconds", data.PreVerifyWindowSeconds)
-	putJSONInt64(m, "TrustCookieTtlDays", data.TrustCookieTTLDays)
-	putJSONBool(m, "NatHairpinSelfIpBypass", data.NatHairpinSelfIPBypass)
-	putJSONInt64(m, "DefaultMaxConcurrentSessions", data.DefaultMaxConcurrentSessions)
-	putJSONString(m, "EnrollmentDeadline", data.EnrollmentDeadline)
-	putJSONString(m, "WebhookUrl", data.WebhookURL)
-	putJSONString(m, "WebhookSecret", data.WebhookSecret)
-	putJSONString(m, "GeoIpAsnDbPath", data.GeoIPAsnDbPath)
-	putJSONString(m, "GeoIpCountryDbPath", data.GeoIPCountryDbPath)
-	putJSONString(m, "WebAuthnRpId", data.WebauthnRpID)
-	putJSONString(m, "PublicBaseUrl", data.PublicBaseURL)
-	putJSONBool(m, "BypassForExternalAuthProviders", data.BypassForExternalAuthProviders)
-	putJSONString(m, "GeoIpCityDbPath", data.GeoIPCityDbPath)
-	putJSONBool(m, "IpBanEnabled", data.IPBanEnabled)
-	putJSONInt64(m, "IpBanFailureThreshold", data.IPBanFailureThreshold)
-	putJSONInt64(m, "IpBanFailureWindowMinutes", data.IPBanFailureWindowMinutes)
-	putJSONInt64(m, "IpBanDurationHours", data.IPBanDurationHours)
-	putJSONBool(m, "ImpossibleTravelEnabled", data.ImpossibleTravelEnabled)
-	putJSONInt64(m, "ImpossibleTravelMaxKmh", data.ImpossibleTravelMaxKmh)
-	putJSONString(m, "WebhookEd25519PrivateKey", data.WebhookEd25519PrivateKey)
-	putJSONInt64(m, "OnboardingPasswordMinLength", data.OnboardingPasswordMinLength)
-	putJSONBool(m, "OnboardingPasswordRequireUppercase", data.OnboardingPasswordRequireUppercase)
-	putJSONBool(m, "OnboardingPasswordRequireLowercase", data.OnboardingPasswordRequireLowercase)
-	putJSONBool(m, "OnboardingPasswordRequireDigit", data.OnboardingPasswordRequireDigit)
-	putJSONBool(m, "OnboardingPasswordRequireSymbol", data.OnboardingPasswordRequireSymbol)
-
-	// Root string[] fields (JSON array wire format)
-	if d := putJSONStringList(ctx, m, "LanBypassCidrs", data.LanBypassCidrs); d.HasError() {
-		return append(diags, d...)
-	}
-	if d := putJSONStringList(ctx, m, "TrustedProxyCidrs", data.TrustedProxyCidrs); d.HasError() {
-		return append(diags, d...)
-	}
-	if d := putJSONStringList(ctx, m, "PasswordLoginExemptCidrs", data.PasswordLoginExemptCidrs); d.HasError() {
-		return append(diags, d...)
-	}
-	if d := putJSONStringList(ctx, m, "NotifyEmailAddresses", data.NotifyEmailAddresses); d.HasError() {
-		return append(diags, d...)
-	}
-	if d := putJSONStringList(ctx, m, "WebhookHeaders", data.WebhookHeaders); d.HasError() {
-		return append(diags, d...)
-	}
-	if d := putJSONStringList(ctx, m, "WebAuthnOrigins", data.WebauthnOrigins); d.HasError() {
-		return append(diags, d...)
-	}
-	if d := putJSONStringList(ctx, m, "IpBanExemptCidrs", data.IPBanExemptCidrs); d.HasError() {
-		return append(diags, d...)
-	}
-
-	// UserEmails — List<UserEmailEntry>
-	if !data.UserEmails.IsNull() && !data.UserEmails.IsUnknown() {
-		var entries []UserEmailEntryModel
-		if d := data.UserEmails.ElementsAs(ctx, &entries, false); d.HasError() {
-			return append(diags, d...)
-		}
-		objs := make([]map[string]json.RawMessage, len(entries))
-		for i, e := range entries {
-			entry := map[string]json.RawMessage{}
-			putJSONString(entry, "UserId", e.UserID)
-			putJSONString(entry, "Email", e.Email)
-			objs[i] = entry
-		}
-		b, err := json.Marshal(objs)
-		if err != nil {
-			return append(diags, diag.NewErrorDiagnostic("Failed to marshal user emails", err.Error()))
-		}
-		m["UserEmails"] = b
-	}
-
-	// OidcProviders — preserve existing CreatedAt per Id
-	if !data.OidcProviders.IsNull() && !data.OidcProviders.IsUnknown() {
-		var providers []OidcProviderModel
-		if d := data.OidcProviders.ElementsAs(ctx, &providers, false); d.HasError() {
-			return append(diags, d...)
-		}
-
-		// Build map of existing CreatedAt by Id
-		existingCreatedAt := map[string]string{}
-		if raw, ok := m["OidcProviders"]; ok && !isJSONNull(raw) {
-			var existing []map[string]json.RawMessage
-			if err := json.Unmarshal(raw, &existing); err == nil {
-				for _, e := range existing {
-					id := getJSONString(e, "Id")
-					createdAt := getJSONString(e, "CreatedAt")
-					if !id.IsNull() && !createdAt.IsNull() {
-						existingCreatedAt[id.ValueString()] = createdAt.ValueString()
-					}
-				}
-			}
-		}
-
-		objs := make([]map[string]json.RawMessage, len(providers))
-		for i, p := range providers {
-			entry := map[string]json.RawMessage{}
-			overlayOidcProvider(ctx, entry, &p)
-			// Preserve CreatedAt from existing entry if present
-			if id := p.ID; !id.IsNull() {
-				if ca, ok := existingCreatedAt[id.ValueString()]; ok {
-					b, _ := json.Marshal(ca)
-					entry["CreatedAt"] = b
-				}
-			}
-			objs[i] = entry
-		}
-		b, err := json.Marshal(objs)
-		if err != nil {
-			return append(diags, diag.NewErrorDiagnostic("Failed to marshal OIDC providers", err.Error()))
-		}
-		m["OidcProviders"] = b
-	}
-
-	return diags
-}
-
-// overlayOidcProvider overlays a single OIDC provider onto the entry map.
-func overlayOidcProvider(ctx context.Context, m map[string]json.RawMessage, p *OidcProviderModel) {
-	putJSONString(m, "Id", p.ID)
-	putJSONString(m, "DisplayName", p.DisplayName)
-	putJSONString(m, "Preset", p.Preset)
-	putJSONString(m, "DiscoveryUrl", p.DiscoveryURL)
-	putJSONString(m, "ClientId", p.ClientID)
-	putJSONString(m, "ClientSecret", p.ClientSecret)
-	putDelimitedString(ctx, m, "Scopes", p.Scopes, " ")
-	putDelimitedString(ctx, m, "AcrValues", p.AcrValues, " ")
-	putJSONString(m, "UsernameClaim", p.UsernameClaim)
-	putDelimitedString(ctx, m, "AllowedGroups", p.AllowedGroups, ",")
-	putDelimitedString(ctx, m, "AdminGroups", p.AdminGroups, ",")
-	putJSONBool(m, "AllowAdminGroupElevation", p.AllowAdminGroupElevation)
-	putJSONString(m, "TemplateUserId", p.TemplateUserID)
-	putJSONBool(m, "AutoCreateUsers", p.AutoCreateUsers)
-	putJSONBool(m, "LinkExistingUsersByUsername", p.LinkExistingUsersByUsername)
-	putJSONBool(m, "RequireIdpMfa", p.RequireIdpMfa)
-	putJSONBool(m, "BypassPluginTwoFa", p.BypassPluginTwoFa)
-	putJSONBool(m, "Enabled", p.Enabled)
-	putJSONBool(m, "ShowLoginButton", p.ShowLoginButton)
-	putJSONBool(m, "ForceHttps", p.ForceHTTPS)
-	putJSONBool(m, "AllowPrivateNetworks", p.AllowPrivateNetworks)
-	putDelimitedString(ctx, m, "AdditionalAllowedCidrs", p.AdditionalAllowedCidrs, ",")
-	putJSONBool(m, "SyncProfilePicture", p.SyncProfilePicture)
-	putJSONString(m, "PictureClaim", p.PictureClaim)
-	putJSONBool(m, "PromptSelectAccount", p.PromptSelectAccount)
-	putJSONBool(m, "OmitPromptLogin", p.OmitPromptLogin)
-	putJSONBool(m, "ApplyRoleLibraryAccess", p.ApplyRoleLibraryAccess)
-	putJSONString(m, "EmailClaim", p.EmailClaim)
-	putJSONBool(m, "SyncEmailFromClaim", p.SyncEmailFromClaim)
-	putJSONString(m, "ButtonText", p.ButtonText)
-	putJSONString(m, "ButtonIconUrl", p.ButtonIconURL)
-	putJSONBool(m, "ForcePasswordSetup", p.ForcePasswordSetup)
-	putJSONBool(m, "RpInitiatedLogoutEnabled", p.RpInitiatedLogoutEnabled)
-	putJSONString(m, "RpInitiatedLogoutRedirectUri", p.RpInitiatedLogoutRedirectURI)
-
-	// RoleLibraryMappings — nested list
-	if !p.RoleLibraryMappings.IsNull() && !p.RoleLibraryMappings.IsUnknown() {
-		var mappings []RoleLibraryMappingModel
-		if d := p.RoleLibraryMappings.ElementsAs(ctx, &mappings, false); d.HasError() {
-			return
-		}
-		objs := make([]map[string]json.RawMessage, len(mappings))
-		for i, rlm := range mappings {
-			entry := map[string]json.RawMessage{}
-			putJSONString(entry, "Role", rlm.Role)
-			putDelimitedString(ctx, entry, "LibraryIds", rlm.LibraryIDs, ",")
-			objs[i] = entry
-		}
-		b, _ := json.Marshal(objs)
-		m["RoleLibraryMappings"] = b
-	}
-}
-
-// putDelimitedString joins a types.List of strings with the given delimiter and writes it as a JSON string.
-func putDelimitedString(ctx context.Context, m map[string]json.RawMessage, key string, v types.List, delim string) {
-	if v.IsNull() || v.IsUnknown() {
-		return
-	}
-	var elements []types.String
-	if d := v.ElementsAs(ctx, &elements, false); d.HasError() {
-		return
-	}
-	values := make([]string, len(elements))
-	for i, elem := range elements {
-		values[i] = elem.ValueString()
-	}
-	joined := strings.Join(values, delim)
-	b, _ := json.Marshal(joined)
-	m[key] = b
-}
-
-// getDelimitedStringList reads a delimited string from the JSON map and splits it into a types.List.
-func getDelimitedStringList(ctx context.Context, m map[string]json.RawMessage, key, delim string) (types.List, diag.Diagnostics) {
-	var diags diag.Diagnostics
-	s := getJSONString(m, key)
-	if s.IsNull() {
-		return types.ListNull(types.StringType), diags
-	}
-	parts := strings.Split(s.ValueString(), delim)
-	elements := make([]types.String, 0, len(parts))
-	for _, p := range parts {
-		// Trim empty strings from split when the source was empty
-		if p == "" && len(parts) == 1 {
-			break
-		}
-		elements = append(elements, types.StringValue(p))
-	}
-	list, d := types.ListValueFrom(ctx, types.StringType, elements)
-	return list, append(diags, d...)
-}
-
-// flattenJellyfinSecurity reads the server response into the typed model.
-func flattenJellyfinSecurity(ctx context.Context, raw string, data *JellyfinSecurityPluginConfigurationResourceModel, diags *diag.Diagnostics) {
-	m, err := parseJSONObject(raw)
-	if err != nil {
-		diags.AddError("Failed to parse JellyfinSecurity plugin configuration", err.Error())
-		return
-	}
-
-	// Root scalar fields
-	data.Enabled = getJSONBool(m, "Enabled")
-	data.BlockEmptyPasswordLogin = getJSONBool(m, "BlockEmptyPasswordLogin")
-	data.RequireChallengeIPMatch = getJSONBool(m, "RequireChallengeIpMatch")
-	data.RegisteredDeviceMaxAgeDays = getJSONInt64(m, "RegisteredDeviceMaxAgeDays")
-	data.BareDeviceIDBypassEnabled = getJSONBool(m, "BareDeviceIdBypassEnabled")
-	data.PairDeviceOnSecondScreenApproval = getJSONBool(m, "PairDeviceOnSecondScreenApproval")
-	data.RequireTwoFactorToDisable = getJSONBool(m, "RequireTwoFactorToDisable")
-	data.SelfServiceStepUpMode = getJSONString(m, "SelfServiceStepUpMode")
-	data.StepUpLevel = getJSONString(m, "StepUpLevel")
-	data.StepUpWindowSeconds = getJSONInt64(m, "StepUpWindowSeconds")
-	data.AllowIndefiniteTrust = getJSONBoolDefaultFalse(m, "AllowIndefiniteTrust")
-	data.HideBuiltinTwoFactorButton = getJSONBool(m, "HideBuiltInTwoFactorButton")
-	data.HideBuiltinPasskeyButton = getJSONBool(m, "HideBuiltInPasskeyButton")
-	data.EnforcementScope = getJSONString(m, "EnforcementScope")
-	data.LanBypassEnabled = getJSONBool(m, "LanBypassEnabled")
-	data.TrustForwardedFor = getJSONBool(m, "TrustForwardedFor")
-	data.EmailOtpEnabled = getJSONBool(m, "EmailOtpEnabled")
-	data.HibpEnabled = getJSONBool(m, "HibpEnabled")
-	data.EmailOTPTTLSeconds = getJSONInt64(m, "EmailOtpTtlSeconds")
-	data.ChallengeTokenTTLSeconds = getJSONInt64(m, "ChallengeTokenTtlSeconds")
-	data.PairingCodeTTLSeconds = getJSONInt64(m, "PairingCodeTtlSeconds")
-	data.MaxFailedAttempts = getJSONInt64(m, "MaxFailedAttempts")
-	data.LockoutDurationMinutes = getJSONInt64(m, "LockoutDurationMinutes")
-	data.ExemptAdministratorsFromLockout = getJSONBool(m, "ExemptAdministratorsFromLockout")
-	data.DisablePasswordLogin = getJSONBool(m, "DisablePasswordLogin")
-	data.AllowAdminPasswordLogin = getJSONBool(m, "AllowAdminPasswordLogin")
-	data.AllowPasswordLoginOnLan = getJSONBool(m, "AllowPasswordLoginOnLan")
-	data.EnablePasswordRecovery = getJSONBool(m, "EnablePasswordRecovery")
-	data.HideBuiltinForgotPassword = getJSONBool(m, "HideBuiltInForgotPassword")
-	data.LoginLinksBelowQuickConnect = getJSONBool(m, "LoginLinksBelowQuickConnect")
-	data.AuditLogMaxEntries = getJSONInt64(m, "AuditLogMaxEntries")
-	data.NtfyURL = getJSONString(m, "NtfyUrl")
-	data.NtfyTopic = getJSONString(m, "NtfyTopic")
-	data.NtfyToken = getJSONString(m, "NtfyToken")
-	data.NtfyUsername = getJSONString(m, "NtfyUsername")
-	data.NtfyPassword = getJSONString(m, "NtfyPassword")
-	data.GotifyURL = getJSONString(m, "GotifyUrl")
-	data.GotifyAppToken = getJSONString(m, "GotifyAppToken")
-	data.AllowPrivateNotificationTargets = getJSONBool(m, "AllowPrivateNotificationTargets")
-	data.SMTPHost = getJSONString(m, "SmtpHost")
-	data.SMTPPort = getJSONInt64(m, "SmtpPort")
-	data.SMTPUseSsl = getJSONBool(m, "SmtpUseSsl")
-	data.SMTPUsername = getJSONString(m, "SmtpUsername")
-	data.SMTPPassword = getJSONString(m, "SmtpPassword")
-	data.SMTPFromAddress = getJSONString(m, "SmtpFromAddress")
-	data.SMTPFromName = getJSONString(m, "SmtpFromName")
-	data.TotpIssuerName = getJSONString(m, "TotpIssuerName")
-	data.DefaultLanguage = getJSONString(m, "DefaultLanguage")
-	data.PreVerifyWindowSeconds = getJSONInt64(m, "PreVerifyWindowSeconds")
-	data.TrustCookieTTLDays = getJSONInt64(m, "TrustCookieTtlDays")
-	data.NatHairpinSelfIPBypass = getJSONBool(m, "NatHairpinSelfIpBypass")
-	data.DefaultMaxConcurrentSessions = getJSONInt64(m, "DefaultMaxConcurrentSessions")
-	data.EnrollmentDeadline = keepSameInstant(data.EnrollmentDeadline, getJSONString(m, "EnrollmentDeadline"))
-	data.WebhookURL = getJSONString(m, "WebhookUrl")
-	data.WebhookSecret = getJSONString(m, "WebhookSecret")
-	data.GeoIPAsnDbPath = getJSONString(m, "GeoIpAsnDbPath")
-	data.GeoIPCountryDbPath = getJSONString(m, "GeoIpCountryDbPath")
-	data.WebauthnRpID = getJSONString(m, "WebAuthnRpId")
-	data.PublicBaseURL = getJSONString(m, "PublicBaseUrl")
-	data.BypassForExternalAuthProviders = getJSONBool(m, "BypassForExternalAuthProviders")
-	data.GeoIPCityDbPath = getJSONString(m, "GeoIpCityDbPath")
-	data.IPBanEnabled = getJSONBool(m, "IpBanEnabled")
-	data.IPBanFailureThreshold = getJSONInt64(m, "IpBanFailureThreshold")
-	data.IPBanFailureWindowMinutes = getJSONInt64(m, "IpBanFailureWindowMinutes")
-	data.IPBanDurationHours = getJSONInt64(m, "IpBanDurationHours")
-	data.ImpossibleTravelEnabled = getJSONBool(m, "ImpossibleTravelEnabled")
-	data.ImpossibleTravelMaxKmh = getJSONInt64(m, "ImpossibleTravelMaxKmh")
-	data.WebhookEd25519PrivateKey = getJSONString(m, "WebhookEd25519PrivateKey")
-	data.OnboardingPasswordMinLength = getJSONInt64(m, "OnboardingPasswordMinLength")
-	data.OnboardingPasswordRequireUppercase = getJSONBoolDefaultFalse(m, "OnboardingPasswordRequireUppercase")
-	data.OnboardingPasswordRequireLowercase = getJSONBoolDefaultFalse(m, "OnboardingPasswordRequireLowercase")
-	data.OnboardingPasswordRequireDigit = getJSONBoolDefaultFalse(m, "OnboardingPasswordRequireDigit")
-	data.OnboardingPasswordRequireSymbol = getJSONBoolDefaultFalse(m, "OnboardingPasswordRequireSymbol")
-
-	// Root string[] fields (JSON array wire format)
-	var d diag.Diagnostics
-	data.LanBypassCidrs, d = getJSONStringList(ctx, m, "LanBypassCidrs")
-	diags.Append(d...)
-	data.TrustedProxyCidrs, d = getJSONStringList(ctx, m, "TrustedProxyCidrs")
-	diags.Append(d...)
-	data.PasswordLoginExemptCidrs, d = getJSONStringList(ctx, m, "PasswordLoginExemptCidrs")
-	diags.Append(d...)
-	data.NotifyEmailAddresses, d = getJSONStringList(ctx, m, "NotifyEmailAddresses")
-	diags.Append(d...)
-	data.WebhookHeaders, d = getJSONStringList(ctx, m, "WebhookHeaders")
-	diags.Append(d...)
-	data.WebauthnOrigins, d = getJSONStringList(ctx, m, "WebAuthnOrigins")
-	diags.Append(d...)
-	data.IPBanExemptCidrs, d = getJSONStringList(ctx, m, "IpBanExemptCidrs")
-	diags.Append(d...)
-
-	// UserEmails
-	data.UserEmails = flattenUserEmails(ctx, m, diags)
-
-	// OidcProviders
-	data.OidcProviders = flattenOidcProviders(ctx, m, diags)
 }
 
 // keepSameInstant returns prior when served names the same instant, so a
@@ -1008,6 +684,30 @@ func sameInstant(a, b types.String) bool {
 	}
 	bt, ok := parseISODateTime(b.ValueString())
 	return ok && at.Equal(bt)
+}
+
+// sameInstantCodec reads a date-time back as its prior value when both name
+// the same instant; see keepSameInstant.
+type sameInstantCodec struct{}
+
+func (sameInstantCodec) String() string { return "same-instant" }
+
+func (sameInstantCodec) Encode(_ context.Context, v attr.Value) (json.RawMessage, diag.Diagnostics) {
+	s, _ := v.(basetypes.StringValue)
+	b, err := json.Marshal(s.ValueString())
+	if err != nil {
+		return nil, diag.Diagnostics{diag.NewErrorDiagnostic("Failed to encode a date-time", err.Error())}
+	}
+	return b, nil
+}
+
+func (sameInstantCodec) Decode(_ context.Context, raw json.RawMessage, prior attr.Value, _ attr.Type) (attr.Value, diag.Diagnostics) {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return types.StringNull(), nil
+	}
+	p, _ := prior.(basetypes.StringValue)
+	return keepSameInstant(p, types.StringValue(s)), nil
 }
 
 // sameInstantPlanModifier plans the prior value when the configuration names
@@ -1036,225 +736,4 @@ func parseISODateTime(v string) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
-}
-
-// flattenUserEmails reads the UserEmails array from the server response.
-func flattenUserEmails(_ context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
-	raw, ok := m["UserEmails"]
-	if !ok || isJSONNull(raw) {
-		return types.ListNull(types.ObjectType{AttrTypes: userEmailEntryObjectTypes()})
-	}
-
-	var entries []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		diags.AddError("Failed to parse user emails", err.Error())
-		return types.ListNull(types.ObjectType{AttrTypes: userEmailEntryObjectTypes()})
-	}
-
-	objType := types.ObjectType{AttrTypes: userEmailEntryObjectTypes()}
-	objects := make([]attr.Value, len(entries))
-	for i, entry := range entries {
-		attrs := map[string]attr.Value{
-			"user_id": getJSONString(entry, "UserId"),
-			"email":   getJSONString(entry, "Email"),
-		}
-		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
-		if d.HasError() {
-			diags.Append(d...)
-			return types.ListNull(objType)
-		}
-		objects[i] = obj
-	}
-
-	list, d := types.ListValue(objType, objects)
-	if d.HasError() {
-		diags.Append(d...)
-		return types.ListNull(objType)
-	}
-	return list
-}
-
-// flattenOidcProviders reads the OidcProviders array from the server response.
-func flattenOidcProviders(ctx context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
-	raw, ok := m["OidcProviders"]
-	if !ok || isJSONNull(raw) {
-		return types.ListNull(types.ObjectType{AttrTypes: oidcProviderObjectTypes()})
-	}
-
-	var entries []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		diags.AddError("Failed to parse OIDC providers", err.Error())
-		return types.ListNull(types.ObjectType{AttrTypes: oidcProviderObjectTypes()})
-	}
-
-	objType := types.ObjectType{AttrTypes: oidcProviderObjectTypes()}
-	objects := make([]attr.Value, len(entries))
-	for i, entry := range entries {
-		attrs := oidcProviderAttrs(ctx, entry, diags)
-		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
-		if d.HasError() {
-			diags.Append(d...)
-			return types.ListNull(objType)
-		}
-		objects[i] = obj
-	}
-
-	list, d := types.ListValue(objType, objects)
-	if d.HasError() {
-		diags.Append(d...)
-		return types.ListNull(objType)
-	}
-	return list
-}
-
-// flattenRoleLibraryMappings reads the RoleLibraryMappings array from an OIDC provider entry.
-func flattenRoleLibraryMappings(ctx context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
-	raw, ok := m["RoleLibraryMappings"]
-	if !ok || isJSONNull(raw) {
-		return types.ListNull(types.ObjectType{AttrTypes: roleLibraryMappingObjectTypes()})
-	}
-
-	var entries []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		diags.AddError("Failed to parse role library mappings", err.Error())
-		return types.ListNull(types.ObjectType{AttrTypes: roleLibraryMappingObjectTypes()})
-	}
-
-	objType := types.ObjectType{AttrTypes: roleLibraryMappingObjectTypes()}
-	objects := make([]attr.Value, len(entries))
-	for i, entry := range entries {
-		libraryIDs, d := getDelimitedStringList(ctx, entry, "LibraryIds", ",")
-		diags.Append(d...)
-		attrs := map[string]attr.Value{
-			"role":        getJSONString(entry, "Role"),
-			"library_ids": libraryIDs,
-		}
-		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
-		if d.HasError() {
-			diags.Append(d...)
-			return types.ListNull(objType)
-		}
-		objects[i] = obj
-	}
-
-	list, d := types.ListValue(objType, objects)
-	if d.HasError() {
-		diags.Append(d...)
-		return types.ListNull(objType)
-	}
-	return list
-}
-
-func userEmailEntryObjectTypes() map[string]attr.Type {
-	return map[string]attr.Type{
-		"user_id": types.StringType,
-		"email":   types.StringType,
-	}
-}
-
-func roleLibraryMappingObjectTypes() map[string]attr.Type {
-	return map[string]attr.Type{
-		"role":        types.StringType,
-		"library_ids": types.ListType{ElemType: types.StringType},
-	}
-}
-
-func oidcProviderObjectTypes() map[string]attr.Type {
-	return map[string]attr.Type{
-		"id":                               types.StringType,
-		"display_name":                     types.StringType,
-		"preset":                           types.StringType,
-		"discovery_url":                    types.StringType,
-		"client_id":                        types.StringType,
-		"client_secret":                    types.StringType,
-		"scopes":                           types.ListType{ElemType: types.StringType},
-		"acr_values":                       types.ListType{ElemType: types.StringType},
-		"username_claim":                   types.StringType,
-		"allowed_groups":                   types.ListType{ElemType: types.StringType},
-		"admin_groups":                     types.ListType{ElemType: types.StringType},
-		"allow_admin_group_elevation":      types.BoolType,
-		"template_user_id":                 types.StringType,
-		"auto_create_users":                types.BoolType,
-		"link_existing_users_by_username":  types.BoolType,
-		"require_idp_mfa":                  types.BoolType,
-		"bypass_plugin_two_fa":             types.BoolType,
-		"enabled":                          types.BoolType,
-		"show_login_button":                types.BoolType,
-		"force_https":                      types.BoolType,
-		"allow_private_networks":           types.BoolType,
-		"additional_allowed_cidrs":         types.ListType{ElemType: types.StringType},
-		"sync_profile_picture":             types.BoolType,
-		"picture_claim":                    types.StringType,
-		"prompt_select_account":            types.BoolType,
-		"omit_prompt_login":                types.BoolType,
-		"apply_role_library_access":        types.BoolType,
-		"role_library_mappings":            types.ListType{ElemType: types.ObjectType{AttrTypes: roleLibraryMappingObjectTypes()}},
-		"email_claim":                      types.StringType,
-		"sync_email_from_claim":            types.BoolType,
-		"button_text":                      types.StringType,
-		"button_icon_url":                  types.StringType,
-		"force_password_setup":             types.BoolType,
-		"rp_initiated_logout_enabled":      types.BoolType,
-		"rp_initiated_logout_redirect_uri": types.StringType,
-		"created_at":                       types.StringType,
-	}
-}
-
-func oidcProviderAttrs(ctx context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) map[string]attr.Value {
-	attrs := map[string]attr.Value{}
-	attrs["id"] = getJSONString(m, "Id")
-	attrs["display_name"] = getJSONString(m, "DisplayName")
-	attrs["preset"] = getJSONString(m, "Preset")
-	attrs["discovery_url"] = getJSONString(m, "DiscoveryUrl")
-	attrs["client_id"] = getJSONString(m, "ClientId")
-	attrs["client_secret"] = getJSONString(m, "ClientSecret")
-
-	scopes, d := getDelimitedStringList(ctx, m, "Scopes", " ")
-	diags.Append(d...)
-	attrs["scopes"] = scopes
-
-	acrValues, d := getDelimitedStringList(ctx, m, "AcrValues", " ")
-	diags.Append(d...)
-	attrs["acr_values"] = acrValues
-
-	attrs["username_claim"] = getJSONString(m, "UsernameClaim")
-
-	allowedGroups, d := getDelimitedStringList(ctx, m, "AllowedGroups", ",")
-	diags.Append(d...)
-	attrs["allowed_groups"] = allowedGroups
-
-	adminGroups, d := getDelimitedStringList(ctx, m, "AdminGroups", ",")
-	diags.Append(d...)
-	attrs["admin_groups"] = adminGroups
-
-	attrs["allow_admin_group_elevation"] = getJSONBool(m, "AllowAdminGroupElevation")
-	attrs["template_user_id"] = getJSONString(m, "TemplateUserId")
-	attrs["auto_create_users"] = getJSONBool(m, "AutoCreateUsers")
-	attrs["link_existing_users_by_username"] = getJSONBool(m, "LinkExistingUsersByUsername")
-	attrs["require_idp_mfa"] = getJSONBool(m, "RequireIdpMfa")
-	attrs["bypass_plugin_two_fa"] = getJSONBool(m, "BypassPluginTwoFa")
-	attrs["enabled"] = getJSONBool(m, "Enabled")
-	attrs["show_login_button"] = getJSONBool(m, "ShowLoginButton")
-	attrs["force_https"] = getJSONBool(m, "ForceHttps")
-	attrs["allow_private_networks"] = getJSONBool(m, "AllowPrivateNetworks")
-
-	additionalCidrs, d := getDelimitedStringList(ctx, m, "AdditionalAllowedCidrs", ",")
-	diags.Append(d...)
-	attrs["additional_allowed_cidrs"] = additionalCidrs
-
-	attrs["sync_profile_picture"] = getJSONBool(m, "SyncProfilePicture")
-	attrs["picture_claim"] = getJSONString(m, "PictureClaim")
-	attrs["prompt_select_account"] = getJSONBool(m, "PromptSelectAccount")
-	attrs["omit_prompt_login"] = getJSONBool(m, "OmitPromptLogin")
-	attrs["apply_role_library_access"] = getJSONBool(m, "ApplyRoleLibraryAccess")
-	attrs["role_library_mappings"] = flattenRoleLibraryMappings(ctx, m, diags)
-	attrs["email_claim"] = getJSONString(m, "EmailClaim")
-	attrs["sync_email_from_claim"] = getJSONBool(m, "SyncEmailFromClaim")
-	attrs["button_text"] = getJSONString(m, "ButtonText")
-	attrs["button_icon_url"] = getJSONString(m, "ButtonIconUrl")
-	attrs["force_password_setup"] = getJSONBool(m, "ForcePasswordSetup")
-	attrs["rp_initiated_logout_enabled"] = getJSONBool(m, "RpInitiatedLogoutEnabled")
-	attrs["rp_initiated_logout_redirect_uri"] = getJSONString(m, "RpInitiatedLogoutRedirectUri")
-	attrs["created_at"] = getJSONString(m, "CreatedAt")
-	return attrs
 }
