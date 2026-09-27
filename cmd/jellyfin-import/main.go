@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
@@ -198,7 +197,7 @@ func (g *generator) generateUsers() ([]string, []string, error) {
 		imports = append(imports, importBlock("jellyfin_user", name, user.ID))
 
 		attrs := map[string]string{
-			"name":               quote(user.Name),
+			"name":               hclString(user.Name),
 			"is_administrator":   fmt.Sprintf("%t", user.Policy.IsAdministrator),
 			"is_disabled":        fmt.Sprintf("%t", user.Policy.IsDisabled),
 			"enable_all_folders": fmt.Sprintf("%t", user.Policy.EnableAllFolders),
@@ -222,12 +221,12 @@ func (g *generator) generateLibraries() ([]string, []string, error) {
 
 		paths := make([]string, len(folder.Locations))
 		for i, loc := range folder.Locations {
-			paths[i] = quote(loc)
+			paths[i] = hclString(loc)
 		}
 
 		attrs := map[string]string{
-			"name":            quote(folder.Name),
-			"collection_type": quote(folder.CollectionType),
+			"name":            hclString(folder.Name),
+			"collection_type": hclString(folder.CollectionType),
 			"paths":           "[" + strings.Join(paths, ", ") + "]",
 		}
 		resources = append(resources, resourceBlock("jellyfin_library", name, attrs))
@@ -248,7 +247,7 @@ func (g *generator) generateAPIKeys() ([]string, []string, error) {
 		imports = append(imports, importBlock("jellyfin_api_key", name, key.AccessToken))
 
 		attrs := map[string]string{
-			"app_name": quote(key.AppName),
+			"app_name": hclString(key.AppName),
 		}
 		resources = append(resources, resourceBlock("jellyfin_api_key", name, attrs))
 	}
@@ -268,8 +267,8 @@ func (g *generator) generatePluginRepositories() ([]string, []string, error) {
 		imports = append(imports, importBlock("jellyfin_plugin_repository", name, repo.Name))
 
 		attrs := map[string]string{
-			"name":    quote(repo.Name),
-			"url":     quote(repo.URL),
+			"name":    hclString(repo.Name),
+			"url":     hclString(repo.URL),
 			"enabled": fmt.Sprintf("%t", repo.Enabled),
 		}
 		resources = append(resources, resourceBlock("jellyfin_plugin_repository", name, attrs))
@@ -295,9 +294,9 @@ func (g *generator) generatePlugins() ([]string, []string, error) {
 		repoURL := repoURLs[plugin.ID]
 
 		attrs := map[string]string{
-			"name":           quote(plugin.Name),
-			"version":        quote(plugin.Version),
-			"repository_url": quote(repoURL),
+			"name":           hclString(plugin.Name),
+			"version":        hclString(plugin.Version),
+			"repository_url": hclString(repoURL),
 		}
 		resources = append(resources, resourceBlock("jellyfin_plugin", name, attrs))
 	}
@@ -365,7 +364,7 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 		}
 
 		attrs := map[string]string{
-			"task_id":  quote(task.ID),
+			"task_id":  hclString(task.ID),
 			"triggers": triggers,
 		}
 		resources = append(resources, resourceBlock("jellyfin_scheduled_task", name, attrs))
@@ -399,7 +398,7 @@ func triggersHCL(raw []json.RawMessage) (string, error) {
 		}
 
 		b.WriteString("    {\n")
-		fmt.Fprintf(&b, "      type = %s\n", quote(t.Type))
+		fmt.Fprintf(&b, "      type = %s\n", hclString(t.Type))
 		if t.TimeOfDayTicks != nil {
 			fmt.Fprintf(&b, "      time_of_day_ticks = %d\n", *t.TimeOfDayTicks)
 		}
@@ -407,7 +406,7 @@ func triggersHCL(raw []json.RawMessage) (string, error) {
 			fmt.Fprintf(&b, "      interval_ticks = %d\n", *t.IntervalTicks)
 		}
 		if t.DayOfWeek != nil {
-			fmt.Fprintf(&b, "      day_of_week = %s\n", quote(*t.DayOfWeek))
+			fmt.Fprintf(&b, "      day_of_week = %s\n", hclString(*t.DayOfWeek))
 		}
 		if t.MaxRuntimeTicks != nil {
 			fmt.Fprintf(&b, "      max_runtime_ticks = %d\n", *t.MaxRuntimeTicks)
@@ -432,7 +431,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	}
 	imports = append(imports, importBlock("jellyfin_system_configuration", "this", "system"))
 	resources = append(resources, resourceBlock("jellyfin_system_configuration", "this", map[string]string{
-		"server_name":        quote(sysConfig.ServerName),
+		"server_name":        hclString(sysConfig.ServerName),
 		"configuration_json": "jsonencode(" + pretty + ")",
 	}))
 
@@ -524,46 +523,6 @@ func sanitizeName(name string) string {
 		result = "r_" + result
 	}
 	return result
-}
-
-// importBlock generates a Terraform import block.
-func importBlock(resourceType, name, id string) string {
-	return fmt.Sprintf(`import {
-  to = %s.%s
-  id = %s
-}
-`, resourceType, name, quote(id))
-}
-
-// resourceBlock generates a Terraform resource block from a map of attributes.
-func resourceBlock(resourceType, name string, attrs map[string]string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "resource %s %s {\n", quote(resourceType), quote(name))
-
-	keys := sortedKeys(attrs)
-	for _, k := range keys {
-		fmt.Fprintf(&b, "  %s = %s\n", k, attrs[k])
-	}
-
-	b.WriteString("}\n")
-	return b.String()
-}
-
-// sortedKeys returns map keys in sorted order.
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-// quote wraps a string in double quotes, escaping inner quotes.
-func quote(s string) string {
-	escaped := strings.ReplaceAll(s, `\`, `\\`)
-	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-	return `"` + escaped + `"`
 }
 
 // prettyJSON formats a JSON string with indentation, preserving number precision.

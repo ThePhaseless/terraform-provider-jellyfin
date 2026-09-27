@@ -62,14 +62,6 @@ func TestLivetvAttributes(t *testing.T) {
 	}
 }
 
-func TestHCLStringEscapesTemplatesAndControlCharacters(t *testing.T) {
-	got := hclString("${a} %{b} $c \"q\" \\ line\nnext\x01")
-	want := `"$${a} %%{b} $c \"q\" \\ line\nnext\u0001"`
-	if got != want {
-		t.Errorf("hclString() = %s, want %s", got, want)
-	}
-}
-
 func TestGenerateSingletonConfigsRendersTypedLivetvAttributes(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()

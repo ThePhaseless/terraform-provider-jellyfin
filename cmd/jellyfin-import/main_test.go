@@ -48,31 +48,6 @@ func TestSanitizeName(t *testing.T) {
 	}
 }
 
-func TestQuote(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"hello", `"hello"`},
-		{`say "hi"`, `"say \"hi\""`},
-		{`back\slash`, `"back\\slash"`},
-		{"", `""`},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			t.Parallel()
-
-			result := quote(tt.input)
-			if result != tt.expected {
-				t.Errorf("quote(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestImportBlock(t *testing.T) {
 	result := importBlock("jellyfin_user", "admin", "abc-123")
 	expected := `import {
