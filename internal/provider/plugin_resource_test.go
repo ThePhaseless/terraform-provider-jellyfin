@@ -56,6 +56,20 @@ resource "jellyfin_plugin" "test" {
 				ImportStateVerifyIgnore: []string{"repository_url"},
 				ImportStateId:           pluginName,
 			},
+			// GET /Plugins lists the dash-free GUID, but a GUID copied from
+			// elsewhere usually has dashes.
+			{
+				ResourceName:      "jellyfin_plugin.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateIdFunc: func(s *terraform.State) (string, error) {
+					id := s.RootModule().Resources["jellyfin_plugin.test"].Primary.ID
+					if len(id) != 32 {
+						return "", fmt.Errorf("plugin id %q is not a dash-free GUID", id)
+					}
+					return id[:8] + "-" + id[8:12] + "-" + id[12:16] + "-" + id[16:20] + "-" + id[20:], nil
+				},
+			},
 			// Verify Create is idempotent when the plugin is already installed
 			// (issue #84): adding a second resource for the same plugin name
 			// must not 404. Create detects the plugin is already present and

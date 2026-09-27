@@ -204,21 +204,14 @@ func (r *PluginResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
-	found := false
-	for _, p := range plugins {
-		if p.ID == data.ID.ValueString() || p.Name == data.Name.ValueString() {
-			data.ID = types.StringValue(p.ID)
-			data.Name = types.StringValue(p.Name)
-			data.Version = types.StringValue(p.Version)
-			found = true
-			break
-		}
-	}
-
+	p, found := selectInstalledPlugin(plugins, data.ID.ValueString(), data.Name.ValueString(), data.Version.ValueString())
 	if !found {
 		resp.State.RemoveResource(ctx)
 		return
 	}
+	data.ID = types.StringValue(p.ID)
+	data.Name = types.StringValue(p.Name)
+	data.Version = types.StringValue(p.Version)
 
 	// Populate repository_url from available packages if not already set.
 	if data.RepositoryURL.IsNull() || data.RepositoryURL.ValueString() == "" {
@@ -283,6 +276,29 @@ func (r *PluginResource) uninstall(ctx context.Context, id string) error {
 		listed = remaining
 	}
 	return nil
+}
+
+// selectInstalledPlugin returns the entry GET /Plugins lists for the plugin
+// with the given id in either GUID spelling, or with the given name, which is
+// all an import by name knows. Jellyfin lists every version on disk, so after
+// an update both the running version and the one that loads at the next
+// restart are listed: the entry at version wins, otherwise the newest.
+// Versions Jellyfin deletes at the next restart do not count.
+func selectInstalledPlugin(plugins []client.InstalledPlugin, id, name, version string) (client.InstalledPlugin, bool) {
+	var selected client.InstalledPlugin
+	found := false
+	for _, p := range plugins {
+		if p.Status == pluginStatusDeleted || (normalizeGUID(p.ID) != normalizeGUID(id) && p.Name != name) {
+			continue
+		}
+		if version != "" && samePluginVersion(p.Version, version) {
+			return p, true
+		}
+		if !found || compareDottedVersions(p.Version, selected.Version) > 0 {
+			selected, found = p, true
+		}
+	}
+	return selected, found
 }
 
 // listedVersions returns the versions GET /Plugins lists for the plugin with

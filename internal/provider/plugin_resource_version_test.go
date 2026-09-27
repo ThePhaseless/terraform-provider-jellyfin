@@ -85,3 +85,43 @@ func TestPickReleaseBuild(t *testing.T) {
 		})
 	}
 }
+
+func TestSelectInstalledPlugin(t *testing.T) {
+	t.Parallel()
+
+	const id = "9c4e63f1031b4f25988b4f7d78a8b53e"
+	superseded := client.InstalledPlugin{ID: id, Name: "Bookshelf", Version: "12.0.0.0", Status: "Superseded"}
+	pending := client.InstalledPlugin{ID: id, Name: "Bookshelf", Version: "13.0.0.0", Status: "Restart"}
+	deleted := client.InstalledPlugin{ID: id, Name: "Bookshelf", Version: "14.0.0.0", Status: pluginStatusDeleted}
+	other := client.InstalledPlugin{ID: "170a157fac6c437aabddca9c25cebd39", Name: "Fanart", Version: "15.0.0.0", Status: "Active"}
+
+	cases := []struct {
+		name    string
+		plugins []client.InstalledPlugin
+		id      string
+		plugin  string
+		version string
+		want    string
+		found   bool
+	}{
+		{"version in state while an update is pending", []client.InstalledPlugin{other, superseded, pending}, id, "Bookshelf", "12.0.0.0", "12.0.0.0", true},
+		{"newest when the version in state is gone", []client.InstalledPlugin{pending, superseded}, id, "Bookshelf", "11.0.0.0", "13.0.0.0", true},
+		{"newest without a version", []client.InstalledPlugin{superseded, pending}, id, "Bookshelf", "", "13.0.0.0", true},
+		{"version pending deletion skipped", []client.InstalledPlugin{superseded, deleted}, id, "Bookshelf", "14.0.0.0", "12.0.0.0", true},
+		{"dashed id as imported", []client.InstalledPlugin{other, pending}, "9C4E63F1-031B-4F25-988B-4F7D78A8B53E", "9C4E63F1-031B-4F25-988B-4F7D78A8B53E", "", "13.0.0.0", true},
+		{"name as imported", []client.InstalledPlugin{other, pending}, "Bookshelf", "Bookshelf", "", "13.0.0.0", true},
+		{"only a version pending deletion", []client.InstalledPlugin{other, deleted}, id, "Bookshelf", "", "", false},
+		{"not listed", []client.InstalledPlugin{other}, id, "Bookshelf", "", "", false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, found := selectInstalledPlugin(c.plugins, c.id, c.plugin, c.version)
+			if found != c.found || got.Version != c.want {
+				t.Errorf("selectInstalledPlugin() = %q, %t, want %q, %t", got.Version, found, c.want, c.found)
+			}
+		})
+	}
+}

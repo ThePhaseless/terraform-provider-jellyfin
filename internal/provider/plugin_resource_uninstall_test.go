@@ -144,7 +144,7 @@ func TestUnitPluginUninstallRemovesEveryListedVersion(t *testing.T) {
 	}
 }
 
-func TestUnitPluginUninstallSkipsPluginNotListed(t *testing.T) {
+func TestUnitPluginUninstallSkipsVersionPendingDeletion(t *testing.T) {
 	fake := &fakePluginServer{plugins: []client.InstalledPlugin{
 		{ID: bookshelfID, Name: "Bookshelf", Version: "13.0.0.0", Status: pluginStatusDeleted},
 	}}
