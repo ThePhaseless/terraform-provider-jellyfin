@@ -12,34 +12,33 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-func TestUnitBrandingConfigurationOverlay(t *testing.T) {
+func TestUnitBrandingConfigurationRoundTrip(t *testing.T) {
 	ctx := context.Background()
+	b, err := brandingWire()
+	if err != nil {
+		t.Fatal(err)
+	}
 	fixture := `{"LoginDisclaimer":"LoginDisclaimer","CustomCss":"CustomCSS","SplashscreenEnabled":true}`
 
-	var data BrandingConfigurationResourceModel
-	flattenBrandingConfiguration(ctx, fixture, &data, nil)
+	data := BrandingConfigurationResourceModel{ID: types.StringValue("branding")}
+	if d := b.FlattenInto(ctx, fixture, &data); d.HasError() {
+		t.Fatalf("read: %v", d)
+	}
 
 	base := map[string]json.RawMessage{}
-	overlayBrandingConfiguration(ctx, base, &data)
-
-	result, err := json.Marshal(base)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
+		t.Fatalf("write: %v", d)
 	}
 
-	var got map[string]interface{}
-	if err := json.Unmarshal(result, &got); err != nil {
-		t.Fatalf("unmarshal result: %v", err)
+	var got, want map[string]any
+	if err := json.Unmarshal(mustJSON(base), &got); err != nil {
+		t.Fatal(err)
 	}
-	var want map[string]interface{}
 	if err := json.Unmarshal([]byte(fixture), &want); err != nil {
-		t.Fatalf("unmarshal fixture: %v", err)
+		t.Fatal(err)
 	}
-
-	gotJSON, _ := json.Marshal(got)
-	wantJSON, _ := json.Marshal(want)
-	if string(gotJSON) != string(wantJSON) {
-		t.Fatalf("round-trip mismatch\n got: %s\nwant: %s", gotJSON, wantJSON)
+	if string(mustJSON(got)) != string(mustJSON(want)) {
+		t.Fatalf("round-trip mismatch\n got: %s\nwant: %s", mustJSON(got), mustJSON(want))
 	}
 }
 
@@ -52,15 +51,23 @@ func TestUnitBrandingSplashscreenLocationIsNotComputedReadOrWritten(t *testing.T
 		t.Error("splashscreen_location is computed, so create plans show it as known after apply although it always reads as null")
 	}
 
-	var data BrandingConfigurationResourceModel
-	flattenBrandingConfiguration(ctx, `{"SplashscreenEnabled":true,"SplashscreenLocation":"/config/splashscreen.png"}`, &data, nil)
+	b, err := brandingWire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := BrandingConfigurationResourceModel{SplashscreenLocation: types.StringValue("/config/splashscreen.png")}
+	if d := b.FlattenInto(ctx, `{"SplashscreenEnabled":true,"SplashscreenLocation":"/config/splashscreen.png"}`, &data); d.HasError() {
+		t.Fatalf("read: %v", d)
+	}
 	if !data.SplashscreenLocation.IsNull() {
 		t.Errorf("splashscreen_location read as %s, want null", data.SplashscreenLocation)
 	}
 
 	base := map[string]json.RawMessage{}
 	data.SplashscreenLocation = types.StringValue("/config/splashscreen.png")
-	overlayBrandingConfiguration(ctx, base, &data)
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
+		t.Fatalf("write: %v", d)
+	}
 	if v, ok := base["SplashscreenLocation"]; ok {
 		t.Errorf("overlay wrote SplashscreenLocation = %s, want no key", v)
 	}

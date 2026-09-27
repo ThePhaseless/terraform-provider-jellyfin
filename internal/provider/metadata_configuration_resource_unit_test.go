@@ -7,35 +7,28 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-func TestUnitMetadataConfigurationOverlay(t *testing.T) {
+func TestUnitMetadataConfigurationRoundTrip(t *testing.T) {
 	ctx := context.Background()
+	b, err := metadataWire()
+	if err != nil {
+		t.Fatal(err)
+	}
 	fixture := `{"UseFileCreationTimeForDateAdded":true}`
 
-	var data MetadataConfigurationResourceModel
-	flattenMetadataConfiguration(ctx, fixture, &data, nil)
+	data := MetadataConfigurationResourceModel{ID: types.StringValue("metadata")}
+	if d := b.FlattenInto(ctx, fixture, &data); d.HasError() {
+		t.Fatalf("read: %v", d)
+	}
 
 	base := map[string]json.RawMessage{}
-	overlayMetadataConfiguration(ctx, base, &data)
-
-	result, err := json.Marshal(base)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
+		t.Fatalf("write: %v", d)
 	}
-
-	var got map[string]interface{}
-	if err := json.Unmarshal(result, &got); err != nil {
-		t.Fatalf("unmarshal result: %v", err)
-	}
-	var want map[string]interface{}
-	if err := json.Unmarshal([]byte(fixture), &want); err != nil {
-		t.Fatalf("unmarshal fixture: %v", err)
-	}
-
-	gotJSON, _ := json.Marshal(got)
-	wantJSON, _ := json.Marshal(want)
-	if string(gotJSON) != string(wantJSON) {
-		t.Fatalf("round-trip mismatch\n got: %s\nwant: %s", gotJSON, wantJSON)
+	if got := string(mustJSON(base)); got != fixture {
+		t.Fatalf("round-trip mismatch\n got: %s\nwant: %s", got, fixture)
 	}
 }

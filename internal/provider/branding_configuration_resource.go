@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -20,11 +21,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 var (
 	_ resource.Resource                = &BrandingConfigurationResource{}
 	_ resource.ResourceWithImportState = &BrandingConfigurationResource{}
+	_ resource.ResourceWithModifyPlan  = &BrandingConfigurationResource{}
+	_ wireBound                        = &BrandingConfigurationResource{}
 )
 
 // NewBrandingConfigurationResource creates a new branding configuration resource.
@@ -45,6 +49,14 @@ type BrandingConfigurationResourceModel struct {
 	SplashscreenEnabled  types.Bool   `tfsdk:"splashscreen_enabled"`
 	SplashscreenLocation types.String `tfsdk:"splashscreen_location"`
 }
+
+var brandingWire = sync.OnceValues(func() (*wire.Binding, error) {
+	return wire.Bind(schemaOf(&BrandingConfigurationResource{}), "BrandingOptionsDto",
+		wire.Identity("id"),
+		wire.NeverSent("splashscreen_location", splashscreenLocationUnsupportedMessage))
+})
+
+func (r *BrandingConfigurationResource) Wire() (*wire.Binding, error) { return brandingWire() }
 
 func (r *BrandingConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_branding_configuration"
@@ -153,7 +165,23 @@ func (r *BrandingConfigurationResource) ImportState(ctx context.Context, _ resou
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("branding"))...)
 }
 
+// ModifyPlan gates each configured field on the Jellyfin version it needs, so
+// a field a later pin adds is checked without a change here.
+func (r *BrandingConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	if b := wireBinding(&resp.Diagnostics, brandingWire); b != nil {
+		resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
+	}
+}
+
 func (r *BrandingConfigurationResource) apply(ctx context.Context, data *BrandingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+	b := wireBinding(diags, brandingWire)
+	if b == nil {
+		return
+	}
+
 	current, err := r.client.GetBrandingConfiguration(ctx)
 	if err != nil {
 		diags.AddError("Failed to read current branding configuration", err.Error())
@@ -166,7 +194,10 @@ func (r *BrandingConfigurationResource) apply(ctx context.Context, data *Brandin
 		return
 	}
 
-	overlayBrandingConfiguration(ctx, base, data)
+	if d := b.OverlayModel(ctx, base, data); d.HasError() {
+		diags.Append(d...)
+		return
+	}
 
 	payload, err := json.Marshal(base)
 	if err != nil {
@@ -185,39 +216,24 @@ func (r *BrandingConfigurationResource) apply(ctx context.Context, data *Brandin
 		return
 	}
 
-	flattenBrandingConfiguration(ctx, updated.RawJSON, data, diags)
+	diags.Append(b.FlattenAfterApply(ctx, updated.RawJSON, data)...)
 	data.ID = types.StringValue("branding")
 	diags.Append(state.Set(ctx, data)...)
 }
 
 func (r *BrandingConfigurationResource) read(ctx context.Context, data *BrandingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+	b := wireBinding(diags, brandingWire)
+	if b == nil {
+		return
+	}
+
 	current, err := r.client.GetBrandingConfiguration(ctx)
 	if err != nil {
 		diags.AddError("Failed to read branding configuration", err.Error())
 		return
 	}
 
-	flattenBrandingConfiguration(ctx, current.RawJSON, data, diags)
+	diags.Append(b.FlattenInto(ctx, current.RawJSON, data)...)
 	data.ID = types.StringValue("branding")
 	diags.Append(state.Set(ctx, data)...)
-}
-
-func overlayBrandingConfiguration(_ context.Context, m map[string]json.RawMessage, data *BrandingConfigurationResourceModel) {
-	putJSONString(m, "LoginDisclaimer", data.LoginDisclaimer)
-	putJSONString(m, "CustomCss", data.CustomCSS)
-	putJSONBool(m, "SplashscreenEnabled", data.SplashscreenEnabled)
-}
-
-func flattenBrandingConfiguration(_ context.Context, raw string, data *BrandingConfigurationResourceModel, diags *diag.Diagnostics) {
-	m, err := parseJSONObject(raw)
-	if err != nil {
-		diags.AddError("Failed to parse branding configuration", err.Error())
-		return
-	}
-	data.LoginDisclaimer = getJSONString(m, "LoginDisclaimer")
-	data.CustomCSS = getJSONString(m, "CustomCss")
-	data.SplashscreenEnabled = getJSONBool(m, "SplashscreenEnabled")
-	// Jellyfin never returns the location, and the attribute is not computed,
-	// so a value read here could only contradict the plan.
-	data.SplashscreenLocation = types.StringNull()
 }

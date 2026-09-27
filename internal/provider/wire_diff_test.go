@@ -130,24 +130,6 @@ func readVirtualFolderOptions(raw []byte) (string, bool) {
 func wireDiffCases() []wireDiffCase {
 	return []wireDiffCase{
 		{
-			name: "branding", resource: NewBrandingConfigurationResource(), object: "BrandingOptionsDto",
-			captured: []string{"branding.json"}, servedBase: true,
-			oldFlatten: flatAdapter(flattenBrandingConfiguration),
-			oldOverlay: overlayAdapter(func(ctx context.Context, doc map[string]json.RawMessage, m *BrandingConfigurationResourceModel) diag.Diagnostics {
-				overlayBrandingConfiguration(ctx, doc, m)
-				return nil
-			}),
-		},
-		{
-			name: "metadata", resource: NewMetadataConfigurationResource(), object: "MetadataConfiguration",
-			captured: []string{"metadata.json"}, servedBase: true,
-			oldFlatten: flatAdapter(flattenMetadataConfiguration),
-			oldOverlay: overlayAdapter(func(ctx context.Context, doc map[string]json.RawMessage, m *MetadataConfigurationResourceModel) diag.Diagnostics {
-				overlayMetadataConfiguration(ctx, doc, m)
-				return nil
-			}),
-		},
-		{
 			name: "encoding", resource: NewEncodingConfigurationResource(), object: "EncodingOptions",
 			captured: []string{"encoding.json"}, servedBase: true,
 			oldFlatten: flatAdapter(flattenEncodingConfiguration),
