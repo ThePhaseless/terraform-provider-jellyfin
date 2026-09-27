@@ -5,13 +5,16 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
@@ -132,4 +135,44 @@ Each line is an attribute and the Jellyfin key it reads and writes, or an
 object's keys that no attribute claims. A change here changes what the
 provider sends: review it, then run the test with SCHEMA_GUARD_UPDATE=1 to
 record it.`, wireBindingsGolden, msg.String())
+}
+
+// readWire reads raw through b into a new model, from a prior whose every
+// attribute is null, as the read that follows an import does.
+func readWire[T any](t *testing.T, b *wire.Binding, raw string) T {
+	t.Helper()
+	ctx := context.Background()
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		t.Fatalf("parsing %s: %v", raw, err)
+	}
+	obj, d := b.Flatten(ctx, doc, types.ObjectNull(b.AttrTypes))
+	if d.HasError() {
+		t.Fatalf("read: %v", d)
+	}
+	var m T
+	if d := obj.As(ctx, &m, basetypes.ObjectAsOptions{}); d.HasError() {
+		t.Fatalf("read into %T: %v", m, d)
+	}
+	return m
+}
+
+// checkSameJSON fails t unless got marshals to the JSON want holds, in any
+// key order.
+func checkSameJSON(t *testing.T, got any, want string) {
+	t.Helper()
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var g, w any
+	if err := json.Unmarshal(raw, &g); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(want), &w); err != nil {
+		t.Fatalf("parsing %s: %v", want, err)
+	}
+	if !reflect.DeepEqual(g, w) {
+		t.Errorf("JSON mismatch\n got: %s\nwant: %s", raw, want)
+	}
 }

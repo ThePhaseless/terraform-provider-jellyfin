@@ -130,12 +130,6 @@ func readVirtualFolderOptions(raw []byte) (string, bool) {
 func wireDiffCases() []wireDiffCase {
 	return []wireDiffCase{
 		{
-			name: "encoding", resource: NewEncodingConfigurationResource(), object: "EncodingOptions",
-			captured: []string{"encoding.json"}, servedBase: true,
-			oldFlatten: flatAdapter(flattenEncodingConfiguration),
-			oldOverlay: overlayAdapter(overlayEncodingConfiguration),
-		},
-		{
 			name: "networking", resource: NewNetworkingConfigurationResource(), object: "NetworkConfiguration",
 			captured: []string{"network.json"}, servedBase: true,
 			oldFlatten: flatAdapter(flattenNetworkingConfiguration),
@@ -832,37 +826,6 @@ func TestUnitWireVersionErrorsMatchTheHandWrittenChecks(t *testing.T) {
 		}
 		if version == "10.11.11" && len(old) != 6 {
 			t.Errorf("library on %s: %d errors, want one per similar item setting and network path of the two synthesized elements", version, len(old))
-		}
-	}
-
-	encRoot, err := encodingWire()
-	if err != nil {
-		t.Fatal(err)
-	}
-	encFull, d := encRoot.Flatten(ctx, parseDoc(t, string(mustJSON(synthesize(wire.Pinned(), "EncodingOptions", "enc", 0)))), types.ObjectNull(encRoot.AttrTypes))
-	if d.HasError() {
-		t.Fatal(d)
-	}
-	encValue, err := encFull.ToTerraformValue(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	encConfig := tfsdk.Config{Schema: schemaOf(NewEncodingConfigurationResource()), Raw: encValue}
-	encModel, _ := modelOf[EncodingConfigurationResourceModel](ctx, encFull)
-	// The old check looked for the keys in the served document, which the
-	// captured document of each version stands for.
-	for version, file := range map[string]string{"10.9.11": "10.9.11", "10.11.11": "10.11.11", "12.1.0": "12.1"} {
-		served, err := os.ReadFile(filepath.Join("testdata", "wire_diff", file, "encoding.json"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		old := diagLines(checkJellyfin12EncodingKeys(parseDoc(t, string(served)), &encModel))
-		got := diagLines(encRoot.VersionErrors(ctx, encConfig, func() (string, error) { return version, nil }))
-		if !reflect.DeepEqual(old, got) {
-			t.Errorf("encoding on %s:\nold %q\nnew %q", version, old, got)
-		}
-		if version == "10.11.11" && len(old) != 2 {
-			t.Errorf("encoding on %s: %d errors, want one per 12.0 field", version, len(old))
 		}
 	}
 }
