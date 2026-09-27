@@ -9,14 +9,10 @@ package main
 
 var systemFields = []hclField{
 	{json: "EnableMetrics", attr: "enable_metrics"},
-	// Jellyfin sends EnableNormalizedItemByNameIds and
-	// EnableCaseSensitiveItemIds, which the Read's IDs spelling does not
-	// match, so the imported state holds null for both and they must stay
-	// out of the configuration.
-	{json: "EnableNormalizedItemByNameIDs", attr: "enable_normalized_item_by_name_ids"},
+	{json: "EnableNormalizedItemByNameIds", attr: "enable_normalized_item_by_name_ids"},
 	{json: "IsPortAuthorized", attr: "is_port_authorized"},
 	{json: "QuickConnectAvailable", attr: "quick_connect_available"},
-	{json: "EnableCaseSensitiveItemIDs", attr: "enable_case_sensitive_item_ids"},
+	{json: "EnableCaseSensitiveItemIds", attr: "enable_case_sensitive_item_ids"},
 	{json: "DisableLiveTvChannelUserDataName", attr: "disable_live_tv_channel_user_data_name"},
 	{json: "MetadataPath", attr: "metadata_path"},
 	{json: "PreferredMetadataLanguage", attr: "preferred_metadata_language"},
@@ -81,9 +77,7 @@ var systemFields = []hclField{
 		{json: "EnableHwEncoding", attr: "enable_hw_encoding"},
 		{json: "EnableKeyFrameOnlyExtraction", attr: "enable_key_frame_only_extraction"},
 		{json: "ScanBehavior", attr: "scan_behavior"},
-		// Jellyfin sends ProcessPriority, so this stays out for the same
-		// reason as the ...IDs fields above.
-		{json: "ProcessPriorityClass", attr: "process_priority"},
+		{json: "ProcessPriority", attr: "process_priority"},
 		{json: "Interval", attr: "interval"},
 		{json: "WidthResolutions", attr: "width_resolutions"},
 		{json: "TileWidth", attr: "tile_width"},

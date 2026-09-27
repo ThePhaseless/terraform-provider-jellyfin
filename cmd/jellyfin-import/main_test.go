@@ -567,6 +567,7 @@ func TestGenerateSingletonConfigs(t *testing.T) {
 
 	want := []string{
 		`resource "jellyfin_system_configuration" "this" {
+  enable_normalized_item_by_name_ids = true
   metadata_options = [
     {
       disabled_metadata_fetchers = ["OMDb"]
@@ -577,6 +578,7 @@ func TestGenerateSingletonConfigs(t *testing.T) {
   sort_remove_words = ["the", "a"]
   trickplay_options = {
     interval          = 10000
+    process_priority  = "BelowNormal"
     width_resolutions = [320]
   }
 }
@@ -1184,9 +1186,10 @@ func terraformFmtCheck(t *testing.T, dir string) {
 // seedFixtures gives the server what the importer has to handle for the
 // generated files to validate, and puts the server back when the test ends:
 // strings that HCL would interpolate or reject unless escaped, API keys whose
-// names sanitize to the same resource name or to its suffixed form, and
-// libraries jellyfin_library cannot import, whose names it returns.
-func seedFixtures(t *testing.T, c *client.Client) []string {
+// names sanitize to the same resource name or to its suffixed form, and a
+// music videos library and one without a collection type, which the importer
+// writes as mixed.
+func seedFixtures(t *testing.T, c *client.Client) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -1279,7 +1282,6 @@ func seedFixtures(t *testing.T, c *client.Client) []string {
 			return c.RemoveVirtualFolder(ctx, lib.name)
 		})
 	}
-	return []string{libraries[1].name, libraries[2].name}
 }
 
 // TestAccImportToolE2E runs the import tool against a real Jellyfin instance,
@@ -1291,7 +1293,7 @@ func seedFixtures(t *testing.T, c *client.Client) []string {
 func TestAccImportToolE2E(t *testing.T) {
 	outputDir := t.TempDir()
 	c := testAccImportClient(t)
-	skippedLibraries := seedFixtures(t, c)
+	seedFixtures(t, c)
 
 	var warnings strings.Builder
 	g := &generator{
@@ -1372,11 +1374,6 @@ func TestAccImportToolE2E(t *testing.T) {
 	t.Logf("Generated %d import blocks and %d resource blocks", importBlocks, resourceBlocks)
 	if warnings.Len() > 0 {
 		t.Logf("Generator warnings:\n%s", warnings.String())
-	}
-	for _, name := range skippedLibraries {
-		if !strings.Contains(warnings.String(), fmt.Sprintf("skipping library %q", name)) {
-			t.Errorf("expected a warning that library %q is skipped", name)
-		}
 	}
 
 	terraformFmtCheck(t, outputDir)
