@@ -14,7 +14,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/provider"
 )
 
 func TestSanitizeName(t *testing.T) {
@@ -960,17 +966,100 @@ func testAccImportClient(t *testing.T) *client.Client {
 	return c
 }
 
-// TestAccImportToolE2E is an acceptance test that runs the import tool against a real
-// Jellyfin instance. It verifies that the tool generates valid import and resource files.
+// seedEscapingFixtures gives the server strings that HCL would interpolate
+// or reject unless the importer escapes them, and puts the server back when
+// the test ends.
+func seedEscapingFixtures(t *testing.T, c *client.Client) {
+	t.Helper()
+
+	ctx := context.Background()
+	const tricky = `import-e2e ${a} %{b} "q" \ $${c} %%{d} ${`
+
+	var restore []func(*client.Client) error
+	t.Cleanup(func() {
+		// The provider logs in under the same device ID during the plan, and
+		// Jellyfin then revokes the session token c holds.
+		fresh := testAccImportClient(t)
+		for i := len(restore) - 1; i >= 0; i-- {
+			if err := restore[i](fresh); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+
+	branding, err := c.GetBrandingConfiguration(ctx)
+	if err != nil {
+		t.Fatalf("reading branding configuration: %v", err)
+	}
+	restore = append(restore, func(c *client.Client) error {
+		return c.UpdateBrandingConfiguration(ctx, &client.BrandingConfiguration{RawJSON: branding.RawJSON})
+	})
+	seeded, err := json.Marshal(map[string]interface{}{
+		"LoginDisclaimer":     tricky + "\nsecond line\twith a tab and \x01",
+		"CustomCss":           "body {\n  color: red;\n}\n/* ${x} %{y} */\n",
+		"SplashscreenEnabled": false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.UpdateBrandingConfiguration(ctx, &client.BrandingConfiguration{RawJSON: string(seeded)}); err != nil {
+		t.Fatalf("seeding branding configuration: %v", err)
+	}
+
+	if err := c.CreateAPIKey(ctx, tricky); err != nil {
+		t.Fatalf("seeding API key: %v", err)
+	}
+	key, err := c.GetAPIKeyByAppName(ctx, tricky)
+	if err != nil {
+		t.Fatalf("finding seeded API key: %v", err)
+	}
+	restore = append(restore, func(c *client.Client) error {
+		return c.DeleteAPIKey(ctx, key.AccessToken)
+	})
+
+	repos, err := c.GetPluginRepositories(ctx)
+	if err != nil {
+		t.Fatalf("reading plugin repositories: %v", err)
+	}
+	restore = append(restore, func(c *client.Client) error {
+		return c.SetPluginRepositories(ctx, repos)
+	})
+	// Disabled, so Jellyfin never fetches the unreachable URL.
+	seededRepos := append(append([]client.PluginRepository{}, repos...), client.PluginRepository{
+		Name:    tricky,
+		URL:     "http://127.0.0.1:1/${x}/%{y}/manifest.json",
+		Enabled: false,
+	})
+	if err := c.SetPluginRepositories(ctx, seededRepos); err != nil {
+		t.Fatalf("seeding plugin repository: %v", err)
+	}
+
+	// Library names cannot hold quotes or backslashes.
+	const library = "import-e2e ${lib} %{x} $${y}"
+	if err := c.AddVirtualFolder(ctx, library, "movies", []string{"/media/movies"}, &client.LibraryOptions{RawJSON: "{}"}); err != nil {
+		t.Fatalf("seeding library: %v", err)
+	}
+	restore = append(restore, func(c *client.Client) error {
+		return c.RemoveVirtualFolder(ctx, library)
+	})
+}
+
+// TestAccImportToolE2E runs the import tool against a real Jellyfin instance
+// and plans the generated files with Terraform and this provider: the plan
+// must import every resource without changes, and each imported resource's
+// configuration must set every value its imported state holds.
 // Set JELLYFIN_ENDPOINT and either JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD to enable this test.
 func TestAccImportToolE2E(t *testing.T) {
 	outputDir := t.TempDir()
 	c := testAccImportClient(t)
+	seedEscapingFixtures(t, c)
 
+	var warnings strings.Builder
 	g := &generator{
 		client:    c,
 		outputDir: outputDir,
 		usedNames: make(map[string]int),
+		warnings:  &warnings,
 	}
 
 	// Run the full generation.
@@ -1042,6 +1131,28 @@ func TestAccImportToolE2E(t *testing.T) {
 	}
 
 	t.Logf("Generated %d import blocks and %d resource blocks", importBlocks, resourceBlocks)
+	if warnings.Len() > 0 {
+		t.Logf("Generator warnings:\n%s", warnings.String())
+	}
+
+	// PlanOnly never applies, so no state is saved and nothing on the server
+	// is changed or destroyed.
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"jellyfin": providerserver.NewProtocol6WithError(provider.New("test")()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config:   importsStr + "\n" + resourcesStr,
+				PlanOnly: true,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPreRefresh: []plancheck.PlanCheck{
+						configMatchesImportedState{schemas: providerSchemas(t)},
+					},
+				},
+			},
+		},
+	})
 }
 
 // TestAccImportToolIndividualGenerators tests each generator function against a real
