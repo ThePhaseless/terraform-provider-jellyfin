@@ -1,1 +1,0 @@
-{"Name":"Keyframe Extractor","State":"Idle","Id":"f302d80f31bcacf76f979d277d448581","Triggers":[],"Description":"Extracts keyframes from video files to create more precise HLS playlists. This task may run for a long time.","Category":"Library","IsHidden":false,"Key":"KeyframeExtraction"}

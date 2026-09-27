@@ -205,40 +205,6 @@ func wireDiffCases() []wireDiffCase {
 			oldFlatten: flatAdapter(flattenJellyfinSecurity),
 			oldOverlay: overlayAdapter(overlayJellyfinSecurity),
 		},
-		{
-			name: "scheduled_task_triggers", resource: NewScheduledTaskResource(), object: "TaskInfo",
-			captured: []string{"task_weekly.json", "task_startup_interval.json", "task_daily.json", "task_empty.json"},
-			docKey:   "Triggers",
-			oldFlatten: func(ctx context.Context, raw string, prior types.Object) (types.Object, diag.Diagnostics) {
-				m, diags := modelOf[ScheduledTaskResourceModel](ctx, prior)
-				if diags.HasError() {
-					return prior, diags
-				}
-				var task client.ScheduledTask
-				if err := json.Unmarshal([]byte(raw), &task); err != nil {
-					diags.AddError("decoding task", err.Error())
-					return prior, diags
-				}
-				var d diag.Diagnostics
-				m.Triggers, d = flattenTriggers(ctx, task.Triggers)
-				diags.Append(d...)
-				obj, d := objectOf(ctx, prior.AttributeTypes(ctx), &m)
-				return obj, append(diags, d...)
-			},
-			oldOverlay: func(ctx context.Context, doc map[string]json.RawMessage, obj types.Object) diag.Diagnostics {
-				m, diags := modelOf[ScheduledTaskResourceModel](ctx, obj)
-				if diags.HasError() {
-					return diags
-				}
-				triggers, err := marshalTriggers(ctx, m.Triggers)
-				if err != nil {
-					diags.AddError("marshaling triggers", err.Error())
-					return diags
-				}
-				doc["Triggers"] = json.RawMessage(triggers)
-				return diags
-			},
-		},
 	}
 }
 

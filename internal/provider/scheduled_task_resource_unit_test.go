@@ -18,6 +18,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 func scheduledTaskSchema(t *testing.T) rschema.Schema {
@@ -167,75 +169,72 @@ var triggerSerialisationCases = map[string]struct {
 	},
 }
 
-func TestMarshalTriggersOmitsNullAttributes(t *testing.T) {
+func scheduledTaskBinding(t *testing.T) *wire.Binding {
+	t.Helper()
+
+	b, err := scheduledTaskWire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func TestScheduledTaskWriteOmitsNullTriggerAttributes(t *testing.T) {
 	t.Parallel()
 
 	for name, tc := range triggerSerialisationCases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := marshalTriggers(context.Background(), triggerList(t, tc.trigger))
-			if err != nil {
-				t.Fatalf("marshalTriggers() error = %v", err)
+			data := ScheduledTaskResourceModel{
+				ID:       types.StringNull(),
+				TaskID:   types.StringValue("7738148ffcd07979c7ceb148e06b3aed"),
+				Triggers: triggerList(t, tc.trigger),
 			}
-
-			var gotEntries, wantEntries []map[string]any
-			if err := json.Unmarshal([]byte(got), &gotEntries); err != nil {
-				t.Fatalf("unmarshal marshalTriggers() output %s: %v", got, err)
+			task := map[string]json.RawMessage{}
+			if d := scheduledTaskBinding(t).OverlayModel(context.Background(), task, &data); d.HasError() {
+				t.Fatalf("write: %v", d)
 			}
-			if err := json.Unmarshal([]byte("["+tc.json+"]"), &wantEntries); err != nil {
-				t.Fatalf("unmarshal want: %v", err)
-			}
-			if !reflect.DeepEqual(gotEntries, wantEntries) {
-				t.Fatalf("marshalTriggers() = %s, want [%s]", got, tc.json)
-			}
+			checkSameJSON(t, task, `{"Triggers":[`+tc.json+`]}`)
 		})
 	}
 }
 
-func TestFlattenTriggersNullsAbsentAttributes(t *testing.T) {
+func TestScheduledTaskReadNullsAbsentTriggerAttributes(t *testing.T) {
 	t.Parallel()
 
 	for name, tc := range triggerSerialisationCases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, diags := flattenTriggers(context.Background(), []json.RawMessage{json.RawMessage(tc.json)})
-			if diags.HasError() {
-				t.Fatalf("flattenTriggers() diagnostics: %v", diags)
-			}
+			got := readWire[ScheduledTaskResourceModel](t, scheduledTaskBinding(t), `{"Triggers":[`+tc.json+`]}`).Triggers
 			if want := triggerList(t, tc.trigger); !got.Equal(want) {
-				t.Fatalf("flattenTriggers() = %v, want %v", got, want)
+				t.Fatalf("triggers = %v, want %v", got, want)
 			}
 		})
 	}
 }
 
-func TestFlattenTriggersTreatsExplicitJSONNullAsNull(t *testing.T) {
+func TestScheduledTaskReadTreatsExplicitJSONNullAsNull(t *testing.T) {
 	t.Parallel()
 
-	raw := json.RawMessage(`{"Type":"IntervalTrigger","IntervalTicks":1,"TimeOfDayTicks":null,"DayOfWeek":null,"MaxRuntimeTicks":null}`)
-	got, diags := flattenTriggers(context.Background(), []json.RawMessage{raw})
-	if diags.HasError() {
-		t.Fatalf("flattenTriggers() diagnostics: %v", diags)
-	}
+	got := readWire[ScheduledTaskResourceModel](t, scheduledTaskBinding(t), `{"Triggers":[{"Type":"IntervalTrigger","IntervalTicks":1,"TimeOfDayTicks":null,"DayOfWeek":null,"MaxRuntimeTicks":null}]}`).Triggers
 
 	want := newTrigger(triggerTypeInterval)
 	want.IntervalTicks = types.Int64Value(1)
 	if !got.Equal(triggerList(t, want)) {
-		t.Fatalf("flattenTriggers() = %v, want %v", got, triggerList(t, want))
+		t.Fatalf("triggers = %v, want %v", got, triggerList(t, want))
 	}
 }
 
-func TestFlattenTriggersReturnsKnownEmptyListForNoTriggers(t *testing.T) {
+func TestScheduledTaskReadReturnsKnownEmptyListForNoTriggers(t *testing.T) {
 	t.Parallel()
 
-	got, diags := flattenTriggers(context.Background(), nil)
-	if diags.HasError() {
-		t.Fatalf("flattenTriggers() diagnostics: %v", diags)
-	}
-	if got.IsNull() || got.IsUnknown() || len(got.Elements()) != 0 {
-		t.Fatalf("flattenTriggers(nil) = %v, want a known empty list", got)
+	for _, task := range []string{`{"Triggers":[]}`, `{"Triggers":null}`, `{}`} {
+		got := readWire[ScheduledTaskResourceModel](t, scheduledTaskBinding(t), task).Triggers
+		if got.IsNull() || got.IsUnknown() || len(got.Elements()) != 0 {
+			t.Errorf("triggers read from %s = %v, want a known empty list", task, got)
+		}
 	}
 }
 

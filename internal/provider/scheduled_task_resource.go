@@ -11,7 +11,6 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -247,6 +246,7 @@ func (r *ScheduledTaskResource) Read(ctx context.Context, req resource.ReadReque
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
 	b := wireBinding(&resp.Diagnostics, scheduledTaskWire)
 	if b == nil {
 		return
@@ -355,66 +355,4 @@ func missingTriggerAttributes(t ScheduledTaskTriggerModel) []string {
 		}
 	}
 	return missing
-}
-
-func marshalTriggers(ctx context.Context, list types.List) (string, error) {
-	var triggers []ScheduledTaskTriggerModel
-	if diags := list.ElementsAs(ctx, &triggers, false); diags.HasError() {
-		return "", fmt.Errorf("extracting triggers: %v", diags)
-	}
-
-	rawEntries := make([]map[string]json.RawMessage, len(triggers))
-	for i, t := range triggers {
-		entry := map[string]json.RawMessage{}
-		putJSONString(entry, "Type", t.Type)
-		putJSONInt64(entry, "TimeOfDayTicks", t.TimeOfDayTicks)
-		putJSONInt64(entry, "IntervalTicks", t.IntervalTicks)
-		putJSONString(entry, "DayOfWeek", t.DayOfWeek)
-		putJSONInt64(entry, "MaxRuntimeTicks", t.MaxRuntimeTicks)
-		rawEntries[i] = entry
-	}
-
-	b, err := json.Marshal(rawEntries)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
-}
-
-func flattenTriggers(_ context.Context, raw []json.RawMessage) (types.List, diag.Diagnostics) {
-	var diags diag.Diagnostics
-	objType := types.ObjectType{AttrTypes: map[string]attr.Type{
-		"type":              types.StringType,
-		"time_of_day_ticks": types.Int64Type,
-		"interval_ticks":    types.Int64Type,
-		"day_of_week":       types.StringType,
-		"max_runtime_ticks": types.Int64Type,
-	}}
-
-	objects := make([]attr.Value, len(raw))
-	for i, r := range raw {
-		var entry map[string]json.RawMessage
-		if err := json.Unmarshal(r, &entry); err != nil {
-			return types.ListNull(objType), append(diags, diag.NewErrorDiagnostic("Failed to parse trigger", err.Error()))
-		}
-
-		attrs := map[string]attr.Value{
-			"type":              getJSONString(entry, "Type"),
-			"time_of_day_ticks": getJSONInt64(entry, "TimeOfDayTicks"),
-			"interval_ticks":    getJSONInt64(entry, "IntervalTicks"),
-			"day_of_week":       getJSONString(entry, "DayOfWeek"),
-			"max_runtime_ticks": getJSONInt64(entry, "MaxRuntimeTicks"),
-		}
-		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
-		if d.HasError() {
-			return types.ListNull(objType), append(diags, d...)
-		}
-		objects[i] = obj
-	}
-
-	list, d := types.ListValue(objType, objects)
-	if d.HasError() {
-		return types.ListNull(objType), append(diags, d...)
-	}
-	return list, diags
 }
