@@ -146,7 +146,9 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 					stringvalidator.OneOf(collectionTypes...),
 				},
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.RequiresReplaceIf(collectionTypeRequiresReplace,
+						"Changing the collection type replaces the library, except from an empty string to mixed.",
+						"Changing the collection type replaces the library, except from an empty string to `mixed`."),
 				},
 			},
 			"paths": schema.ListAttribute{
@@ -201,6 +203,15 @@ func flattenCollectionType(collectionType string) types.String {
 		return types.StringValue("mixed")
 	}
 	return types.StringValue(collectionType)
+}
+
+// Earlier provider versions stored a library without a collection type as "".
+// A refresh reads that as mixed, but a plan that skips the refresh, as
+// -refresh=false does, still compares mixed against "", and replacing the
+// library there would delete and recreate it for a collection type it already
+// has.
+func collectionTypeRequiresReplace(_ context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
+	resp.RequiresReplace = !req.StateValue.Equal(types.StringValue("")) || !req.PlanValue.Equal(types.StringValue("mixed"))
 }
 
 func libraryOptionsAttributes() map[string]schema.Attribute {
@@ -683,6 +694,22 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 	var state LibraryResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// With the options unchanged, the update can only be collection_type going
+	// from the "" earlier versions stored to mixed, which the server already
+	// has. Writing the options anyway would store them as the server reads
+	// them, and a plan made without a refresh, which carries the options from
+	// state written by an older version, need not match that.
+	var plannedOptions, priorOptions types.Object
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("library_options"), &plannedOptions)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("library_options"), &priorOptions)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if plannedOptions.Equal(priorOptions) {
+		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 		return
 	}
 

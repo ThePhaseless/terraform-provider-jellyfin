@@ -17,7 +17,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 func TestUnitLibraryOptionsOverlay(t *testing.T) {
@@ -378,6 +380,40 @@ func TestUnitFlattenCollectionTypeReadsMissingTypeAsMixed(t *testing.T) {
 	} {
 		if got := flattenCollectionType(server); got != types.StringValue(want) {
 			t.Errorf("flattenCollectionType(%q) = %v, want %q", server, got, want)
+		}
+	}
+}
+
+func TestUnitCollectionTypeChangeRequiresReplaceExceptEmptyToMixed(t *testing.T) {
+	schemaResp := resource.SchemaResponse{}
+	NewLibraryResource().Schema(context.Background(), resource.SchemaRequest{}, &schemaResp)
+	collectionType, ok := schemaResp.Schema.Attributes["collection_type"].(schema.StringAttribute)
+	if !ok {
+		t.Fatal("collection_type is not a string attribute")
+	}
+	existing := tftypes.NewValue(tftypes.Object{}, map[string]tftypes.Value{})
+
+	for _, test := range []struct {
+		state, plan string
+		want        bool
+	}{
+		{state: "", plan: "mixed", want: false},
+		{state: "", plan: "movies", want: true},
+		{state: "movies", plan: "mixed", want: true},
+		{state: "mixed", plan: "movies", want: true},
+	} {
+		resp := planmodifier.StringResponse{PlanValue: types.StringValue(test.plan)}
+		for _, m := range collectionType.PlanModifiers {
+			m.PlanModifyString(context.Background(), planmodifier.StringRequest{
+				State:       tfsdk.State{Raw: existing},
+				Plan:        tfsdk.Plan{Raw: existing},
+				ConfigValue: types.StringValue(test.plan),
+				PlanValue:   types.StringValue(test.plan),
+				StateValue:  types.StringValue(test.state),
+			}, &resp)
+		}
+		if resp.RequiresReplace != test.want {
+			t.Errorf("%q -> %q: requires replace %t, want %t", test.state, test.plan, resp.RequiresReplace, test.want)
 		}
 	}
 }
