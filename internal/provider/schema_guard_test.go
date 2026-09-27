@@ -108,10 +108,13 @@ list in the probe in testAccSecurityPluginPayloadShape fixes it. The golden
 changes when a new pin adds, removes or retypes a key. The test installs the
 plugin and restarts the server to load it, which it does only with
 JELLYFIN_RESTART_ACC=1, so CI runs it in a step of its own.`,
-	followUp: `jellyfin_security_plugin_configuration maps each key by hand, so update it in
-the same change: TestUnitJellyfinSecurityWritesBackExactlyTheServedKeys fails
-until the resource writes back exactly the keys the golden lists, less those
-securityPluginUnmanagedKeys excuses.`,
+	followUp: `jellyfin_security_plugin_configuration reads this golden at run time, through
+internal/wire, for the JSON key of each attribute, so a changed line can change
+what it sends although the test passes again. Run TestUnitWireBindings, review
+the diff of internal/provider/testdata/wire_bindings.golden it reports, where a
+key no attribute claims shows as kept, and fix the resource in the same change.
+TestUnitJellyfinSecurityWritesBackExactlyTheServedKeys fails while a rebuilt
+OIDC provider, user email or role mapping drops a key the golden lists.`,
 }
 
 // The spec types /System/Configuration/{key} as an opaque blob, so the schema
