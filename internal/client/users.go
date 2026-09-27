@@ -232,7 +232,7 @@ func (c *Client) AuthenticateByName(ctx context.Context, username, password stri
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("authentication failed for user %s (status %d): %s", username, resp.StatusCode, readResponseBody(resp.Body))
+		return nil, fmt.Errorf("authentication failed for user %s: %w", username, &HTTPError{Method: http.MethodPost, Path: "/Users/AuthenticateByName", StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)})
 	}
 
 	var result AuthResult

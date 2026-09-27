@@ -129,6 +129,22 @@ func TestUserAndAuthResponsesUseJellyfinIDCasing(t *testing.T) {
 	}
 }
 
+func TestAuthenticateByNameRejectionCarriesStatusCode(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("Invalid username or password entered."))
+	}))
+	defer server.Close()
+
+	_, err := NewClient(server.URL, "").AuthenticateByName(context.Background(), "viewer", "wrong")
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("AuthenticateByName() error = %v, want an HTTPError with status 401", err)
+	}
+}
+
 func TestGetUserPolicyRawKeepsFieldsMissingFromUserPolicy(t *testing.T) {
 	t.Parallel()
 
