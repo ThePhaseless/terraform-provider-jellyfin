@@ -31,7 +31,7 @@ resource "jellyfin_system_configuration" "test" {
   cast_receiver_applications = [{ id = "F007D354" }]
 }
 `,
-				ExpectError: regexp.MustCompile(`element 0:\s+attribute "name" is required`),
+				ExpectError: regexp.MustCompile(`"cast_receiver_applications\[0\]\.name"\s+must\s+be\s+specified`),
 			},
 			// Create and Read.
 			{
@@ -85,6 +85,18 @@ resource "jellyfin_system_configuration" "test" {
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.#", "2"),
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.1.id", "6F511C87"),
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.1.name", "Unstable"),
+				),
+			},
+			// Leaves every nested attribute out so the post-apply empty-plan check covers omitted lists and objects.
+			{
+				Config: `
+resource "jellyfin_system_configuration" "test" {
+  server_name = "UpdatedServer"
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.#", "2"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "trickplay_options.process_priority", "BelowNormal"),
 				),
 			},
 		},

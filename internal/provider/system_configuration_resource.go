@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -233,16 +234,9 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 		"to":   optionalString("To path."),
 	}
 
-	requiredString := func(desc string) schema.StringAttribute {
-		return schema.StringAttribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Required:            true,
-		}
-	}
 	castReceiverApplicationAttributes := map[string]schema.Attribute{
-		"id":   requiredString("Application ID."),
-		"name": requiredString("Application name."),
+		"id":   optionalString("Application ID. Must be set in every entry."),
+		"name": optionalString("Application name. Must be set in every entry."),
 	}
 
 	trickplayOptionsAttributes := map[string]schema.Attribute{
@@ -354,6 +348,13 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			"cast_receiver_applications": schema.ListNestedAttribute{
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: castReceiverApplicationAttributes,
+					// Required on id and name would make Terraform propose null for
+					// them whenever the list is left out of the configuration, so
+					// every plan would differ from state; the element validator
+					// enforces them only for entries that are configured.
+					Validators: []validator.Object{
+						objectvalidator.AlsoRequires(path.MatchRelative().AtName("id"), path.MatchRelative().AtName("name")),
+					},
 				},
 				Description:         "Cast receiver applications.",
 				MarkdownDescription: "Cast receiver applications.",

@@ -97,10 +97,10 @@ resource "jellyfin_system_configuration" "example" {
 <a id="nestedatt--cast_receiver_applications"></a>
 ### Nested Schema for `cast_receiver_applications`
 
-Required:
+Optional:
 
-- `id` (String) Application ID.
-- `name` (String) Application name.
+- `id` (String) Application ID. Must be set in every entry.
+- `name` (String) Application name. Must be set in every entry.
 
 
 <a id="nestedatt--content_types"></a>
