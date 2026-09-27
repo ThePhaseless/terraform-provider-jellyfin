@@ -31,9 +31,10 @@ func (b *Binding) OverlayModel(ctx context.Context, doc map[string]json.RawMessa
 // Overlay writes each known attribute of obj into doc, the document as the
 // server serves it, so the keys no attribute claims keep their served values.
 // A null attribute is left out unless it NullClears. Keys come from the
-// goldens only; a served key that differs from a written one only in case is
-// removed, because Jellyfin reads keys case-insensitively and would take
-// whichever comes last.
+// goldens only. A served key spelled otherwise than the golden stays: the
+// metadata, encoding, network and Live TV endpoints read keys case-sensitively,
+// so the served spelling may be the only one the server reads, and dropping it
+// would reset that setting to its default.
 func (b *Binding) Overlay(ctx context.Context, doc map[string]json.RawMessage, obj types.Object) diag.Diagnostics {
 	if doc == nil {
 		return diag.Diagnostics{diag.NewErrorDiagnostic("Missing Jellyfin document",
@@ -276,12 +277,6 @@ func put(ctx context.Context, doc map[string]json.RawMessage, keyPath []string, 
 		raw, diags = marshal(sub)
 		if diags.HasError() {
 			return diags
-		}
-	}
-	for served := range doc {
-		if served != key && strings.EqualFold(served, key) {
-			tflog.Debug(ctx, "Removing a served Jellyfin key spelled otherwise than the golden", map[string]any{"key": key, "served": served})
-			delete(doc, served)
 		}
 	}
 	doc[key] = raw

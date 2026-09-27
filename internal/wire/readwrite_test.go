@@ -243,7 +243,6 @@ func TestUnitOverlayWritesTheConfiguredValues(t *testing.T) {
 	m = with(t, m, "sub.limit", types.Int64Null())
 
 	served := doc(t, testServed)
-	served["name"] = json.RawMessage(`"shadow"`)
 	served["Types"] = json.RawMessage(`[{"Type": "Other"}, {"Type": "movie", "Extra": "e", "Images": [{"Type": "primary", "MinWidth": 3}]}]`)
 	if d := b.Overlay(ctx, served, object(t, m)); d.HasError() {
 		t.Fatal(d)
@@ -255,8 +254,21 @@ func TestUnitOverlayWritesTheConfiguredValues(t *testing.T) {
 	if got := canonical(t, served); got != want {
 		t.Errorf("overlay wrote\n%s\nwant\n%s", got, want)
 	}
-	if !strings.Contains(logs.String(), `"key":"Name"`) || !strings.Contains(logs.String(), `"key":"Sub.Other"`) || !strings.Contains(logs.String(), `"served":"name"`) {
+	if !strings.Contains(logs.String(), `"key":"Name"`) || !strings.Contains(logs.String(), `"key":"Sub.Other"`) {
 		t.Errorf("the writes are not logged:\n%s", logs.String())
+	}
+}
+
+func TestUnitOverlayKeepsAServedKeySpelledOtherwise(t *testing.T) {
+	ctx := context.Background()
+	b := testBinding(t)
+	model, _ := b.Flatten(ctx, doc(t, testServed), types.ObjectNull(b.AttrTypes))
+	served := doc(t, `{"name": "shadow"}`)
+	if d := b.Overlay(ctx, served, object(t, with(t, model, "name", types.StringValue("renamed")))); d.HasError() {
+		t.Fatal(d)
+	}
+	if got, want := string(served["name"])+" "+string(served["Name"]), `"shadow" "renamed"`; got != want {
+		t.Errorf("name and Name are %s, want %s", got, want)
 	}
 }
 
