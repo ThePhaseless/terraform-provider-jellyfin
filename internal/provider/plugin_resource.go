@@ -5,6 +5,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -28,6 +29,10 @@ const (
 	pluginInstallTimeout = 2 * time.Minute
 	pluginPollInterval   = 2 * time.Second
 )
+
+// pluginStatusDeleted is the status Jellyfin lists for a version it could not
+// remove from disk and deletes at the next restart instead.
+const pluginStatusDeleted = "Deleted"
 
 var (
 	_ resource.Resource                = &PluginResource{}
@@ -238,12 +243,62 @@ func (r *PluginResource) Delete(ctx context.Context, req resource.DeleteRequest,
 		return
 	}
 
-	if err := r.client.UninstallPlugin(ctx, data.ID.ValueString()); err != nil {
-		if client.IsNotFound(err) {
-			return
-		}
+	if err := r.uninstall(ctx, data.ID.ValueString()); err != nil {
 		resp.Diagnostics.AddError("Failed to uninstall plugin", err.Error())
 	}
+}
+
+// uninstall removes every listed version of the plugin with the given id.
+//
+// DELETE /Plugins/{id} removes one version, and after an update Jellyfin lists
+// both the running version and the one that loads at the next restart;
+// removing only one leaves the other to load at that restart. A failed request
+// still counts once the plugin is no longer listed, which is how an uninstall
+// that raced another one for the same plugin ends.
+func (r *PluginResource) uninstall(ctx context.Context, id string) error {
+	listed, err := r.listedVersions(ctx, id)
+	if err != nil {
+		return err
+	}
+	for len(listed) > 0 {
+		uninstallErr := r.client.UninstallPlugin(ctx, id)
+		if client.IsNotFound(uninstallErr) {
+			return nil
+		}
+		remaining, err := r.listedVersions(ctx, id)
+		if err != nil {
+			return errors.Join(uninstallErr, err)
+		}
+		if len(remaining) == 0 {
+			return nil
+		}
+		if uninstallErr != nil {
+			return uninstallErr
+		}
+		// Jellyfin answers 204 without removing a plugin it does not let users
+		// uninstall, so stop instead of asking again.
+		if len(remaining) >= len(listed) {
+			return fmt.Errorf("plugin %s is still listed at version %s after uninstalling it", id, strings.Join(remaining, ", "))
+		}
+		listed = remaining
+	}
+	return nil
+}
+
+// listedVersions returns the versions GET /Plugins lists for the plugin with
+// the given id, leaving out those Jellyfin deletes at the next restart.
+func (r *PluginResource) listedVersions(ctx context.Context, id string) ([]string, error) {
+	plugins, err := r.client.GetInstalledPlugins(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var versions []string
+	for _, p := range plugins {
+		if normalizeGUID(p.ID) == normalizeGUID(id) && p.Status != pluginStatusDeleted {
+			versions = append(versions, p.Version)
+		}
+	}
+	return versions, nil
 }
 
 // waitForPlugin blocks until name is installed at version and returns its id.
