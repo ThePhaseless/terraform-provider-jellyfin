@@ -1,0 +1,1 @@
+{"Name":"Extract Chapter Images","State":"Idle","Id":"4e6637c832ed644d1af3370a2506e80a","Triggers":[{"Type":"DailyTrigger","TimeOfDayTicks":72000000000,"MaxRuntimeTicks":144000000000}],"Description":"Creates thumbnails for videos that have chapters.","Category":"Library","IsHidden":false,"Key":"RefreshChapterImages"}
