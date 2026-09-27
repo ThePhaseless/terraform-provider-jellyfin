@@ -9,7 +9,14 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"sync"
 )
+
+// pluginChangeMu serialises plugin installs and uninstalls. Jellyfin's plugin
+// manager adds and removes entries in an unsynchronised list, so overlapping
+// requests fail with ArgumentOutOfRangeException or a missing meta.json and can
+// leave that list inconsistent until the server restarts.
+var pluginChangeMu sync.Mutex
 
 // PluginRepository represents a plugin repository.
 type PluginRepository struct {
@@ -90,14 +97,19 @@ func (c *Client) InstallPlugin(ctx context.Context, name, version, repositoryURL
 
 	path := fmt.Sprintf("/Packages/Installed/%s?%s", url.PathEscape(name), params.Encode())
 
+	pluginChangeMu.Lock()
+	defer pluginChangeMu.Unlock()
 	if err := c.post(ctx, path, nil); err != nil {
 		return fmt.Errorf("installing plugin %s version %s: %w", name, version, err)
 	}
 	return nil
 }
 
-// UninstallPlugin removes an installed plugin by its ID.
+// UninstallPlugin removes one installed version of a plugin by its ID; with
+// several versions listed, Jellyfin picks one that is not loaded first.
 func (c *Client) UninstallPlugin(ctx context.Context, pluginID string) error {
+	pluginChangeMu.Lock()
+	defer pluginChangeMu.Unlock()
 	if err := c.delete(ctx, fmt.Sprintf("/Plugins/%s", url.PathEscape(pluginID))); err != nil {
 		return fmt.Errorf("uninstalling plugin %s: %w", pluginID, err)
 	}
