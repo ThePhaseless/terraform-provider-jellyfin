@@ -69,8 +69,14 @@ func (r *PluginResource) Metadata(_ context.Context, req resource.MetadataReques
 
 func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Installs a plugin on the Jellyfin server. The server may require a restart after installation.",
-		MarkdownDescription: "Installs a plugin on the Jellyfin server. The server may require a restart after installation.",
+		Description: "Installs a plugin on the Jellyfin server. The server may require a restart after installation.\n\n" +
+			"Jellyfin's Update Plugins scheduled task (key PluginUpdates) runs at startup and every 24 hours by default and upgrades every plugin to the newest compatible version its repositories offer, and Jellyfin has no setting or API to exempt a single plugin. " +
+			"A pinned version therefore drifts once the task runs: the newer version loads at the next restart, and because changing version replaces the resource, the next apply reinstalls the pinned version, which the task upgrades again at the following startup. " +
+			"To keep a pin, remove the task's triggers with jellyfin_scheduled_task, which stops automatic updates for every plugin. To follow updates instead, leave version unset or add lifecycle { ignore_changes = [version] }.",
+		MarkdownDescription: "Installs a plugin on the Jellyfin server. The server may require a restart after installation.\n\n" +
+			"Jellyfin's *Update Plugins* scheduled task (key `PluginUpdates`) runs at startup and every 24 hours by default and upgrades every plugin to the newest compatible version its repositories offer, and Jellyfin has no setting or API to exempt a single plugin. " +
+			"A pinned `version` therefore drifts once the task runs: the newer version loads at the next restart, and because changing `version` replaces the resource, the next apply reinstalls the pinned version, which the task upgrades again at the following startup. " +
+			"To keep a pin, remove the task's triggers with `jellyfin_scheduled_task`, which stops automatic updates for every plugin. To follow updates instead, leave `version` unset or add `lifecycle { ignore_changes = [version] }`.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description:         "The plugin ID assigned by Jellyfin after installation.",

@@ -6,7 +6,9 @@ package provider
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -174,6 +176,85 @@ resource "jellyfin_plugin" "test" {
 			},
 		},
 	})
+}
+
+// TestAccPluginResourcePinnedVersionSurvivesRestart follows the resource's
+// documented way to keep a pinned version: Jellyfin's plugin update task runs
+// at startup, so it only stays pinned across a restart with the task's
+// triggers removed.
+func TestAccPluginResourcePinnedVersionSurvivesRestart(t *testing.T) {
+	if os.Getenv("JELLYFIN_RESTART_ACC") == "" {
+		t.Skip("set JELLYFIN_RESTART_ACC=1 to run tests that restart the server; run against a disposable Jellyfin (e.g. the bundled docker-compose) in isolation, not a shared instance")
+	}
+	pkg := testAccFindUninstalledPackage(t, stableRepoURL, 2)
+	pinned := pkg.Versions[1].Version
+
+	var taskID string
+	tasks, err := testAccClient(t).GetScheduledTasks(t.Context())
+	if err != nil {
+		t.Fatalf("listing scheduled tasks: %v", err)
+	}
+	for _, task := range tasks {
+		if task.Key == "PluginUpdates" {
+			taskID = task.ID
+		}
+	}
+	if taskID == "" {
+		t.Fatal("scheduled task PluginUpdates not found")
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+resource "jellyfin_scheduled_task" "plugin_updates" {
+  task_id  = %q
+  triggers = []
+}
+
+resource "jellyfin_plugin" "test" {
+  name           = %q
+  version        = %q
+  repository_url = %q
+
+  depends_on = [jellyfin_scheduled_task.plugin_updates]
+}
+
+resource "jellyfin_restart" "test" {
+  triggers = {
+    plugin_version = jellyfin_plugin.test.installed_version
+  }
+}
+`, taskID, pkg.Name, pinned, stableRepoURL),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "installed_version", pinned),
+					testAccCheckPluginStaysAt(t, pkg.Name, pinned),
+				),
+			},
+		},
+	})
+}
+
+// testAccCheckPluginStaysAt fails if Jellyfin lists the named plugin at any
+// version other than want during the time its startup tasks take to run.
+func testAccCheckPluginStaysAt(t *testing.T, name, want string) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		c := testAccClient(t)
+		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(pluginPollInterval) {
+			plugins, err := c.GetInstalledPlugins(context.Background())
+			if err != nil {
+				return err
+			}
+			for _, p := range plugins {
+				if p.Name == name && p.Status != pluginStatusDeleted && p.Version != want {
+					return fmt.Errorf("%s is listed at %s (%s) next to the pinned %s", name, p.Version, p.Status, want)
+				}
+			}
+		}
+		return nil
+	}
 }
 
 // testAccCheckPluginNotListed fails while Jellyfin lists any version of the

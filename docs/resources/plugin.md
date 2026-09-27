@@ -4,19 +4,31 @@ page_title: "jellyfin_plugin Resource - jellyfin"
 subcategory: ""
 description: |-
   Installs a plugin on the Jellyfin server. The server may require a restart after installation.
+  Jellyfin's Update Plugins scheduled task (key PluginUpdates) runs at startup and every 24 hours by default and upgrades every plugin to the newest compatible version its repositories offer, and Jellyfin has no setting or API to exempt a single plugin. A pinned version therefore drifts once the task runs: the newer version loads at the next restart, and because changing version replaces the resource, the next apply reinstalls the pinned version, which the task upgrades again at the following startup. To keep a pin, remove the task's triggers with jellyfin_scheduled_task, which stops automatic updates for every plugin. To follow updates instead, leave version unset or add lifecycle { ignore_changes = [version] }.
 ---
 
 # jellyfin_plugin (Resource)
 
 Installs a plugin on the Jellyfin server. The server may require a restart after installation.
 
+Jellyfin's *Update Plugins* scheduled task (key `PluginUpdates`) runs at startup and every 24 hours by default and upgrades every plugin to the newest compatible version its repositories offer, and Jellyfin has no setting or API to exempt a single plugin. A pinned `version` therefore drifts once the task runs: the newer version loads at the next restart, and because changing `version` replaces the resource, the next apply reinstalls the pinned version, which the task upgrades again at the following startup. To keep a pin, remove the task's triggers with `jellyfin_scheduled_task`, which stops automatic updates for every plugin. To follow updates instead, leave `version` unset or add `lifecycle { ignore_changes = [version] }`.
+
 ## Example Usage
 
 ```terraform
 resource "jellyfin_plugin" "example" {
   name           = "Bookshelf"
-  version        = "14.0.0.0"
+  version        = "13.0.0.0"
   repository_url = "https://repo.jellyfin.org/files/plugin/manifest.json"
+}
+
+# Jellyfin's Update Plugins task upgrades every plugin at startup and daily, so
+# Bookshelf would leave the pinned version once a newer one is released.
+# Without triggers the task never runs, which stops automatic updates for every
+# plugin.
+resource "jellyfin_scheduled_task" "plugin_updates" {
+  task_id  = "f9b057c054e9e6daee4a88ffd146a403"
+  triggers = []
 }
 ```
 
