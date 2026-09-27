@@ -5,7 +5,10 @@ on:
   pull_request:
     paths-ignore:
       - 'README.md'
+  # Branches are covered by their PR's pull_request run; push on every branch
+  # ran the suite twice per PR.
   push:
+    branches: [main]
     paths-ignore:
       - 'README.md'
 
@@ -41,7 +44,10 @@ jobs:
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_wrapper: false
-      - run: make generate
+      # go mod tidy raises tools/go.mod's go line past the provider's whenever
+      # a generator dependency needs a newer Go. Under the GOTOOLCHAIN=local
+      # that setup-go exports, go then fails instead of fetching the toolchain.
+      - run: GOTOOLCHAIN=auto make generate
       - name: git diff
         run: |
           git diff --compact-summary --exit-code || \
@@ -69,10 +75,13 @@ jobs:
       - name: Setup Jellyfin
         run: |
           chmod +x scripts/setup_jellyfin.sh
-          eval "$(scripts/setup_jellyfin.sh 2>/dev/null | grep '^export ')"
-          echo "JELLYFIN_ENDPOINT=${JELLYFIN_ENDPOINT}" >> "$GITHUB_ENV"
-          echo "JELLYFIN_USERNAME=${JELLYFIN_USERNAME}" >> "$GITHUB_ENV"
-          echo "JELLYFIN_PASSWORD=${JELLYFIN_PASSWORD}" >> "$GITHUB_ENV"
+          exports="$(scripts/setup_jellyfin.sh | grep '^export ')"
+          eval "$exports"
+          {
+            echo "JELLYFIN_ENDPOINT=${JELLYFIN_ENDPOINT}"
+            echo "JELLYFIN_USERNAME=${JELLYFIN_USERNAME}"
+            echo "JELLYFIN_PASSWORD=${JELLYFIN_PASSWORD}"
+          } >> "$GITHUB_ENV"
 
       - name: Run acceptance tests
         env:
@@ -83,17 +92,22 @@ jobs:
       - name: Run import tool e2e tests
         # JELLYFIN_ENDPOINT, JELLYFIN_USERNAME, and JELLYFIN_PASSWORD are set via $GITHUB_ENV in "Setup Jellyfin" step.
         # Disable Go test caching because these tests depend on the Jellyfin container state from the prior step.
+        env:
+          TF_ACC: "1"
         run: go test -count=1 -v -timeout 5m -run 'TestAcc' ./cmd/jellyfin-import/
 
-      - name: Run restart acceptance test (isolated)
-        # Runs the disruptive jellyfin_restart test on its own, after the rest of
-        # the suite, so its server restart cannot disrupt other acceptance tests
-        # sharing this Jellyfin. The main "Run acceptance tests" step leaves
-        # JELLYFIN_RESTART_ACC unset, so TestAccRestartResource skips there.
+      - name: Run restart acceptance tests (isolated)
+        # Runs the tests that restart the server (jellyfin_restart, the
+        # JellyfinSecurity tests that must restart to load the plugin, and the
+        # jellyfin_plugin test that keeps a pinned version across a restart) on
+        # their own, after the rest of the suite, so a restart cannot disrupt
+        # other acceptance tests sharing this Jellyfin. The main "Run
+        # acceptance tests" step leaves JELLYFIN_RESTART_ACC unset, so they
+        # skip there.
         env:
           TF_ACC: "1"
           JELLYFIN_RESTART_ACC: "1"
-        run: go test -count=1 -v -timeout 5m -run TestAccRestartResource ./internal/provider/
+        run: go test -count=1 -v -timeout 10m -run 'TestAccRestartResource|TestAccSecurityPlugin|TestAccPluginResourcePin' ./internal/provider/
 
       - name: Stop Jellyfin
         if: always()

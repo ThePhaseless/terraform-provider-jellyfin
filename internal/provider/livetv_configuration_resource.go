@@ -10,6 +10,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
@@ -181,24 +182,26 @@ func (r *LiveTVConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: tunerHostAttributes(),
 				},
-				Description:         "Tuner hosts.",
-				MarkdownDescription: "Tuner hosts.",
+				Description:         "Tuner hosts. An entry keeps the settings it does not configure from the existing entry with the same `id`, else the same `url`, else the same `type`.",
+				MarkdownDescription: "Tuner hosts. An entry keeps the settings it does not configure from the existing entry with the same `id`, else the same `url`, else the same `type`.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.List{
 					listplanmodifier.UseStateForUnknown(),
+					useStateForUnknownByKey([]string{"id"}, []string{"url"}, []string{"type"}),
 				},
 			},
 			"listing_providers": schema.ListNestedAttribute{
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: listingProviderAttributes(),
 				},
-				Description:         "Listing providers.",
-				MarkdownDescription: "Listing providers.",
+				Description:         "Listing providers. An entry keeps the settings it does not configure from the existing entry with the same `id`, else the same `type` and `listings_id`, else the same `type` and `path`, else the same `type`.",
+				MarkdownDescription: "Listing providers. An entry keeps the settings it does not configure from the existing entry with the same `id`, else the same `type` and `listings_id`, else the same `type` and `path`, else the same `type`.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.List{
 					listplanmodifier.UseStateForUnknown(),
+					useStateForUnknownByKey([]string{"id"}, []string{"type", "listings_id"}, []string{"type", "path"}, []string{"type"}),
 				},
 			},
 			"pre_padding_seconds": schema.Int64Attribute{
@@ -219,15 +222,15 @@ func (r *LiveTVConfigurationResource) Schema(_ context.Context, _ resource.Schem
 					int64planmodifier.UseStateForUnknown(),
 				},
 			},
+			// No UseStateForUnknown: Jellyfin rewrites this list in the background
+			// whenever a save points a recording path at an existing directory, so
+			// a value carried over from state would not match the one read back.
 			"media_locations_created": schema.ListAttribute{
 				ElementType:         types.StringType,
-				Description:         "Media locations created.",
-				MarkdownDescription: "Media locations created.",
+				Description:         "Recording folders Jellyfin has added as libraries. Jellyfin maintains this list itself when a recording path points at an existing directory, so it is usually left unset.",
+				MarkdownDescription: "Recording folders Jellyfin has added as libraries. Jellyfin maintains this list itself when a recording path points at an existing directory, so it is usually left unset.",
 				Optional:            true,
 				Computed:            true,
-				PlanModifiers: []planmodifier.List{
-					listplanmodifier.UseStateForUnknown(),
-				},
 			},
 			"recording_post_processor": schema.StringAttribute{
 				Description:         "Recording post processor.",
@@ -269,15 +272,17 @@ func (r *LiveTVConfigurationResource) Schema(_ context.Context, _ resource.Schem
 	}
 }
 
+// The nested attributes carry no UseStateForUnknown: it pairs list elements by
+// index, so tuner_hosts and listing_providers fill their unknowns by key instead.
 func tunerHostAttributes() map[string]schema.Attribute {
 	optionalString := func(desc string) schema.StringAttribute {
-		return schema.StringAttribute{Description: desc, MarkdownDescription: desc, Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}}
+		return schema.StringAttribute{Description: desc, MarkdownDescription: desc, Optional: true, Computed: true}
 	}
 	optionalBool := func(desc string) schema.BoolAttribute {
-		return schema.BoolAttribute{Description: desc, MarkdownDescription: desc, Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}}
+		return schema.BoolAttribute{Description: desc, MarkdownDescription: desc, Optional: true, Computed: true}
 	}
 	optionalInt := func(desc string) schema.Int64Attribute {
-		return schema.Int64Attribute{Description: desc, MarkdownDescription: desc, Optional: true, Computed: true, PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()}}
+		return schema.Int64Attribute{Description: desc, MarkdownDescription: desc, Optional: true, Computed: true}
 	}
 	return map[string]schema.Attribute{
 		"id":                               optionalString("Tuner host ID."),
@@ -301,13 +306,13 @@ func tunerHostAttributes() map[string]schema.Attribute {
 
 func listingProviderAttributes() map[string]schema.Attribute {
 	optionalString := func(desc string) schema.StringAttribute {
-		return schema.StringAttribute{Description: desc, MarkdownDescription: desc, Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}}
+		return schema.StringAttribute{Description: desc, MarkdownDescription: desc, Optional: true, Computed: true}
 	}
 	optionalBool := func(desc string) schema.BoolAttribute {
-		return schema.BoolAttribute{Description: desc, MarkdownDescription: desc, Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}}
+		return schema.BoolAttribute{Description: desc, MarkdownDescription: desc, Optional: true, Computed: true}
 	}
 	optionalStringList := func(desc string) schema.ListAttribute {
-		return schema.ListAttribute{ElementType: types.StringType, Description: desc, MarkdownDescription: desc, Optional: true, Computed: true, PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}}
+		return schema.ListAttribute{ElementType: types.StringType, Description: desc, MarkdownDescription: desc, Optional: true, Computed: true}
 	}
 	return map[string]schema.Attribute{
 		"id":       optionalString("Provider ID."),
@@ -316,7 +321,6 @@ func listingProviderAttributes() map[string]schema.Attribute {
 		"password": schema.StringAttribute{
 			Description: "Password.", MarkdownDescription: "Password.",
 			Optional: true, Computed: true, Sensitive: true,
-			PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 		},
 		"listings_id":       optionalString("Listings ID."),
 		"zip_code":          optionalString("ZIP code."),
@@ -337,7 +341,6 @@ func listingProviderAttributes() map[string]schema.Attribute {
 			},
 			Description: "Channel mappings.", MarkdownDescription: "Channel mappings.",
 			Optional: true, Computed: true,
-			PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()},
 		},
 		"movie_prefix":       optionalString("Movie prefix."),
 		"preferred_language": optionalString("Preferred language."),
@@ -397,8 +400,10 @@ func (r *LiveTVConfigurationResource) Delete(_ context.Context, _ resource.Delet
 }
 
 func (r *LiveTVConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	data := LiveTVConfigurationResourceModel{ID: types.StringValue("livetv")}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	// Set only the id: the framework types every other attribute from the
+	// schema, and the Read that follows an import fills them. Writing a
+	// zero-valued model here left list attributes without an element type.
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("livetv"))...)
 }
 
 func (r *LiveTVConfigurationResource) apply(ctx context.Context, data *LiveTVConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {

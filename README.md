@@ -17,7 +17,7 @@ A [Terraform](https://www.terraform.io) provider for managing [Jellyfin](https:/
 ## Requirements
 
 - [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.0
-- [Go](https://golang.org/doc/install) >= 1.24
+- [Go](https://golang.org/doc/install) at or above the `go` line in `go.mod` to build the provider, and in `tools/go.mod` to run `make generate`
 - A running Jellyfin server instance
 
 ## Quick Start
@@ -146,15 +146,13 @@ go install
 Start a local Jellyfin instance:
 
 ```shell
-docker compose up -d
-./scripts/setup_jellyfin.sh
+docker compose --env-file internal/provider/supported_jellyfin_version.env up -d
+eval "$(./scripts/setup_jellyfin.sh | grep '^export ')"
 ```
 
 Run acceptance tests:
 
 ```shell
-export JELLYFIN_ENDPOINT=http://localhost:8096
-export JELLYFIN_API_KEY=<from setup script>
 TF_ACC=1 go test -v ./internal/provider/
 ```
 

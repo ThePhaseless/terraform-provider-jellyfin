@@ -8,7 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
@@ -17,6 +20,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -86,8 +90,10 @@ type EncodingConfigurationResourceModel struct {
 	AllowHevcEncoding                                         types.Bool    `tfsdk:"allow_hevc_encoding"`
 	AllowAv1Encoding                                          types.Bool    `tfsdk:"allow_av1_encoding"`
 	EnableSubtitleExtraction                                  types.Bool    `tfsdk:"enable_subtitle_extraction"`
+	SubtitleExtractionTimeoutMinutes                          types.Int64   `tfsdk:"subtitle_extraction_timeout_minutes"`
 	HardwareDecodingCodecs                                    types.List    `tfsdk:"hardware_decoding_codecs"`
 	AllowOnDemandMetadataBasedKeyframeExtractionForExtensions types.List    `tfsdk:"allow_on_demand_metadata_based_keyframe_extraction_for_extensions"`
+	HlsAudioSeekStrategy                                      types.String  `tfsdk:"hls_audio_seek_strategy"`
 }
 
 func (r *EncodingConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -113,13 +119,13 @@ func (r *EncodingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 			"enable_fallback_font":                    schema.BoolAttribute{Description: "Whether fallback font is enabled.", MarkdownDescription: "Whether fallback font is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 			"enable_audio_vbr":                        schema.BoolAttribute{Description: "Whether audio VBR is enabled.", MarkdownDescription: "Whether audio VBR is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 			"down_mix_audio_boost":                    schema.Float64Attribute{Description: "Down-mix audio boost.", MarkdownDescription: "Down-mix audio boost.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Float64{float64planmodifier.UseStateForUnknown()}},
-			"down_mix_stereo_algorithm":               schema.StringAttribute{Description: "Down-mix stereo algorithm.", MarkdownDescription: "Down-mix stereo algorithm.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
+			"down_mix_stereo_algorithm":               schema.StringAttribute{Description: "Down-mix stereo algorithm. One of `None`, `Dave750`, `NightmodeDialogue`, `Rfc7845`, `Ac4`.", MarkdownDescription: "Down-mix stereo algorithm. One of `None`, `Dave750`, `NightmodeDialogue`, `Rfc7845`, `Ac4`.", Optional: true, Computed: true, Validators: []validator.String{stringvalidator.OneOf("None", "Dave750", "NightmodeDialogue", "Rfc7845", "Ac4")}, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 			"max_muxing_queue_size":                   schema.Int64Attribute{Description: "Max muxing queue size.", MarkdownDescription: "Max muxing queue size.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()}},
 			"enable_throttling":                       schema.BoolAttribute{Description: "Whether throttling is enabled.", MarkdownDescription: "Whether throttling is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 			"throttle_delay_seconds":                  schema.Int64Attribute{Description: "Throttle delay in seconds.", MarkdownDescription: "Throttle delay in seconds.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()}},
 			"enable_segment_deletion":                 schema.BoolAttribute{Description: "Whether segment deletion is enabled.", MarkdownDescription: "Whether segment deletion is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 			"segment_keep_seconds":                    schema.Int64Attribute{Description: "Segment keep time in seconds.", MarkdownDescription: "Segment keep time in seconds.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()}},
-			"hardware_acceleration_type":              schema.StringAttribute{Description: "Hardware acceleration type.", MarkdownDescription: "Hardware acceleration type.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
+			"hardware_acceleration_type":              schema.StringAttribute{Description: "Hardware acceleration type. One of `none`, `amf`, `qsv`, `nvenc`, `v4l2m2m`, `vaapi`, `videotoolbox`, `rkmpp`.", MarkdownDescription: "Hardware acceleration type. One of `none`, `amf`, `qsv`, `nvenc`, `v4l2m2m`, `vaapi`, `videotoolbox`, `rkmpp`.", Optional: true, Computed: true, Validators: []validator.String{stringvalidator.OneOf("none", "amf", "qsv", "nvenc", "v4l2m2m", "vaapi", "videotoolbox", "rkmpp")}, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 			"encoder_app_path":                        schema.StringAttribute{Description: "Encoder application path.", MarkdownDescription: "Encoder application path.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 			"encoder_app_path_display":                schema.StringAttribute{Description: "Encoder application display path.", MarkdownDescription: "Encoder application display path.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 			"vaapi_device":                            schema.StringAttribute{Description: "VAAPI device.", MarkdownDescription: "VAAPI device.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
@@ -127,9 +133,9 @@ func (r *EncodingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 			"enable_tonemapping":                      schema.BoolAttribute{Description: "Whether tonemapping is enabled.", MarkdownDescription: "Whether tonemapping is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 			"enable_vpp_tonemapping":                  schema.BoolAttribute{Description: "Whether VPP tonemapping is enabled.", MarkdownDescription: "Whether VPP tonemapping is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 			"enable_video_toolbox_tonemapping":        schema.BoolAttribute{Description: "Whether VideoToolbox tonemapping is enabled.", MarkdownDescription: "Whether VideoToolbox tonemapping is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
-			"tonemapping_algorithm":                   schema.StringAttribute{Description: "Tonemapping algorithm.", MarkdownDescription: "Tonemapping algorithm.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
-			"tonemapping_mode":                        schema.StringAttribute{Description: "Tonemapping mode.", MarkdownDescription: "Tonemapping mode.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
-			"tonemapping_range":                       schema.StringAttribute{Description: "Tonemapping range.", MarkdownDescription: "Tonemapping range.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
+			"tonemapping_algorithm":                   schema.StringAttribute{Description: "Tonemapping algorithm. One of `none`, `clip`, `linear`, `gamma`, `reinhard`, `hable`, `mobius`, `bt2390`.", MarkdownDescription: "Tonemapping algorithm. One of `none`, `clip`, `linear`, `gamma`, `reinhard`, `hable`, `mobius`, `bt2390`.", Optional: true, Computed: true, Validators: []validator.String{stringvalidator.OneOf("none", "clip", "linear", "gamma", "reinhard", "hable", "mobius", "bt2390")}, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
+			"tonemapping_mode":                        schema.StringAttribute{Description: "Tonemapping mode. One of `auto`, `max`, `rgb`, `lum`, `itp`.", MarkdownDescription: "Tonemapping mode. One of `auto`, `max`, `rgb`, `lum`, `itp`.", Optional: true, Computed: true, Validators: []validator.String{stringvalidator.OneOf("auto", "max", "rgb", "lum", "itp")}, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
+			"tonemapping_range":                       schema.StringAttribute{Description: "Tonemapping range. One of `auto`, `tv`, `pc`.", MarkdownDescription: "Tonemapping range. One of `auto`, `tv`, `pc`.", Optional: true, Computed: true, Validators: []validator.String{stringvalidator.OneOf("auto", "tv", "pc")}, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 			"tonemapping_desat":                       schema.Float64Attribute{Description: "Tonemapping desaturation.", MarkdownDescription: "Tonemapping desaturation.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Float64{float64planmodifier.UseStateForUnknown()}},
 			"tonemapping_peak":                        schema.Float64Attribute{Description: "Tonemapping peak.", MarkdownDescription: "Tonemapping peak.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Float64{float64planmodifier.UseStateForUnknown()}},
 			"tonemapping_param":                       schema.Float64Attribute{Description: "Tonemapping parameter.", MarkdownDescription: "Tonemapping parameter.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Float64{float64planmodifier.UseStateForUnknown()}},
@@ -137,9 +143,9 @@ func (r *EncodingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 			"vpp_tonemapping_contrast":                schema.Float64Attribute{Description: "VPP tonemapping contrast.", MarkdownDescription: "VPP tonemapping contrast.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Float64{float64planmodifier.UseStateForUnknown()}},
 			"h264_crf":                                schema.Int64Attribute{Description: "H264 CRF.", MarkdownDescription: "H264 CRF.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()}},
 			"h265_crf":                                schema.Int64Attribute{Description: "H265 CRF.", MarkdownDescription: "H265 CRF.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()}},
-			"encoder_preset":                          schema.StringAttribute{Description: "Encoder preset.", MarkdownDescription: "Encoder preset.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
+			"encoder_preset":                          schema.StringAttribute{Description: "Encoder preset. One of `auto`, `placebo`, `veryslow`, `slower`, `slow`, `medium`, `fast`, `faster`, `veryfast`, `superfast`, `ultrafast`.", MarkdownDescription: "Encoder preset. One of `auto`, `placebo`, `veryslow`, `slower`, `slow`, `medium`, `fast`, `faster`, `veryfast`, `superfast`, `ultrafast`.", Optional: true, Computed: true, Validators: []validator.String{stringvalidator.OneOf("auto", "placebo", "veryslow", "slower", "slow", "medium", "fast", "faster", "veryfast", "superfast", "ultrafast")}, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 			"deinterlace_double_rate":                 schema.BoolAttribute{Description: "Whether deinterlace double rate is enabled.", MarkdownDescription: "Whether deinterlace double rate is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
-			"deinterlace_method":                      schema.StringAttribute{Description: "Deinterlace method.", MarkdownDescription: "Deinterlace method.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
+			"deinterlace_method":                      schema.StringAttribute{Description: "Deinterlace method. One of `yadif`, `bwdif`.", MarkdownDescription: "Deinterlace method. One of `yadif`, `bwdif`.", Optional: true, Computed: true, Validators: []validator.String{stringvalidator.OneOf("yadif", "bwdif")}, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 			"enable_decoding_color_depth10_hevc":      schema.BoolAttribute{Description: "Whether 10-bit HEVC decoding is enabled.", MarkdownDescription: "Whether 10-bit HEVC decoding is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 			"enable_decoding_color_depth10_vp9":       schema.BoolAttribute{Description: "Whether 10-bit VP9 decoding is enabled.", MarkdownDescription: "Whether 10-bit VP9 decoding is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 			"enable_decoding_color_depth10_hevc_rext": schema.BoolAttribute{Description: "Whether 10-bit HEVC RExt decoding is enabled.", MarkdownDescription: "Whether 10-bit HEVC RExt decoding is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
@@ -152,8 +158,10 @@ func (r *EncodingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 			"allow_hevc_encoding":                     schema.BoolAttribute{Description: "Whether HEVC encoding is allowed.", MarkdownDescription: "Whether HEVC encoding is allowed.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 			"allow_av1_encoding":                      schema.BoolAttribute{Description: "Whether AV1 encoding is allowed.", MarkdownDescription: "Whether AV1 encoding is allowed.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 			"enable_subtitle_extraction":              schema.BoolAttribute{Description: "Whether subtitle extraction is enabled.", MarkdownDescription: "Whether subtitle extraction is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
+			"subtitle_extraction_timeout_minutes":     schema.Int64Attribute{Description: "Subtitle extraction timeout in minutes. Requires Jellyfin 12.0 or later.", MarkdownDescription: "Subtitle extraction timeout in minutes. Requires Jellyfin 12.0 or later.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()}},
 			"hardware_decoding_codecs":                schema.ListAttribute{ElementType: types.StringType, Description: "Hardware decoding codecs.", MarkdownDescription: "Hardware decoding codecs.", Optional: true, Computed: true, PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}},
 			"allow_on_demand_metadata_based_keyframe_extraction_for_extensions": schema.ListAttribute{ElementType: types.StringType, Description: "Extensions allowing on-demand metadata-based keyframe extraction.", MarkdownDescription: "Extensions allowing on-demand metadata-based keyframe extraction.", Optional: true, Computed: true, PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}},
+			"hls_audio_seek_strategy": schema.StringAttribute{Description: "Method used to seek the audio stream when transcoding HLS segments. One of `TrimCopiedAudio`, `TranscodeAudio`. Requires Jellyfin 12.0 or later.", MarkdownDescription: "Method used to seek the audio stream when transcoding HLS segments. One of `TrimCopiedAudio`, `TranscodeAudio`. Requires Jellyfin 12.0 or later.", Optional: true, Computed: true, Validators: []validator.String{stringvalidator.OneOf("TrimCopiedAudio", "TranscodeAudio")}, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 		},
 	}
 }
@@ -211,8 +219,10 @@ func (r *EncodingConfigurationResource) Delete(_ context.Context, _ resource.Del
 
 func (r *EncodingConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Singleton resource — the import ID is not used. Read will populate all fields.
-	data := EncodingConfigurationResourceModel{ID: types.StringValue("encoding")}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	// Set only the id: the framework types every other attribute from the
+	// schema, and the Read that follows an import fills them. Writing a
+	// zero-valued model here left list attributes without an element type.
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("encoding"))...)
 }
 
 func (r *EncodingConfigurationResource) apply(ctx context.Context, data *EncodingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
@@ -225,6 +235,11 @@ func (r *EncodingConfigurationResource) apply(ctx context.Context, data *Encodin
 	base, err := parseJSONObject(current.RawJSON)
 	if err != nil {
 		diags.AddError("Failed to parse current encoding configuration", err.Error())
+		return
+	}
+
+	if d := checkJellyfin12EncodingKeys(base, data); d.HasError() {
+		diags.Append(d...)
 		return
 	}
 
@@ -266,6 +281,34 @@ func (r *EncodingConfigurationResource) read(ctx context.Context, data *Encoding
 	flattenEncodingConfiguration(ctx, current.RawJSON, data, diags)
 	data.ID = types.StringValue("encoding")
 	diags.Append(state.Set(ctx, data)...)
+}
+
+// Older servers accept the POST and silently drop keys they do not know, which
+// would otherwise surface only as the framework's generic "inconsistent result
+// after apply" error, repeated on every apply.
+func checkJellyfin12EncodingKeys(m map[string]json.RawMessage, data *EncodingConfigurationResourceModel) diag.Diagnostics {
+	var diags diag.Diagnostics
+	for _, f := range []struct {
+		attribute string
+		key       string
+		value     attr.Value
+	}{
+		{"subtitle_extraction_timeout_minutes", "SubtitleExtractionTimeoutMinutes", data.SubtitleExtractionTimeoutMinutes},
+		{"hls_audio_seek_strategy", "HlsAudioSeekStrategy", data.HlsAudioSeekStrategy},
+	} {
+		if f.value.IsNull() || f.value.IsUnknown() {
+			continue
+		}
+		if _, ok := m[f.key]; ok {
+			continue
+		}
+		diags.AddAttributeError(
+			path.Root(f.attribute),
+			"Unsupported Jellyfin server version",
+			fmt.Sprintf("%s requires Jellyfin 12.0 or later: the server's encoding configuration has no %s field, so it would discard the value. Remove %s from the configuration or upgrade the server.", f.attribute, f.key, f.attribute),
+		)
+	}
+	return diags
 }
 
 func overlayEncodingConfiguration(ctx context.Context, m map[string]json.RawMessage, data *EncodingConfigurationResourceModel) diag.Diagnostics {
@@ -315,12 +358,14 @@ func overlayEncodingConfiguration(ctx context.Context, m map[string]json.RawMess
 	putJSONBool(m, "AllowHevcEncoding", data.AllowHevcEncoding)
 	putJSONBool(m, "AllowAv1Encoding", data.AllowAv1Encoding)
 	putJSONBool(m, "EnableSubtitleExtraction", data.EnableSubtitleExtraction)
+	putJSONInt64(m, "SubtitleExtractionTimeoutMinutes", data.SubtitleExtractionTimeoutMinutes)
 	if d := putJSONStringList(ctx, m, "HardwareDecodingCodecs", data.HardwareDecodingCodecs); d.HasError() {
 		return d
 	}
 	if d := putJSONStringList(ctx, m, "AllowOnDemandMetadataBasedKeyframeExtractionForExtensions", data.AllowOnDemandMetadataBasedKeyframeExtractionForExtensions); d.HasError() {
 		return d
 	}
+	putJSONString(m, "HlsAudioSeekStrategy", data.HlsAudioSeekStrategy)
 	return diags
 }
 
@@ -375,6 +420,8 @@ func flattenEncodingConfiguration(ctx context.Context, raw string, data *Encodin
 	data.AllowHevcEncoding = getJSONBool(m, "AllowHevcEncoding")
 	data.AllowAv1Encoding = getJSONBool(m, "AllowAv1Encoding")
 	data.EnableSubtitleExtraction = getJSONBool(m, "EnableSubtitleExtraction")
+	data.SubtitleExtractionTimeoutMinutes = getJSONInt64(m, "SubtitleExtractionTimeoutMinutes")
 	data.HardwareDecodingCodecs, _ = getJSONStringList(ctx, m, "HardwareDecodingCodecs")
 	data.AllowOnDemandMetadataBasedKeyframeExtractionForExtensions, _ = getJSONStringList(ctx, m, "AllowOnDemandMetadataBasedKeyframeExtractionForExtensions")
+	data.HlsAudioSeekStrategy = getJSONString(m, "HlsAudioSeekStrategy")
 }

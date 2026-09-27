@@ -6,15 +6,24 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/provider"
 )
 
 func TestSanitizeName(t *testing.T) {
@@ -48,31 +57,6 @@ func TestSanitizeName(t *testing.T) {
 	}
 }
 
-func TestQuote(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"hello", `"hello"`},
-		{`say "hi"`, `"say \"hi\""`},
-		{`back\slash`, `"back\\slash"`},
-		{"", `""`},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			t.Parallel()
-
-			result := quote(tt.input)
-			if result != tt.expected {
-				t.Errorf("quote(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestImportBlock(t *testing.T) {
 	result := importBlock("jellyfin_user", "admin", "abc-123")
 	expected := `import {
@@ -91,24 +75,13 @@ func TestResourceBlock(t *testing.T) {
 		"count": "5",
 	}
 	result := resourceBlock("jellyfin_user", "test", attrs)
-	if !strings.Contains(result, `resource "jellyfin_user" "test"`) {
-		t.Errorf("resourceBlock() missing resource header: %s", result)
-	}
-	if !strings.Contains(result, `name = "test"`) {
-		t.Errorf("resourceBlock() missing name attr: %s", result)
-	}
-	if !strings.Contains(result, "count = 5") {
-		t.Errorf("resourceBlock() missing count attr: %s", result)
-	}
+	want := `resource "jellyfin_user" "test" {
+  count = 5
+  name  = "test"
 }
-
-func TestPrettyJSON(t *testing.T) {
-	result, err := prettyJSON(`{"b":2,"a":1}`)
-	if err != nil {
-		t.Fatalf("prettyJSON() error: %v", err)
-	}
-	if !strings.Contains(result, "\n") {
-		t.Error("prettyJSON() should produce multi-line output")
+`
+	if result != want {
+		t.Errorf("resourceBlock() = %q, want %q", result, want)
 	}
 }
 
@@ -241,8 +214,19 @@ func setupTestServer(t *testing.T) *httptest.Server {
 
 	mux.HandleFunc("/System/Configuration", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, map[string]interface{}{
-			"ServerName":               "Test Server",
-			"IsStartupWizardCompleted": true,
+			"ServerName":                    "Test Server",
+			"IsStartupWizardCompleted":      true,
+			"EnableNormalizedItemByNameIds": true,
+			"CachePath":                     nil,
+			"SortRemoveWords":               []string{"the", "a"},
+			"MetadataOptions": []map[string]interface{}{
+				{"ItemType": "Movie", "DisabledMetadataFetchers": []string{"OMDb"}, "ImageFetcherOrder": nil},
+			},
+			"TrickplayOptions": map[string]interface{}{
+				"Interval":         10000,
+				"ProcessPriority":  "BelowNormal",
+				"WidthResolutions": []int{320},
+			},
 		})
 	})
 
@@ -262,6 +246,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/System/Configuration/branding", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, map[string]interface{}{
 			"SplashscreenEnabled": false,
+			"LoginDisclaimer":     "Hi ${user}\n100%{x}",
 		})
 	})
 
@@ -287,7 +272,7 @@ func TestGenerateUsers(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	imports, resources, err := g.generateUsers()
@@ -311,7 +296,7 @@ func TestGenerateUsers(t *testing.T) {
 	}
 
 	// Check admin user resource
-	if !strings.Contains(resources[0], "is_administrator = true") {
+	if !strings.Contains(resources[0], "is_administrator   = true") {
 		t.Errorf("expected admin to be administrator: %s", resources[0])
 	}
 }
@@ -323,7 +308,7 @@ func TestGenerateLibraries(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	imports, resources, err := g.generateLibraries()
@@ -346,6 +331,33 @@ func TestGenerateLibraries(t *testing.T) {
 	}
 }
 
+func TestGenerateLibrariesWritesMixedForMissingCollectionType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]interface{}{
+			{
+				"Name":      "Mixed",
+				"Locations": []string{"/media/mixed"},
+				"ItemId":    "item-1",
+			},
+		})
+	}))
+	defer server.Close()
+
+	g := &generator{
+		client:    client.NewClient(server.URL, "test-key"),
+		outputDir: t.TempDir(),
+		usedNames: make(map[string]bool),
+	}
+
+	_, resources, err := g.generateLibraries()
+	if err != nil {
+		t.Fatalf("generateLibraries() error: %v", err)
+	}
+	if len(resources) != 1 || !strings.Contains(resources[0], `collection_type = "mixed"`) {
+		t.Errorf("expected one library with collection_type mixed: %q", resources)
+	}
+}
+
 func TestGenerateAPIKeys(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()
@@ -353,7 +365,7 @@ func TestGenerateAPIKeys(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	imports, resources, err := g.generateAPIKeys()
@@ -379,7 +391,7 @@ func TestGenerateScheduledTasks(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	imports, resources, err := g.generateScheduledTasks()
@@ -398,6 +410,133 @@ func TestGenerateScheduledTasks(t *testing.T) {
 	if !strings.Contains(imports[0], "task-id-1") {
 		t.Errorf("expected task-id-1 in import: %s", imports[0])
 	}
+
+	want := `resource "jellyfin_scheduled_task" "scan_media_library" {
+  task_id = "task-id-1"
+  triggers = [
+    {
+      interval_ticks = 432000000000
+      type           = "IntervalTrigger"
+    },
+  ]
+}
+`
+	if resources[0] != want {
+		t.Errorf("resource block = %q, want %q", resources[0], want)
+	}
+}
+
+func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		triggers string
+		want     string
+	}{
+		"no triggers": {
+			triggers: `[]`,
+			want: `resource "jellyfin_scheduled_task" "task" {
+  task_id  = "task-id"
+  triggers = []
+}
+`,
+		},
+		"null triggers": {
+			triggers: `null`,
+			want: `resource "jellyfin_scheduled_task" "task" {
+  task_id  = "task-id"
+  triggers = []
+}
+`,
+		},
+		"interval trigger without day_of_week": {
+			triggers: `[{"Type":"IntervalTrigger","IntervalTicks":864000000000}]`,
+			want: `resource "jellyfin_scheduled_task" "task" {
+  task_id = "task-id"
+  triggers = [
+    {
+      interval_ticks = 864000000000
+      type           = "IntervalTrigger"
+    },
+  ]
+}
+`,
+		},
+		"daily trigger keeps max_runtime_ticks": {
+			triggers: `[{"Type":"DailyTrigger","TimeOfDayTicks":72000000000,"MaxRuntimeTicks":144000000000}]`,
+			want: `resource "jellyfin_scheduled_task" "task" {
+  task_id = "task-id"
+  triggers = [
+    {
+      max_runtime_ticks = 144000000000
+      time_of_day_ticks = 72000000000
+      type              = "DailyTrigger"
+    },
+  ]
+}
+`,
+		},
+		"weekly trigger and startup trigger": {
+			triggers: `[
+				{"Type":"WeeklyTrigger","TimeOfDayTicks":36000000000,"DayOfWeek":"Tuesday"},
+				{"Type":"StartupTrigger"}
+			]`,
+			want: `resource "jellyfin_scheduled_task" "task" {
+  task_id = "task-id"
+  triggers = [
+    {
+      day_of_week       = "Tuesday"
+      time_of_day_ticks = 36000000000
+      type              = "WeeklyTrigger"
+    },
+    {
+      type = "StartupTrigger"
+    },
+  ]
+}
+`,
+		},
+		"explicit nulls and zero ticks": {
+			triggers: `[{"Type":"IntervalTrigger","IntervalTicks":0,"TimeOfDayTicks":null,"DayOfWeek":null,"MaxRuntimeTicks":0}]`,
+			want: `resource "jellyfin_scheduled_task" "task" {
+  task_id = "task-id"
+  triggers = [
+    {
+      interval_ticks    = 0
+      max_runtime_ticks = 0
+      type              = "IntervalTrigger"
+    },
+  ]
+}
+`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprintf(w, `[{"Name": "Task", "Id": "task-id", "Triggers": %s}]`, tc.triggers)
+			}))
+			defer server.Close()
+
+			g := &generator{
+				client:    client.NewClient(server.URL, "test-key"),
+				usedNames: make(map[string]bool),
+			}
+			_, resources, err := g.generateScheduledTasks()
+			if err != nil {
+				t.Fatalf("generateScheduledTasks() error: %v", err)
+			}
+			if len(resources) != 1 {
+				t.Fatalf("expected 1 resource block, got %d", len(resources))
+			}
+			if resources[0] != tc.want {
+				t.Errorf("resource block =\n%s\nwant\n%s", resources[0], tc.want)
+			}
+		})
+	}
 }
 
 func TestGenerateSingletonConfigs(t *testing.T) {
@@ -407,7 +546,7 @@ func TestGenerateSingletonConfigs(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	imports, resources, err := g.generateSingletonConfigs()
@@ -415,17 +554,65 @@ func TestGenerateSingletonConfigs(t *testing.T) {
 		t.Fatalf("generateSingletonConfigs() error: %v", err)
 	}
 
-	// 6 singleton configs
-	if len(imports) != 6 {
-		t.Errorf("expected 6 import blocks, got %d", len(imports))
+	wantImports := []string{"system", "encoding", "networking", "branding", "livetv", "metadata"}
+	if len(imports) != len(wantImports) {
+		t.Fatalf("expected %d import blocks, got %d", len(wantImports), len(imports))
 	}
-	if len(resources) != 6 {
-		t.Errorf("expected 6 resource blocks, got %d", len(resources))
+	for i, id := range wantImports {
+		want := importBlock("jellyfin_"+id+"_configuration", "this", id)
+		if imports[i] != want {
+			t.Errorf("imports[%d] = %q, want %q", i, imports[i], want)
+		}
 	}
 
-	// Check system config
-	if !strings.Contains(resources[0], `server_name = "Test Server"`) {
-		t.Errorf("expected server_name in system config: %s", resources[0])
+	want := []string{
+		`resource "jellyfin_system_configuration" "this" {
+  enable_normalized_item_by_name_ids = true
+  metadata_options = [
+    {
+      disabled_metadata_fetchers = ["OMDb"]
+      item_type                  = "Movie"
+    },
+  ]
+  server_name       = "Test Server"
+  sort_remove_words = ["the", "a"]
+  trickplay_options = {
+    interval          = 10000
+    process_priority  = "BelowNormal"
+    width_resolutions = [320]
+  }
+}
+`,
+		`resource "jellyfin_encoding_configuration" "this" {
+  encoding_thread_count = -1
+}
+`,
+		`resource "jellyfin_networking_configuration" "this" {
+  base_url     = ""
+  enable_https = false
+}
+`,
+		`resource "jellyfin_branding_configuration" "this" {
+  login_disclaimer     = "Hi $${user}\n100%%{x}"
+  splashscreen_enabled = false
+}
+`,
+		`resource "jellyfin_livetv_configuration" "this" {
+  enable_recording_subfolders = false
+}
+`,
+		`resource "jellyfin_metadata_configuration" "this" {
+  use_file_creation_time_for_date_added = true
+}
+`,
+	}
+	if len(resources) != len(want) {
+		t.Fatalf("expected %d resource blocks, got %d", len(want), len(resources))
+	}
+	for i := range want {
+		if resources[i] != want[i] {
+			t.Errorf("resources[%d] =\n%s\nwant\n%s", i, resources[i], want[i])
+		}
 	}
 }
 
@@ -436,7 +623,7 @@ func TestGeneratePlugins(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	imports, resources, err := g.generatePlugins()
@@ -450,7 +637,7 @@ func TestGeneratePlugins(t *testing.T) {
 	if !strings.Contains(imports[0], "plugin-id-1") {
 		t.Errorf("expected plugin-id-1 in import: %s", imports[0])
 	}
-	if !strings.Contains(resources[0], `name = "MusicBrainz"`) {
+	if !strings.Contains(resources[0], `name           = "MusicBrainz"`) {
 		t.Errorf("expected plugin name MusicBrainz: %s", resources[0])
 	}
 	if !strings.Contains(resources[0], `repository_url = "https://repo.jellyfin.org/files/plugin/manifest.json"`) {
@@ -465,7 +652,7 @@ func TestGeneratePluginRepositories(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	imports, resources, err := g.generatePluginRepositories()
@@ -476,7 +663,7 @@ func TestGeneratePluginRepositories(t *testing.T) {
 	if len(imports) != 1 {
 		t.Errorf("expected 1 import block, got %d", len(imports))
 	}
-	if !strings.Contains(resources[0], `url = "https://repo.jellyfin.org/files/plugin/manifest.json"`) {
+	if !strings.Contains(resources[0], `url     = "https://repo.jellyfin.org/files/plugin/manifest.json"`) {
 		t.Errorf("expected repo URL in resource: %s", resources[0])
 	}
 }
@@ -486,14 +673,19 @@ func TestFullGenerate(t *testing.T) {
 	defer server.Close()
 
 	outputDir := t.TempDir()
+	var warnings strings.Builder
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: outputDir,
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
+		warnings:  &warnings,
 	}
 
 	if err := g.Generate(); err != nil {
 		t.Fatalf("Generate() error: %v", err)
+	}
+	if warnings.Len() > 0 {
+		t.Errorf("expected no warnings for an empty output directory, got %q", warnings.String())
 	}
 
 	// Check that files were created
@@ -562,6 +754,42 @@ func TestFullGenerate(t *testing.T) {
 			t.Errorf("resources.tf missing %s", expected)
 		}
 	}
+
+	wantRequiredProviders := `terraform {
+  required_providers {
+    jellyfin = {
+      source = "ThePhaseless/jellyfin"
+    }
+  }
+}
+`
+	if !strings.HasPrefix(string(resourcesContent), wantRequiredProviders) {
+		t.Errorf("resources.tf should start with\n%s\ngot\n%s", wantRequiredProviders, resourcesContent)
+	}
+}
+
+func TestGenerateWarnsAboutOtherConfigurationInOutputDir(t *testing.T) {
+	server := setupTestServer(t)
+	defer server.Close()
+
+	outputDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outputDir, "versions.tf"), []byte("terraform {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var warnings strings.Builder
+	g := &generator{
+		client:    client.NewClient(server.URL, "test-key"),
+		outputDir: outputDir,
+		usedNames: make(map[string]bool),
+		warnings:  &warnings,
+	}
+
+	if err := g.Generate(); err != nil {
+		t.Fatalf("Generate() error: %v", err)
+	}
+	if !strings.Contains(warnings.String(), "required_providers") {
+		t.Errorf("expected a warning about a second required_providers entry, got %q", warnings.String())
+	}
 }
 
 func TestGenerateWithServerError(t *testing.T) {
@@ -575,7 +803,7 @@ func TestGenerateWithServerError(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	err := g.Generate()
@@ -613,7 +841,7 @@ func TestSanitizeNameEdgeCases(t *testing.T) {
 }
 
 func TestUniqueName(t *testing.T) {
-	g := &generator{usedNames: make(map[string]int)}
+	g := &generator{usedNames: make(map[string]bool)}
 
 	// First use: no suffix
 	name1 := g.uniqueName("jellyfin_user", "admin")
@@ -640,6 +868,69 @@ func TestUniqueName(t *testing.T) {
 	}
 }
 
+func TestUniqueNameSkipsSuffixedNamesAlreadyTaken(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		bases []string
+		want  []string
+	}{
+		"suffix taken by an earlier base name": {
+			bases: []string{"films", "films_1", "films"},
+			want:  []string{"films", "films_1", "films_2"},
+		},
+		"base name taken by an earlier suffix": {
+			bases: []string{"films", "films", "films_1"},
+			want:  []string{"films", "films_1", "films_1_1"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			g := &generator{usedNames: make(map[string]bool)}
+			for i, base := range tc.bases {
+				if got := g.uniqueName("jellyfin_library", base); got != tc.want[i] {
+					t.Errorf("uniqueName(%q) call %d = %q, want %q", base, i+1, got, tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateLibrariesGivesEachLibraryItsOwnAddress(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]interface{}{
+			{"Name": "Films!", "CollectionType": "movies", "Locations": []string{"/media/movies"}},
+			{"Name": "Films 1", "CollectionType": "movies", "Locations": []string{"/media/movies"}},
+			{"Name": "Films", "CollectionType": "movies", "Locations": []string{"/media/movies"}},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	g := &generator{
+		client:    client.NewClient(server.URL, "test-key"),
+		usedNames: make(map[string]bool),
+	}
+	imports, _, err := g.generateLibraries()
+	if err != nil {
+		t.Fatalf("generateLibraries() error: %v", err)
+	}
+
+	want := []string{"jellyfin_library.films\n", "jellyfin_library.films_1\n", "jellyfin_library.films_2\n"}
+	if len(imports) != len(want) {
+		t.Fatalf("expected %d import blocks, got %d", len(want), len(imports))
+	}
+	for i, to := range want {
+		if !strings.Contains(imports[i], "to = "+to) {
+			t.Errorf("imports[%d] = %q, want it to import to %s", i, imports[i], strings.TrimSpace(to))
+		}
+	}
+}
+
 func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
 	// Server that has /Plugins but returns 500 for /Packages
 	mux := http.NewServeMux()
@@ -662,7 +953,7 @@ func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
 	}
 
 	imports, resources, err := g.generatePlugins()
@@ -674,9 +965,92 @@ func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
 		t.Errorf("expected 1 import block, got %d", len(imports))
 	}
 
-	// repository_url should be empty string (graceful degradation)
-	if !strings.Contains(resources[0], `repository_url = ""`) {
-		t.Errorf("expected empty repository_url: %s", resources[0])
+	if strings.Contains(resources[0], "repository_url") {
+		t.Errorf("expected no repository_url when packages are unavailable: %s", resources[0])
+	}
+}
+
+func TestGeneratePluginsResolvesOnlyTheInstalledVersion(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]interface{}{
+			{"Name": "Bundled", "Version": "12.1.0.0", "Id": "bundled-id"},
+			{"Name": "Listed", "Version": "2.0.0.0", "Id": "listed-id"},
+		})
+	})
+	mux.HandleFunc("/Packages", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]interface{}{
+			{"name": "Bundled", "versions": []map[string]interface{}{
+				{"version": "11.0.0.0", "repositoryUrl": "https://repo.example/bundled.json"},
+			}},
+			{"name": "Listed", "versions": []map[string]interface{}{
+				{"version": "3.0.0.0", "repositoryUrl": "https://repo.example/newer.json"},
+				{"version": "2.0.0.0", "repositoryUrl": "https://repo.example/listed.json"},
+			}},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	g := &generator{
+		client:    client.NewClient(server.URL, "test-key"),
+		outputDir: t.TempDir(),
+		usedNames: make(map[string]bool),
+	}
+
+	_, resources, err := g.generatePlugins()
+	if err != nil {
+		t.Fatalf("generatePlugins() error: %v", err)
+	}
+	if len(resources) != 2 {
+		t.Fatalf("expected 2 resource blocks, got %d", len(resources))
+	}
+
+	if strings.Contains(resources[0], "repository_url") {
+		t.Errorf("expected no repository_url for a version the repository does not list: %s", resources[0])
+	}
+	if !strings.Contains(resources[1], `repository_url = "https://repo.example/listed.json"`) {
+		t.Errorf("expected the installed version's repository_url: %s", resources[1])
+	}
+}
+
+func TestGenerateLibrariesSkipsCollectionTypesTheProviderRejects(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]interface{}{
+			{"Name": "Lists", "CollectionType": "playlists", "Locations": []string{"/media/lists"}},
+			{"Name": "Films ${x}", "CollectionType": "movies", "Locations": []string{"/media/films"}},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	var warnings strings.Builder
+	g := &generator{
+		client:    client.NewClient(server.URL, "test-key"),
+		outputDir: t.TempDir(),
+		usedNames: make(map[string]bool),
+		warnings:  &warnings,
+	}
+
+	imports, resources, err := g.generateLibraries()
+	if err != nil {
+		t.Fatalf("generateLibraries() error: %v", err)
+	}
+	if len(imports) != 1 || len(resources) != 1 {
+		t.Fatalf("expected 1 import and 1 resource block, got %d and %d", len(imports), len(resources))
+	}
+
+	wantImport := `import {
+  to = jellyfin_library.films_x
+  id = "Films $${x}"
+}
+`
+	if imports[0] != wantImport {
+		t.Errorf("import block = %q, want %q", imports[0], wantImport)
+	}
+	if !strings.Contains(warnings.String(), `"Lists"`) {
+		t.Errorf("expected a warning naming the skipped library \"Lists\", got %q", warnings.String())
 	}
 }
 
@@ -751,8 +1125,13 @@ func testAccImportClient(t *testing.T) *client.Client {
 	username := os.Getenv("JELLYFIN_USERNAME")
 	password := os.Getenv("JELLYFIN_PASSWORD")
 	if endpoint == "" || (apiKey == "" && (username == "" || password == "")) {
-		t.Skip("JELLYFIN_ENDPOINT and either JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD must be set for acceptance tests")
+		skip := t.Skip
+		if os.Getenv("TF_ACC") != "" {
+			skip = t.Fatal
+		}
+		skip("JELLYFIN_ENDPOINT and either JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD must be set for acceptance tests")
 	}
+	testAccBootstrap(t, endpoint)
 
 	c, err := importClient(context.Background(), endpoint, apiKey, username, password)
 	if err != nil {
@@ -761,17 +1140,167 @@ func testAccImportClient(t *testing.T) *client.Client {
 	return c
 }
 
-// TestAccImportToolE2E is an acceptance test that runs the import tool against a real
-// Jellyfin instance. It verifies that the tool generates valid import and resource files.
+// testAccBootstrap completes a fresh server's startup wizard the way a first
+// terraform run does, by configuring the provider. Until then Jellyfin has no
+// user for the importer to log in as.
+func testAccBootstrap(t *testing.T, endpoint string) {
+	t.Helper()
+
+	info, err := client.NewClient(endpoint, "").GetPublicSystemInfo(context.Background())
+	if err != nil {
+		t.Fatalf("reading Jellyfin startup status: %v", err)
+	}
+	if info.StartupWizardCompleted {
+		return
+	}
+	testAccTerraform(t, resource.TestStep{
+		Config: terraformBlock + `data "jellyfin_system_info" "bootstrap" {}`,
+	})
+}
+
+// testAccTerraform runs steps with this provider in-process, registered under
+// the source address the generated terraform block requires.
+func testAccTerraform(t *testing.T, steps ...resource.TestStep) {
+	t.Helper()
+
+	namespace, _, _ := strings.Cut(providerSource, "/")
+	t.Setenv(resource.EnvTfAccProviderNamespace, namespace)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"jellyfin": providerserver.NewProtocol6WithError(provider.New("test")()),
+		},
+		Steps: steps,
+	})
+}
+
+// terraformFmtCheck fails the test if terraform fmt, run from PATH, would
+// rewrite a file in dir.
+func terraformFmtCheck(t *testing.T, dir string) {
+	t.Helper()
+
+	if out, err := exec.Command("terraform", "fmt", "-check", "-diff", dir).CombinedOutput(); err != nil {
+		t.Errorf("terraform fmt -check: %v\n%s", err, out)
+	}
+}
+
+// seedFixtures gives the server what the importer has to handle for the
+// generated files to validate, and puts the server back when the test ends:
+// strings that HCL would interpolate or reject unless escaped, API keys whose
+// names sanitize to the same resource name or to its suffixed form, and a
+// music videos library and one without a collection type, which the importer
+// writes as mixed.
+func seedFixtures(t *testing.T, c *client.Client) {
+	t.Helper()
+
+	ctx := context.Background()
+	const tricky = `import-e2e ${a} %{b} "q" \ $${c} %%{d} ${`
+
+	var restore []func(*client.Client) error
+	t.Cleanup(func() {
+		// The provider logs in under the same device ID during the plan, and
+		// Jellyfin then revokes the session token c holds.
+		fresh := testAccImportClient(t)
+		for i := len(restore) - 1; i >= 0; i-- {
+			if err := restore[i](fresh); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+
+	branding, err := c.GetBrandingConfiguration(ctx)
+	if err != nil {
+		t.Fatalf("reading branding configuration: %v", err)
+	}
+	restore = append(restore, func(c *client.Client) error {
+		return c.UpdateBrandingConfiguration(ctx, &client.BrandingConfiguration{RawJSON: branding.RawJSON})
+	})
+	seeded, err := json.Marshal(map[string]interface{}{
+		"LoginDisclaimer":     tricky + "\nsecond line\twith a tab and \x01",
+		"CustomCss":           "body {\n  color: red;\n}\n/* ${x} %{y} */\n",
+		"SplashscreenEnabled": false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.UpdateBrandingConfiguration(ctx, &client.BrandingConfiguration{RawJSON: string(seeded)}); err != nil {
+		t.Fatalf("seeding branding configuration: %v", err)
+	}
+
+	keysBefore, err := c.GetAPIKeys(ctx)
+	if err != nil {
+		t.Fatalf("reading API keys: %v", err)
+	}
+	restore = append(restore, func(c *client.Client) error {
+		keys, err := c.GetAPIKeys(ctx)
+		if err != nil {
+			return err
+		}
+		var errs []error
+		for _, key := range keys {
+			if !slices.ContainsFunc(keysBefore, func(k client.APIKey) bool { return k.AccessToken == key.AccessToken }) {
+				errs = append(errs, c.DeleteAPIKey(ctx, key.AccessToken))
+			}
+		}
+		return errors.Join(errs...)
+	})
+	for _, appName := range []string{tricky, "import-e2e dup", "import-e2e dup", "import-e2e dup 1"} {
+		if err := c.CreateAPIKey(ctx, appName); err != nil {
+			t.Fatalf("seeding API key %q: %v", appName, err)
+		}
+	}
+
+	repos, err := c.GetPluginRepositories(ctx)
+	if err != nil {
+		t.Fatalf("reading plugin repositories: %v", err)
+	}
+	restore = append(restore, func(c *client.Client) error {
+		return c.SetPluginRepositories(ctx, repos)
+	})
+	// Disabled, so Jellyfin never fetches the unreachable URL.
+	seededRepos := append(append([]client.PluginRepository{}, repos...), client.PluginRepository{
+		Name:    tricky,
+		URL:     "http://127.0.0.1:1/${x}/%{y}/manifest.json",
+		Enabled: false,
+	})
+	if err := c.SetPluginRepositories(ctx, seededRepos); err != nil {
+		t.Fatalf("seeding plugin repository: %v", err)
+	}
+
+	// Library names cannot hold quotes or backslashes. An empty collection
+	// type leaves the library without one, as the web UI's "Mixed Movies and
+	// Shows" does.
+	libraries := []struct{ name, collectionType string }{
+		{"import-e2e ${lib} %{x} $${y}", "movies"},
+		{"import-e2e clips", "musicvideos"},
+		{"import-e2e untyped", ""},
+	}
+	for _, lib := range libraries {
+		if err := c.AddVirtualFolder(ctx, lib.name, lib.collectionType, []string{"/media/movies"}, &client.LibraryOptions{RawJSON: "{}"}); err != nil {
+			t.Fatalf("seeding library %q: %v", lib.name, err)
+		}
+		restore = append(restore, func(c *client.Client) error {
+			return c.RemoveVirtualFolder(ctx, lib.name)
+		})
+	}
+}
+
+// TestAccImportToolE2E runs the import tool against a real Jellyfin instance,
+// checks the generated files with terraform fmt and plans them, as written,
+// with Terraform and this provider: the plan must import every resource
+// without changes, and each imported resource's configuration must set every
+// value its imported state holds.
 // Set JELLYFIN_ENDPOINT and either JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD to enable this test.
 func TestAccImportToolE2E(t *testing.T) {
 	outputDir := t.TempDir()
 	c := testAccImportClient(t)
+	seedFixtures(t, c)
 
+	var warnings strings.Builder
 	g := &generator{
 		client:    c,
 		outputDir: outputDir,
-		usedNames: make(map[string]int),
+		usedNames: make(map[string]bool),
+		warnings:  &warnings,
 	}
 
 	// Run the full generation.
@@ -843,6 +1372,23 @@ func TestAccImportToolE2E(t *testing.T) {
 	}
 
 	t.Logf("Generated %d import blocks and %d resource blocks", importBlocks, resourceBlocks)
+	if warnings.Len() > 0 {
+		t.Logf("Generator warnings:\n%s", warnings.String())
+	}
+
+	terraformFmtCheck(t, outputDir)
+
+	// PlanOnly never applies, so no state is saved and nothing on the server
+	// is changed or destroyed.
+	testAccTerraform(t, resource.TestStep{
+		Config:   importsStr + "\n" + resourcesStr,
+		PlanOnly: true,
+		ConfigPlanChecks: resource.ConfigPlanChecks{
+			PostApplyPreRefresh: []plancheck.PlanCheck{
+				configMatchesImportedState{schemas: providerSchemas(t)},
+			},
+		},
+	})
 }
 
 // TestAccImportToolIndividualGenerators tests each generator function against a real
@@ -854,7 +1400,7 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		g := &generator{
 			client:    c,
 			outputDir: t.TempDir(),
-			usedNames: make(map[string]int),
+			usedNames: make(map[string]bool),
 		}
 
 		imports, resources, err := g.generateUsers()
@@ -883,7 +1429,7 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		g := &generator{
 			client:    c,
 			outputDir: t.TempDir(),
-			usedNames: make(map[string]int),
+			usedNames: make(map[string]bool),
 		}
 
 		imports, resources, err := g.generateScheduledTasks()
@@ -904,7 +1450,7 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		g := &generator{
 			client:    c,
 			outputDir: t.TempDir(),
-			usedNames: make(map[string]int),
+			usedNames: make(map[string]bool),
 		}
 
 		imports, resources, err := g.generateSingletonConfigs()
@@ -929,7 +1475,7 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		g := &generator{
 			client:    c,
 			outputDir: t.TempDir(),
-			usedNames: make(map[string]int),
+			usedNames: make(map[string]bool),
 		}
 
 		imports, resources, err := g.generateAPIKeys()
@@ -949,7 +1495,7 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		g := &generator{
 			client:    c,
 			outputDir: t.TempDir(),
-			usedNames: make(map[string]int),
+			usedNames: make(map[string]bool),
 		}
 
 		// Libraries may or may not exist on a fresh instance - just verify no error.
@@ -963,7 +1509,7 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		g := &generator{
 			client:    c,
 			outputDir: t.TempDir(),
-			usedNames: make(map[string]int),
+			usedNames: make(map[string]bool),
 		}
 
 		// Plugin repos may or may not exist - just verify no error.
@@ -977,7 +1523,7 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		g := &generator{
 			client:    c,
 			outputDir: t.TempDir(),
-			usedNames: make(map[string]int),
+			usedNames: make(map[string]bool),
 		}
 
 		// Plugins may or may not exist - just verify no error.

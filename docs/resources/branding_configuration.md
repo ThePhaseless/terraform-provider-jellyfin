@@ -14,10 +14,9 @@ Manages the Jellyfin branding configuration.
 
 ```terraform
 resource "jellyfin_branding_configuration" "example" {
-  login_disclaimer      = ""
-  custom_css            = ""
-  splashscreen_enabled  = false
-  splashscreen_location = ""
+  login_disclaimer     = ""
+  custom_css           = ""
+  splashscreen_enabled = false
 }
 ```
 
@@ -29,7 +28,7 @@ resource "jellyfin_branding_configuration" "example" {
 - `custom_css` (String) Custom CSS content.
 - `login_disclaimer` (String) The login disclaimer text.
 - `splashscreen_enabled` (Boolean) Whether the splash screen is enabled.
-- `splashscreen_location` (String) The splash screen location.
+- `splashscreen_location` (String, Deprecated) The splash screen location. Jellyfin ignores a splash screen location in the branding configuration, so setting it is an error. The attribute will be removed in a future release.
 
 ### Read-Only
 

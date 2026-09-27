@@ -25,6 +25,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
@@ -149,6 +150,17 @@ func userPolicyAttributes() map[string]schema.Attribute {
 		}
 	}
 
+	// Null is the server's "no limit", so these are not computed: a computed
+	// attribute would keep the prior limit when unset and could never be
+	// cleared.
+	nullableInt := func(desc string) schema.Int64Attribute {
+		return schema.Int64Attribute{
+			Description:         desc,
+			MarkdownDescription: desc,
+			Optional:            true,
+		}
+	}
+
 	optionalFloat := func(desc string) schema.Float64Attribute {
 		return schema.Float64Attribute{
 			Description:         desc,
@@ -179,8 +191,8 @@ func userPolicyAttributes() map[string]schema.Attribute {
 		"enable_collection_management":  optionalBool("Whether the user can manage collections."),
 		"enable_subtitle_management":    optionalBool("Whether the user can manage subtitles."),
 		"enable_lyric_management":       optionalBool("Whether the user can manage lyrics."),
-		"max_parental_rating":           optionalInt("Maximum parental rating allowed for the user."),
-		"max_parental_sub_rating":       optionalInt("Maximum parental sub-rating allowed for the user."),
+		"max_parental_rating":           nullableInt("Maximum parental rating allowed for the user. When `policy` is set, leaving this unset or null means no limit."),
+		"max_parental_sub_rating":       nullableInt("Maximum parental sub-rating allowed for the user. When `policy` is set, leaving this unset or null means no limit."),
 		"blocked_tags":                  optionalStringList("Tags that are blocked for the user."),
 		"allowed_tags":                  optionalStringList("Tags that are explicitly allowed for the user."),
 		"enable_user_preference_access": optionalBool("Whether the user can access their own preferences."),
@@ -327,10 +339,27 @@ func (r *UserResource) Configure(_ context.Context, req resource.ConfigureReques
 }
 
 func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	// policy is computed, so a plan without it carries an unknown object,
+	// which the pointer field of the model cannot hold. Read the attributes
+	// one by one and convert the policy only when it is known.
 	var data UserResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	var policy types.Object
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("name"), &data.Name)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("password"), &data.Password)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("is_administrator"), &data.IsAdministrator)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("is_disabled"), &data.IsDisabled)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("enable_all_folders"), &data.EnableAllFolders)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("policy"), &policy)...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+	if !policy.IsNull() && !policy.IsUnknown() {
+		var p UserPolicyModel
+		resp.Diagnostics.Append(policy.As(ctx, &p, basetypes.ObjectAsOptions{})...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		data.Policy = &p
 	}
 
 	password := ""
@@ -345,11 +374,39 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 
 	data.ID = types.StringValue(user.ID)
-
-	if err := r.applyPolicy(ctx, &data, user.ID, &resp.Diagnostics); err != nil {
-		resp.Diagnostics.AddError("Failed to update user policy", err.Error())
+	// Saved now so that a failure below leaves the user in state as tainted
+	// rather than orphaned on the server, where its name would make every
+	// later create fail.
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), data.ID)...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	// A failed policy update still reads the user back, so the tainted state
+	// holds the user as the server has it rather than only its id. From the
+	// id alone, an untaint followed by an apply without refresh plans a null
+	// policy, and Update fails with an inconsistent result.
+	if err := r.applyPolicy(ctx, &data, user.ID, &resp.Diagnostics); err != nil {
+		resp.Diagnostics.AddError("Failed to update user policy", err.Error())
+	}
+
+	createdUser, err := r.client.GetUserByID(ctx, user.ID)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read user after creation", err.Error())
+		return
+	}
+
+	data.Name = types.StringValue(createdUser.Name)
+	data.IsAdministrator = types.BoolValue(createdUser.Policy.IsAdministrator)
+	data.IsDisabled = types.BoolValue(createdUser.Policy.IsDisabled)
+	data.EnableAllFolders = types.BoolValue(createdUser.Policy.EnableAllFolders)
+
+	policyRaw, err := r.client.GetUserPolicyRaw(ctx, user.ID)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read user policy after creation", err.Error())
+		return
+	}
+	data.Policy = policyFromRaw(ctx, policyRaw, &resp.Diagnostics)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -400,16 +457,11 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		return
 	}
 
-	currentUser, err := r.client.GetUserByID(ctx, state.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to read current user", err.Error())
-		return
-	}
-
-	currentUser.Name = data.Name.ValueString()
-	if err := r.client.UpdateUser(ctx, currentUser); err != nil {
-		resp.Diagnostics.AddError("Failed to update user", err.Error())
-		return
+	if !data.Name.Equal(state.Name) {
+		if err := r.renameUser(ctx, state.ID.ValueString(), data.Name.ValueString()); err != nil {
+			resp.Diagnostics.AddError("Failed to update user", err.Error())
+			return
+		}
 	}
 
 	if err := r.applyPolicy(ctx, &data, state.ID.ValueString(), &resp.Diagnostics); err != nil {
@@ -466,6 +518,30 @@ func (r *UserResource) ImportState(ctx context.Context, req resource.ImportState
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
+// renameUser posts the user read from the server back with only Name changed.
+// The server also replaces the user's Configuration with the one in the body,
+// so sending just the name would reset per-user settings such as language
+// preferences.
+func (r *UserResource) renameUser(ctx context.Context, id, name string) error {
+	raw, err := r.client.GetUserRaw(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	user, err := parseJSONObject(raw)
+	if err != nil {
+		return fmt.Errorf("parsing user: %w", err)
+	}
+	putJSONString(user, "Name", types.StringValue(name))
+
+	payloadBytes, err := json.Marshal(user)
+	if err != nil {
+		return fmt.Errorf("marshaling user: %w", err)
+	}
+
+	return r.client.UpdateUserRaw(ctx, id, string(payloadBytes))
+}
+
 // applyPolicy overlays the planned top-level booleans and typed policy onto the
 // existing server policy, then POSTs the result to /Users/{id}/Policy.
 func (r *UserResource) applyPolicy(ctx context.Context, data *UserResourceModel, id string, diags *diag.Diagnostics) error {
@@ -508,8 +584,8 @@ func overlayPolicyIntoJSON(ctx context.Context, m map[string]json.RawMessage, po
 	putJSONBool(m, "EnableCollectionManagement", policy.EnableCollectionManagement)
 	putJSONBool(m, "EnableSubtitleManagement", policy.EnableSubtitleManagement)
 	putJSONBool(m, "EnableLyricManagement", policy.EnableLyricManagement)
-	putJSONInt64(m, "MaxParentalRating", policy.MaxParentalRating)
-	putJSONInt64(m, "MaxParentalSubRating", policy.MaxParentalSubRating)
+	putJSONNullableInt64(m, "MaxParentalRating", policy.MaxParentalRating)
+	putJSONNullableInt64(m, "MaxParentalSubRating", policy.MaxParentalSubRating)
 	if d := putJSONStringList(ctx, m, "BlockedTags", policy.BlockedTags); d.HasError() {
 		return append(diags, d...)
 	}
@@ -566,6 +642,16 @@ func overlayPolicyIntoJSON(ctx context.Context, m map[string]json.RawMessage, po
 	putJSONString(m, "SyncPlayAccess", policy.SyncPlayAccess)
 
 	return diags
+}
+
+// putJSONNullableInt64 is putJSONInt64 except that a null value is written as
+// JSON null, so that it clears the field on the server.
+func putJSONNullableInt64(m map[string]json.RawMessage, key string, v types.Int64) {
+	if v.IsNull() {
+		m[key] = json.RawMessage("null")
+		return
+	}
+	putJSONInt64(m, key, v)
 }
 
 func putAccessSchedules(ctx context.Context, m map[string]json.RawMessage, v types.List) diag.Diagnostics {

@@ -8,9 +8,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
@@ -18,6 +22,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -157,6 +162,11 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			},
 		}
 	}
+	optionalEnum := func(desc string, values ...string) schema.StringAttribute {
+		a := optionalString(desc + " One of `" + strings.Join(values, "`, `") + "`.")
+		a.Validators = []validator.String{stringvalidator.OneOf(values...)}
+		return a
+	}
 	optionalBool := func(desc string) schema.BoolAttribute {
 		return schema.BoolAttribute{
 			Description:         desc,
@@ -203,38 +213,56 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			},
 		}
 	}
+	// UseStateForUnknown also copies a null prior value, and a planned null
+	// fails the apply when the server returns a value. That happens for an
+	// entry a list gains in the plan, whose prior values are all null while
+	// the server fills in what the entry leaves out, and for the three
+	// attributes whose keys 0.3.7 and earlier misspelt, which state from
+	// those versions holds as null.
+	nonNullStateString := func(a schema.StringAttribute) schema.StringAttribute {
+		a.PlanModifiers = []planmodifier.String{stringplanmodifier.UseNonNullStateForUnknown()}
+		return a
+	}
+	nonNullStateBool := func(a schema.BoolAttribute) schema.BoolAttribute {
+		a.PlanModifiers = []planmodifier.Bool{boolplanmodifier.UseNonNullStateForUnknown()}
+		return a
+	}
+	nonNullStateList := func(a schema.ListAttribute) schema.ListAttribute {
+		a.PlanModifiers = []planmodifier.List{listplanmodifier.UseNonNullStateForUnknown()}
+		return a
+	}
 
 	metadataOptionsAttributes := map[string]schema.Attribute{
-		"item_type":                   optionalString("Item type."),
-		"disabled_metadata_savers":    optionalStringList("Disabled metadata savers."),
-		"local_metadata_reader_order": optionalStringList("Local metadata reader order."),
-		"disabled_metadata_fetchers":  optionalStringList("Disabled metadata fetchers."),
-		"metadata_fetcher_order":      optionalStringList("Metadata fetcher order."),
-		"disabled_image_fetchers":     optionalStringList("Disabled image fetchers."),
-		"image_fetcher_order":         optionalStringList("Image fetcher order."),
+		"item_type":                   nonNullStateString(optionalString("Item type.")),
+		"disabled_metadata_savers":    nonNullStateList(optionalStringList("Disabled metadata savers.")),
+		"local_metadata_reader_order": nonNullStateList(optionalStringList("Local metadata reader order.")),
+		"disabled_metadata_fetchers":  nonNullStateList(optionalStringList("Disabled metadata fetchers.")),
+		"metadata_fetcher_order":      nonNullStateList(optionalStringList("Metadata fetcher order.")),
+		"disabled_image_fetchers":     nonNullStateList(optionalStringList("Disabled image fetchers.")),
+		"image_fetcher_order":         nonNullStateList(optionalStringList("Image fetcher order.")),
 	}
 
 	nameValuePairAttributes := map[string]schema.Attribute{
-		"name":  optionalString("Name."),
-		"value": optionalString("Value."),
+		"name":  nonNullStateString(optionalString("Name.")),
+		"value": nonNullStateString(optionalString("Value.")),
 	}
 
 	pathSubstitutionAttributes := map[string]schema.Attribute{
-		"from": optionalString("From path."),
-		"to":   optionalString("To path."),
+		"from": nonNullStateString(optionalString("From path.")),
+		"to":   nonNullStateString(optionalString("To path.")),
 	}
 
 	castReceiverApplicationAttributes := map[string]schema.Attribute{
-		"id":   optionalString("Application ID."),
-		"name": optionalString("Application name."),
+		"id":   nonNullStateString(optionalString("Application ID. Must be set in every entry.")),
+		"name": nonNullStateString(optionalString("Application name. Must be set in every entry.")),
 	}
 
 	trickplayOptionsAttributes := map[string]schema.Attribute{
 		"enable_hw_acceleration":           optionalBool("Enable hardware acceleration."),
 		"enable_hw_encoding":               optionalBool("Enable hardware encoding."),
 		"enable_key_frame_only_extraction": optionalBool("Enable key frame only extraction."),
-		"scan_behavior":                    optionalString("Scan behavior."),
-		"process_priority":                 optionalString("Process priority class."),
+		"scan_behavior":                    optionalEnum("Scan behavior.", "Blocking", "NonBlocking"),
+		"process_priority":                 nonNullStateString(optionalEnum("Process priority class.", "Normal", "Idle", "High", "RealTime", "BelowNormal", "AboveNormal")),
 		"interval":                         optionalInt("Interval."),
 		"width_resolutions":                optionalIntList("Width resolutions."),
 		"tile_width":                       optionalInt("Tile width."),
@@ -257,10 +285,10 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				},
 			},
 			"enable_metrics":                         optionalBool("Enable metrics."),
-			"enable_normalized_item_by_name_ids":     optionalBool("Enable normalized item by name IDs."),
+			"enable_normalized_item_by_name_ids":     nonNullStateBool(optionalBool("Enable normalized item by name IDs.")),
 			"is_port_authorized":                     optionalBool("Is port authorized."),
 			"quick_connect_available":                optionalBool("Quick connect available."),
-			"enable_case_sensitive_item_ids":         optionalBool("Enable case sensitive item IDs."),
+			"enable_case_sensitive_item_ids":         nonNullStateBool(optionalBool("Enable case sensitive item IDs.")),
 			"disable_live_tv_channel_user_data_name": optionalBool("Disable live TV channel user data name."),
 			"metadata_path":                          optionalString("Metadata path."),
 			"preferred_metadata_language":            optionalString("Preferred metadata language."),
@@ -277,7 +305,7 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			"library_monitor_delay":                  optionalInt("Library monitor delay."),
 			"library_update_duration":                optionalInt("Library update duration."),
 			"cache_size":                             optionalInt("Cache size."),
-			"image_saving_convention":                optionalString("Image saving convention."),
+			"image_saving_convention":                optionalEnum("Image saving convention.", "Legacy", "Compatible"),
 			"metadata_options": schema.ListNestedAttribute{
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: metadataOptionsAttributes,
@@ -333,11 +361,18 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			"library_metadata_refresh_concurrency": optionalInt("Library metadata refresh concurrency."),
 			"allow_client_log_upload":              optionalBool("Allow client log upload."),
 			"dummy_chapter_duration":               optionalInt("Dummy chapter duration."),
-			"chapter_image_resolution":             optionalString("Chapter image resolution."),
+			"chapter_image_resolution":             optionalEnum("Chapter image resolution.", "MatchSource", "P144", "P240", "P360", "P480", "P720", "P1080", "P1440", "P2160"),
 			"parallel_image_encoding_limit":        optionalInt("Parallel image encoding limit."),
 			"cast_receiver_applications": schema.ListNestedAttribute{
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: castReceiverApplicationAttributes,
+					// Required on id and name would make Terraform propose null for
+					// them whenever the list is left out of the configuration, so
+					// every plan would differ from state; the element validator
+					// enforces them only for entries that are configured.
+					Validators: []validator.Object{
+						objectvalidator.AlsoRequires(path.MatchRelative().AtName("id"), path.MatchRelative().AtName("name")),
+					},
 				},
 				Description:         "Cast receiver applications.",
 				MarkdownDescription: "Cast receiver applications.",
@@ -415,8 +450,10 @@ func (r *SystemConfigurationResource) Delete(_ context.Context, _ resource.Delet
 
 func (r *SystemConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Singleton resource — the import ID is not used. Read will populate all fields.
-	data := SystemConfigurationResourceModel{ID: types.StringValue("system")}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	// Set only the id: the framework types every other attribute from the
+	// schema, and the Read that follows an import fills them. Writing a
+	// zero-valued model here left list attributes without an element type.
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("system"))...)
 }
 
 func (r *SystemConfigurationResource) apply(ctx context.Context, data *SystemConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
@@ -475,10 +512,10 @@ func overlaySystemConfiguration(ctx context.Context, m map[string]json.RawMessag
 	var diags diag.Diagnostics
 
 	putJSONBool(m, "EnableMetrics", data.EnableMetrics)
-	putJSONBool(m, "EnableNormalizedItemByNameIDs", data.EnableNormalizedItemByNameIDs)
+	putJSONBool(m, "EnableNormalizedItemByNameIds", data.EnableNormalizedItemByNameIDs)
 	putJSONBool(m, "IsPortAuthorized", data.IsPortAuthorized)
 	putJSONBool(m, "QuickConnectAvailable", data.QuickConnectAvailable)
-	putJSONBool(m, "EnableCaseSensitiveItemIDs", data.EnableCaseSensitiveItemIDs)
+	putJSONBool(m, "EnableCaseSensitiveItemIds", data.EnableCaseSensitiveItemIDs)
 	putJSONBool(m, "DisableLiveTvChannelUserDataName", data.DisableLiveTvChannelUserDataName)
 	putJSONString(m, "MetadataPath", data.MetadataPath)
 	putJSONString(m, "PreferredMetadataLanguage", data.PreferredMetadataLanguage)
@@ -659,7 +696,7 @@ func overlayTrickplayOptions(ctx context.Context, m map[string]json.RawMessage, 
 	putJSONBool(entry, "EnableHwEncoding", opts.EnableHwEncoding)
 	putJSONBool(entry, "EnableKeyFrameOnlyExtraction", opts.EnableKeyFrameOnlyExtraction)
 	putJSONString(entry, "ScanBehavior", opts.ScanBehavior)
-	putJSONString(entry, "ProcessPriorityClass", opts.ProcessPriority)
+	putJSONString(entry, "ProcessPriority", opts.ProcessPriority)
 	putJSONInt64(entry, "Interval", opts.Interval)
 	putJSONInt64List(ctx, entry, "WidthResolutions", opts.WidthResolutions)
 	putJSONInt64(entry, "TileWidth", opts.TileWidth)
@@ -683,10 +720,10 @@ func flattenSystemConfiguration(ctx context.Context, raw string, data *SystemCon
 	}
 
 	data.EnableMetrics = getJSONBool(m, "EnableMetrics")
-	data.EnableNormalizedItemByNameIDs = getJSONBool(m, "EnableNormalizedItemByNameIDs")
+	data.EnableNormalizedItemByNameIDs = getJSONBool(m, "EnableNormalizedItemByNameIds")
 	data.IsPortAuthorized = getJSONBool(m, "IsPortAuthorized")
 	data.QuickConnectAvailable = getJSONBool(m, "QuickConnectAvailable")
-	data.EnableCaseSensitiveItemIDs = getJSONBool(m, "EnableCaseSensitiveItemIDs")
+	data.EnableCaseSensitiveItemIDs = getJSONBool(m, "EnableCaseSensitiveItemIds")
 	data.DisableLiveTvChannelUserDataName = getJSONBool(m, "DisableLiveTvChannelUserDataName")
 	data.MetadataPath = getJSONString(m, "MetadataPath")
 	data.PreferredMetadataLanguage = getJSONString(m, "PreferredMetadataLanguage")
@@ -952,7 +989,7 @@ func flattenTrickplayOptions(ctx context.Context, m map[string]json.RawMessage, 
 		"enable_hw_encoding":               getJSONBool(entry, "EnableHwEncoding"),
 		"enable_key_frame_only_extraction": getJSONBool(entry, "EnableKeyFrameOnlyExtraction"),
 		"scan_behavior":                    getJSONString(entry, "ScanBehavior"),
-		"process_priority":                 getJSONString(entry, "ProcessPriorityClass"),
+		"process_priority":                 getJSONString(entry, "ProcessPriority"),
 		"interval":                         getJSONInt64(entry, "Interval"),
 		"width_resolutions":                widthResolutions,
 		"tile_width":                       getJSONInt64(entry, "TileWidth"),

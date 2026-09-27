@@ -10,6 +10,7 @@ JELLYFIN_URL="${JELLYFIN_ENDPOINT:-http://localhost:8096}"
 JELLYFIN_USERNAME="${JELLYFIN_USERNAME:-admin}"
 JELLYFIN_PASSWORD="${JELLYFIN_PASSWORD:-Admin123!}"
 MAX_WAIT=120
+ENV_FILE="${JELLYFIN_ENV_FILE:-$(dirname "$0")/../internal/provider/supported_jellyfin_version.env}"
 
 echo "Waiting for Jellyfin to become ready at ${JELLYFIN_URL}..."
 for i in $(seq 1 "$MAX_WAIT"); do
@@ -28,7 +29,7 @@ done
 
 # Create test media directories inside the container.
 echo "Creating test media directories..."
-docker compose exec -T jellyfin mkdir -p /media/movies /media/tvshows
+docker compose --env-file "${ENV_FILE}" exec -T jellyfin mkdir -p /media/movies /media/tvshows
 echo "  - Media directories created"
 
 echo ""

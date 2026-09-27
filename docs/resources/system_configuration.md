@@ -42,7 +42,7 @@ resource "jellyfin_system_configuration" "example" {
 - `cache_path` (String) Cache path.
 - `cache_size` (Number) Cache size.
 - `cast_receiver_applications` (Attributes List) Cast receiver applications. (see [below for nested schema](#nestedatt--cast_receiver_applications))
-- `chapter_image_resolution` (String) Chapter image resolution.
+- `chapter_image_resolution` (String) Chapter image resolution. One of `MatchSource`, `P144`, `P240`, `P360`, `P480`, `P720`, `P1080`, `P1440`, `P2160`.
 - `codecs_used` (List of String) Codecs used.
 - `content_types` (Attributes List) Content types. (see [below for nested schema](#nestedatt--content_types))
 - `cors_hosts` (List of String) CORS hosts.
@@ -59,7 +59,7 @@ resource "jellyfin_system_configuration" "example" {
 - `enable_normalized_item_by_name_ids` (Boolean) Enable normalized item by name IDs.
 - `enable_slow_response_warning` (Boolean) Enable slow response warning.
 - `image_extraction_timeout_ms` (Number) Image extraction timeout in milliseconds.
-- `image_saving_convention` (String) Image saving convention.
+- `image_saving_convention` (String) Image saving convention. One of `Legacy`, `Compatible`.
 - `inactive_session_threshold` (Number) Inactive session threshold.
 - `is_port_authorized` (Boolean) Is port authorized.
 - `library_metadata_refresh_concurrency` (Number) Library metadata refresh concurrency.
@@ -99,8 +99,8 @@ resource "jellyfin_system_configuration" "example" {
 
 Optional:
 
-- `id` (String) Application ID.
-- `name` (String) Application name.
+- `id` (String) Application ID. Must be set in every entry.
+- `name` (String) Application name. Must be set in every entry.
 
 
 <a id="nestedatt--content_types"></a>
@@ -145,10 +145,10 @@ Optional:
 - `enable_key_frame_only_extraction` (Boolean) Enable key frame only extraction.
 - `interval` (Number) Interval.
 - `jpeg_quality` (Number) JPEG quality.
-- `process_priority` (String) Process priority class.
+- `process_priority` (String) Process priority class. One of `Normal`, `Idle`, `High`, `RealTime`, `BelowNormal`, `AboveNormal`.
 - `process_threads` (Number) Process threads.
 - `qscale` (Number) Qscale.
-- `scan_behavior` (String) Scan behavior.
+- `scan_behavior` (String) Scan behavior. One of `Blocking`, `NonBlocking`.
 - `tile_height` (Number) Tile height.
 - `tile_width` (Number) Tile width.
 - `width_resolutions` (List of Number) Width resolutions.

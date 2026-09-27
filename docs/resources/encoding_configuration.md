@@ -20,13 +20,13 @@ resource "jellyfin_encoding_configuration" "example" {
   enable_fallback_font                                              = false
   enable_audio_vbr                                                  = false
   down_mix_audio_boost                                              = 0
-  down_mix_stereo_algorithm                                         = ""
+  down_mix_stereo_algorithm                                         = "None"
   max_muxing_queue_size                                             = 0
   enable_throttling                                                 = false
   throttle_delay_seconds                                            = 0
   enable_segment_deletion                                           = false
   segment_keep_seconds                                              = 0
-  hardware_acceleration_type                                        = ""
+  hardware_acceleration_type                                        = "none"
   encoder_app_path                                                  = ""
   encoder_app_path_display                                          = ""
   vaapi_device                                                      = ""
@@ -34,9 +34,9 @@ resource "jellyfin_encoding_configuration" "example" {
   enable_tonemapping                                                = false
   enable_vpp_tonemapping                                            = false
   enable_video_toolbox_tonemapping                                  = false
-  tonemapping_algorithm                                             = ""
-  tonemapping_mode                                                  = ""
-  tonemapping_range                                                 = ""
+  tonemapping_algorithm                                             = "bt2390"
+  tonemapping_mode                                                  = "auto"
+  tonemapping_range                                                 = "auto"
   tonemapping_desat                                                 = 0
   tonemapping_peak                                                  = 0
   tonemapping_param                                                 = 0
@@ -44,9 +44,9 @@ resource "jellyfin_encoding_configuration" "example" {
   vpp_tonemapping_contrast                                          = 0
   h264_crf                                                          = 0
   h265_crf                                                          = 0
-  encoder_preset                                                    = ""
+  encoder_preset                                                    = "auto"
   deinterlace_double_rate                                           = false
-  deinterlace_method                                                = ""
+  deinterlace_method                                                = "yadif"
   enable_decoding_color_depth10_hevc                                = false
   enable_decoding_color_depth10_vp9                                 = false
   enable_decoding_color_depth10_hevc_rext                           = false
@@ -61,6 +61,10 @@ resource "jellyfin_encoding_configuration" "example" {
   enable_subtitle_extraction                                        = false
   hardware_decoding_codecs                                          = []
   allow_on_demand_metadata_based_keyframe_extraction_for_extensions = []
+
+  # Requires Jellyfin 12.0 or later; remove both on older servers.
+  subtitle_extraction_timeout_minutes = 30
+  hls_audio_seek_strategy             = "TrimCopiedAudio"
 }
 ```
 
@@ -73,9 +77,9 @@ resource "jellyfin_encoding_configuration" "example" {
 - `allow_hevc_encoding` (Boolean) Whether HEVC encoding is allowed.
 - `allow_on_demand_metadata_based_keyframe_extraction_for_extensions` (List of String) Extensions allowing on-demand metadata-based keyframe extraction.
 - `deinterlace_double_rate` (Boolean) Whether deinterlace double rate is enabled.
-- `deinterlace_method` (String) Deinterlace method.
+- `deinterlace_method` (String) Deinterlace method. One of `yadif`, `bwdif`.
 - `down_mix_audio_boost` (Number) Down-mix audio boost.
-- `down_mix_stereo_algorithm` (String) Down-mix stereo algorithm.
+- `down_mix_stereo_algorithm` (String) Down-mix stereo algorithm. One of `None`, `Dave750`, `NightmodeDialogue`, `Rfc7845`, `Ac4`.
 - `enable_audio_vbr` (Boolean) Whether audio VBR is enabled.
 - `enable_decoding_color_depth10_hevc` (Boolean) Whether 10-bit HEVC decoding is enabled.
 - `enable_decoding_color_depth10_hevc_rext` (Boolean) Whether 10-bit HEVC RExt decoding is enabled.
@@ -94,24 +98,26 @@ resource "jellyfin_encoding_configuration" "example" {
 - `enable_vpp_tonemapping` (Boolean) Whether VPP tonemapping is enabled.
 - `encoder_app_path` (String) Encoder application path.
 - `encoder_app_path_display` (String) Encoder application display path.
-- `encoder_preset` (String) Encoder preset.
+- `encoder_preset` (String) Encoder preset. One of `auto`, `placebo`, `veryslow`, `slower`, `slow`, `medium`, `fast`, `faster`, `veryfast`, `superfast`, `ultrafast`.
 - `encoding_thread_count` (Number) Encoding thread count.
 - `fallback_font_path` (String) Fallback font path.
 - `h264_crf` (Number) H264 CRF.
 - `h265_crf` (Number) H265 CRF.
-- `hardware_acceleration_type` (String) Hardware acceleration type.
+- `hardware_acceleration_type` (String) Hardware acceleration type. One of `none`, `amf`, `qsv`, `nvenc`, `v4l2m2m`, `vaapi`, `videotoolbox`, `rkmpp`.
 - `hardware_decoding_codecs` (List of String) Hardware decoding codecs.
+- `hls_audio_seek_strategy` (String) Method used to seek the audio stream when transcoding HLS segments. One of `TrimCopiedAudio`, `TranscodeAudio`. Requires Jellyfin 12.0 or later.
 - `max_muxing_queue_size` (Number) Max muxing queue size.
 - `prefer_system_native_hw_decoder` (Boolean) Whether to prefer system native hardware decoder.
 - `qsv_device` (String) QSV device.
 - `segment_keep_seconds` (Number) Segment keep time in seconds.
+- `subtitle_extraction_timeout_minutes` (Number) Subtitle extraction timeout in minutes. Requires Jellyfin 12.0 or later.
 - `throttle_delay_seconds` (Number) Throttle delay in seconds.
-- `tonemapping_algorithm` (String) Tonemapping algorithm.
+- `tonemapping_algorithm` (String) Tonemapping algorithm. One of `none`, `clip`, `linear`, `gamma`, `reinhard`, `hable`, `mobius`, `bt2390`.
 - `tonemapping_desat` (Number) Tonemapping desaturation.
-- `tonemapping_mode` (String) Tonemapping mode.
+- `tonemapping_mode` (String) Tonemapping mode. One of `auto`, `max`, `rgb`, `lum`, `itp`.
 - `tonemapping_param` (Number) Tonemapping parameter.
 - `tonemapping_peak` (Number) Tonemapping peak.
-- `tonemapping_range` (String) Tonemapping range.
+- `tonemapping_range` (String) Tonemapping range. One of `auto`, `tv`, `pc`.
 - `transcoding_temp_path` (String) Transcoding temporary path.
 - `vaapi_device` (String) VAAPI device.
 - `vpp_tonemapping_brightness` (Number) VPP tonemapping brightness.

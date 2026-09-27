@@ -4,19 +4,34 @@ page_title: "jellyfin_plugin Resource - jellyfin"
 subcategory: ""
 description: |-
   Installs a plugin on the Jellyfin server. The server may require a restart after installation.
+  Jellyfin's Update Plugins scheduled task (key PluginUpdates) runs at startup and every 24 hours by default and upgrades every plugin to the newest compatible version its repositories offer. No API exempts a single plugin: the task skips only a plugin whose meta.json, in its folder under the server's plugins directory, sets "autoUpdate": false. Jellyfin reads that file at startup and writes its own copy back whenever the plugin's status changes, so edit it while Jellyfin is stopped, and every install of the plugin, including the reinstall a replacement makes, writes a new one set to true. A pinned version therefore drifts once the task runs: the newer version loads at the next restart, and because changing version replaces the resource, the next apply reinstalls the pinned version, which the task upgrades again at the following startup. To keep a pin, set that flag on the server, or remove the task's triggers with jellyfin_scheduled_task, which stops automatic updates for every plugin. To follow updates instead, leave version unset, set it to latest, or add lifecycle { ignore_changes = [version] }.
+  Replacing the resource also replaces the resources that take its id, such as jellyfin_plugin_configuration, because the id is unknown until the plugin is installed again. They then write their configuration again, which Jellyfin accepts only once a restart has loaded the reinstalled plugin, so put a jellyfin_restart between them, as the jellyfin_security_plugin_configuration example does.
 ---
 
 # jellyfin_plugin (Resource)
 
 Installs a plugin on the Jellyfin server. The server may require a restart after installation.
 
+Jellyfin's *Update Plugins* scheduled task (key `PluginUpdates`) runs at startup and every 24 hours by default and upgrades every plugin to the newest compatible version its repositories offer. No API exempts a single plugin: the task skips only a plugin whose `meta.json`, in its folder under the server's `plugins` directory, sets `"autoUpdate": false`. Jellyfin reads that file at startup and writes its own copy back whenever the plugin's status changes, so edit it while Jellyfin is stopped, and every install of the plugin, including the reinstall a replacement makes, writes a new one set to `true`. A pinned `version` therefore drifts once the task runs: the newer version loads at the next restart, and because changing `version` replaces the resource, the next apply reinstalls the pinned version, which the task upgrades again at the following startup. To keep a pin, set that flag on the server, or remove the task's triggers with `jellyfin_scheduled_task`, which stops automatic updates for every plugin. To follow updates instead, leave `version` unset, set it to `latest`, or add `lifecycle { ignore_changes = [version] }`.
+
+Replacing the resource also replaces the resources that take its `id`, such as `jellyfin_plugin_configuration`, because the `id` is unknown until the plugin is installed again. They then write their configuration again, which Jellyfin accepts only once a restart has loaded the reinstalled plugin, so put a `jellyfin_restart` between them, as the `jellyfin_security_plugin_configuration` example does.
+
 ## Example Usage
 
 ```terraform
 resource "jellyfin_plugin" "example" {
   name           = "Bookshelf"
-  version        = "14.0.0.0"
+  version        = "13.0.0.0"
   repository_url = "https://repo.jellyfin.org/files/plugin/manifest.json"
+}
+
+# Jellyfin's Update Plugins task upgrades every plugin at startup and daily, so
+# Bookshelf would leave the pinned version once a newer one is released.
+# Without triggers the task never runs, which stops automatic updates for every
+# plugin.
+resource "jellyfin_scheduled_task" "plugin_updates" {
+  task_id  = "f9b057c054e9e6daee4a88ffd146a403"
+  triggers = []
 }
 ```
 
@@ -30,11 +45,12 @@ resource "jellyfin_plugin" "example" {
 ### Optional
 
 - `repository_url` (String) The repository URL from which to install the plugin. Required when creating the resource and resolved automatically on import when the exact package version is still available.
-- `version` (String) The plugin version to install. Omit to install the latest available version from the repository.
+- `version` (String) The plugin version to install, as the repository lists it (e.g. `13.0.0.0`), or a keyword: `latest` installs the newest version the repositories offer, and `supported` installs the Jellyfin Security release this provider was tested against, in the build the server accepts. A keyword is resolved only when the plugin is installed, or when it replaces another value, and stays in state as written; `installed_version` holds the result. Omitted, it installs as `supported` does for Jellyfin Security and as `latest` does for any other plugin, and then holds the installed version, as it also does once a keyword is removed from the configuration. Changing the value reinstalls the plugin, unless the new value names the installed version, as a keyword set on an imported plugin usually does; then only state changes.
 
 ### Read-Only
 
 - `id` (String) The plugin ID assigned by Jellyfin after installation.
+- `installed_version` (String) The version Jellyfin lists for the plugin. While an update waits for a restart Jellyfin lists both versions, and this keeps the one it held before.
 
 ## Import
 

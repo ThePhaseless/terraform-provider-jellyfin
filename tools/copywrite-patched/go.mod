@@ -1,11 +1,11 @@
 module github.com/hashicorp/copywrite
 
-go 1.25.0
+go 1.26.0
 
 toolchain go1.27.1
 
 require (
-	github.com/bmatcuk/doublestar/v4 v4.10.0
+	github.com/bmatcuk/doublestar/v4 v4.10.2
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
 	github.com/google/go-github/v45 v45.2.0
 	github.com/knadh/koanf/parsers/dotenv v1.1.2
@@ -14,15 +14,15 @@ require (
 	github.com/knadh/koanf/providers/confmap v1.0.1
 	github.com/knadh/koanf/providers/env v1.1.0
 	github.com/knadh/koanf/providers/file v1.2.1
-	github.com/knadh/koanf/v2 v2.3.6
+	github.com/knadh/koanf/v2 v2.3.7
 	github.com/mattn/go-isatty v0.0.24
 	github.com/mergestat/timediff v0.0.4
 	github.com/spf13/afero v1.15.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1
-	golang.org/x/oauth2 v0.36.0
-	golang.org/x/sync v0.22.0
+	golang.org/x/oauth2 v0.37.0
+	golang.org/x/sync v0.23.0
 )
 
 require (
@@ -47,7 +47,7 @@ require (
 )
 
 require (
-	github.com/cli/go-gh/v2 v2.13.0
+	github.com/cli/go-gh/v2 v2.16.1
 	github.com/samber/lo v1.53.0
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

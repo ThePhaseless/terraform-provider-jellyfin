@@ -6,8 +6,12 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 )
 
@@ -125,6 +129,134 @@ func TestUserAndAuthResponsesUseJellyfinIDCasing(t *testing.T) {
 	}
 }
 
+func TestAuthenticateByNameRejectionCarriesStatusCode(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("Invalid username or password entered."))
+	}))
+	defer server.Close()
+
+	_, err := NewClient(server.URL, "").AuthenticateByName(context.Background(), "viewer", "wrong")
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("AuthenticateByName() error = %v, want an HTTPError with status 401", err)
+	}
+}
+
+func TestGetUserPolicyRawKeepsFieldsMissingFromUserPolicy(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, map[string]interface{}{
+			"Id":   "user-1",
+			"Name": "viewer",
+			"Policy": map[string]interface{}{
+				"MaxParentalRating":    10,
+				"MaxParentalSubRating": 2,
+			},
+		})
+	}))
+	defer server.Close()
+
+	raw, err := NewClient(server.URL, "test-key").GetUserPolicyRaw(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("GetUserPolicyRaw() error = %v", err)
+	}
+
+	var policy map[string]int
+	if err := json.Unmarshal([]byte(raw), &policy); err != nil {
+		t.Fatalf("parsing policy %s: %v", raw, err)
+	}
+	if got := policy["MaxParentalSubRating"]; got != 2 {
+		t.Fatalf("MaxParentalSubRating = %d, want 2 (policy %s)", got, raw)
+	}
+	if len(policy) != 2 {
+		t.Fatalf("policy = %s, want only the fields the server sent", raw)
+	}
+}
+
+func TestUpdateUserRawPostsBodyToUsersWithUserIDQuery(t *testing.T) {
+	t.Parallel()
+
+	var gotMethod, gotPath, gotUserID, gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotUserID = r.Method, r.URL.Path, r.URL.Query().Get("userId")
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("reading request body: %v", err)
+		}
+		gotBody = string(body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	userJSON := `{"Id":"user-1","Name":"renamed","Configuration":{"SubtitleLanguagePreference":"fre"}}`
+	if err := NewClient(server.URL, "test-key").UpdateUserRaw(context.Background(), "user-1", userJSON); err != nil {
+		t.Fatalf("UpdateUserRaw() error = %v", err)
+	}
+
+	if gotMethod != http.MethodPost || gotPath != "/Users" || gotUserID != "user-1" {
+		t.Fatalf("expected POST /Users?userId=user-1, got %s %s with userId %q", gotMethod, gotPath, gotUserID)
+	}
+	if gotBody != userJSON {
+		t.Fatalf("body = %s, want the user JSON passed in unchanged", gotBody)
+	}
+}
+
+func TestUpdateUserPasswordPostsPasswordsToUsersPasswordWithUserIDQuery(t *testing.T) {
+	t.Parallel()
+
+	var gotMethod, gotPath, gotUserID string
+	var gotBody map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotUserID = r.Method, r.URL.Path, r.URL.Query().Get("userId")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decoding request body: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	if err := NewClient(server.URL, "test-key").UpdateUserPassword(context.Background(), "user-1", "old", "new"); err != nil {
+		t.Fatalf("UpdateUserPassword() error = %v", err)
+	}
+
+	if gotMethod != http.MethodPost || gotPath != "/Users/Password" || gotUserID != "user-1" {
+		t.Fatalf("expected POST /Users/Password?userId=user-1, got %s %s with userId %q", gotMethod, gotPath, gotUserID)
+	}
+	want := map[string]string{"CurrentPw": `"old"`, "NewPw": `"new"`}
+	if len(gotBody) != len(want) {
+		t.Fatalf("body has fields %v, want only CurrentPw and NewPw", slices.Sorted(maps.Keys(gotBody)))
+	}
+	for field, value := range want {
+		if got := string(gotBody[field]); got != value {
+			t.Errorf("%s = %s, want %s", field, got, value)
+		}
+	}
+}
+
+func TestUserUpdatesRejectBlankIDWithoutSendingRequest(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected %s %s", r.Method, r.URL)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "test-key")
+	for _, id := range []string{"", " ", "\t"} {
+		if err := c.UpdateUserRaw(context.Background(), id, `{"Name":"renamed"}`); !errors.Is(err, errBlankUserID) {
+			t.Errorf("UpdateUserRaw(%q) error = %v, want errBlankUserID", id, err)
+		}
+		if err := c.UpdateUserPassword(context.Background(), id, "", "new"); !errors.Is(err, errBlankUserID) {
+			t.Errorf("UpdateUserPassword(%q) error = %v, want errBlankUserID", id, err)
+		}
+	}
+}
+
 func TestRestartServerPostsSystemRestart(t *testing.T) {
 	t.Parallel()
 
@@ -141,6 +273,57 @@ func TestRestartServerPostsSystemRestart(t *testing.T) {
 
 	if gotMethod != http.MethodPost || gotPath != "/System/Restart" {
 		t.Fatalf("expected POST /System/Restart, got %s %s", gotMethod, gotPath)
+	}
+}
+
+func TestDirectoryExistsAsksValidatePathForADirectory(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/Environment/ValidatePath" {
+			t.Errorf("expected POST /Environment/ValidatePath, got %s %s", r.Method, r.URL.Path)
+		}
+		var req struct {
+			Path   string
+			IsFile *bool
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decoding request: %v", err)
+		}
+		if req.IsFile == nil || *req.IsFile {
+			t.Errorf("IsFile = %v, want false", req.IsFile)
+		}
+		switch req.Path {
+		case "/media/movies":
+			w.WriteHeader(http.StatusNoContent)
+		case "/media/missing":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusForbidden)
+		}
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "test-key")
+	tests := map[string]struct {
+		path    string
+		want    bool
+		wantErr bool
+	}{
+		"existing directory": {path: "/media/movies", want: true},
+		"missing directory":  {path: "/media/missing", want: false},
+		"other error":        {path: "/forbidden", wantErr: true},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := c.DirectoryExists(context.Background(), test.path)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("DirectoryExists(%q) error = %v, wantErr %t", test.path, err, test.wantErr)
+			}
+			if got != test.want {
+				t.Fatalf("DirectoryExists(%q) = %t, want %t", test.path, got, test.want)
+			}
+		})
 	}
 }
 

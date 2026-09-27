@@ -7,8 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
+	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -19,6 +22,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -26,6 +30,8 @@ import (
 )
 
 const jellyfinSecurityPluginID = "94879a0c-da24-4eb1-aa06-f28b4b9333b1"
+
+var isoDateTimePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?$`)
 
 var (
 	_ resource.Resource                = &JellyfinSecurityPluginConfigurationResource{}
@@ -46,6 +52,7 @@ type JellyfinSecurityPluginConfigurationResourceModel struct {
 	RequireChallengeIPMatch            types.Bool   `tfsdk:"require_challenge_ip_match"`
 	RegisteredDeviceMaxAgeDays         types.Int64  `tfsdk:"registered_device_max_age_days"`
 	BareDeviceIDBypassEnabled          types.Bool   `tfsdk:"bare_device_id_bypass_enabled"`
+	PairDeviceOnSecondScreenApproval   types.Bool   `tfsdk:"pair_device_on_second_screen_approval"`
 	RequireTwoFactorToDisable          types.Bool   `tfsdk:"require_two_factor_to_disable"`
 	SelfServiceStepUpMode              types.String `tfsdk:"self_service_step_up_mode"`
 	StepUpLevel                        types.String `tfsdk:"step_up_level"`
@@ -105,6 +112,7 @@ type JellyfinSecurityPluginConfigurationResourceModel struct {
 	GeoIPCountryDbPath                 types.String `tfsdk:"geo_ip_country_db_path"`
 	WebauthnRpID                       types.String `tfsdk:"webauthn_rp_id"`
 	WebauthnOrigins                    types.List   `tfsdk:"webauthn_origins"`
+	PublicBaseURL                      types.String `tfsdk:"public_base_url"`
 	BypassForExternalAuthProviders     types.Bool   `tfsdk:"bypass_for_external_auth_providers"`
 	OidcProviders                      types.List   `tfsdk:"oidc_providers"`
 	GeoIPCityDbPath                    types.String `tfsdk:"geo_ip_city_db_path"`
@@ -139,6 +147,7 @@ type OidcProviderModel struct {
 	AllowAdminGroupElevation     types.Bool   `tfsdk:"allow_admin_group_elevation"`
 	TemplateUserID               types.String `tfsdk:"template_user_id"`
 	AutoCreateUsers              types.Bool   `tfsdk:"auto_create_users"`
+	LinkExistingUsersByUsername  types.Bool   `tfsdk:"link_existing_users_by_username"`
 	RequireIdpMfa                types.Bool   `tfsdk:"require_idp_mfa"`
 	BypassPluginTwoFa            types.Bool   `tfsdk:"bypass_plugin_two_fa"`
 	Enabled                      types.Bool   `tfsdk:"enabled"`
@@ -240,19 +249,17 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 		}
 	}
 
+	enrollmentDeadline := optionalString("2FA enrollment deadline as an ISO 8601 date-time, e.g. `2030-01-01T00:00:00Z`.")
+	enrollmentDeadline.Validators = []validator.String{
+		stringvalidator.RegexMatches(isoDateTimePattern, "must be an ISO 8601 date-time such as 2030-01-01T00:00:00Z"),
+	}
+	enrollmentDeadline.PlanModifiers = append(enrollmentDeadline.PlanModifiers, sameInstantPlanModifier{})
+
 	resp.Schema = schema.Schema{
 		Description:         "Manages the JellyfinSecurity plugin configuration with typed attributes.",
 		MarkdownDescription: "Manages the JellyfinSecurity plugin configuration with typed attributes.",
 		Attributes: map[string]schema.Attribute{
-			"plugin_id": schema.StringAttribute{
-				Description:         "The plugin ID (GUID).",
-				MarkdownDescription: "The plugin ID (GUID).",
-				Required:            true,
-				Validators:          requiredIdentifierValidators(),
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
+			"plugin_id": pluginIDAttribute(),
 			"id": schema.StringAttribute{
 				Description:         "The plugin configuration resource identifier.",
 				MarkdownDescription: "The plugin configuration resource identifier.",
@@ -331,7 +338,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 			"trust_cookie_ttl_days":              optionalInt("Trust cookie TTL in days."),
 			"nat_hairpin_self_ip_bypass":         optionalBool("Enable NAT hairpin self-IP bypass."),
 			"default_max_concurrent_sessions":    optionalInt("Default max concurrent sessions per user (0 = unlimited)."),
-			"enrollment_deadline":                optionalString("2FA enrollment deadline (ISO-8601 or null)."),
+			"enrollment_deadline":                enrollmentDeadline,
 			"webhook_url":                        optionalString("Webhook notification URL."),
 			"webhook_secret":                     sensitiveString("Webhook signing secret."),
 			"webhook_headers":                    optionalStringList("Extra webhook headers, one \"Name: Value\" entry each."),
@@ -366,6 +373,8 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 			"onboarding_password_require_lowercase": optionalBool("Require lowercase in onboarding passwords."),
 			"onboarding_password_require_digit":     optionalBool("Require digit in onboarding passwords."),
 			"onboarding_password_require_symbol":    optionalBool("Require symbol in onboarding passwords."),
+			"pair_device_on_second_screen_approval": optionalBool("Remember a device signed in through a second-screen approval (OIDC device flow or Quick Connect) in the user's paired devices. Requires plugin 2.6.3 or later."),
+			"public_base_url":                       optionalString("Public base URL of the server, used for OIDC redirect URIs, pairing QR codes and password reset links. Empty uses the request host. Requires plugin 2.6.3 or later."),
 		},
 	}
 }
@@ -424,6 +433,7 @@ func oidcProviderAttributes(
 		"button_text":                      optionalString("Login button text."),
 		"button_icon_url":                  optionalString("Login button icon URL."),
 		"force_password_setup":             optionalBool("Force password setup on first login."),
+		"link_existing_users_by_username":  optionalBool("Link an unlinked identity to an existing non-administrator user with the same username."),
 		"rp_initiated_logout_enabled":      optionalBool("End the provider session on Jellyfin sign-out (OIDC RP-Initiated Logout)."),
 		"rp_initiated_logout_redirect_uri": optionalString("Absolute https post_logout_redirect_uri; must be registered at the IdP."),
 		"created_at": schema.StringAttribute{
@@ -544,18 +554,12 @@ func (r *JellyfinSecurityPluginConfigurationResource) checkJellyfinSecurityVersi
 	canonical := normalizeGUID(jellyfinSecurityPluginID)
 	for _, p := range installed {
 		if normalizeGUID(p.ID) == canonical {
-			if detail, ok := versionNewerWarning("JellyfinSecurity plugin", p.Version, supportedSecurityPluginVersion()); ok {
+			if detail, ok := versionNewerWarning("JellyfinSecurity plugin", pluginRelease(p.Version), pluginRelease(supportedSecurityPluginVersion())); ok {
 				diags.AddWarning("JellyfinSecurity plugin version newer than supported", detail)
 			}
 			return
 		}
 	}
-}
-
-// normalizeGUID returns a lowercase, dash-free GUID so that the provider can
-// compare IDs regardless of whether Jellyfin returns them as "D" or "N" format.
-func normalizeGUID(s string) string {
-	return strings.ToLower(strings.ReplaceAll(s, "-", ""))
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) apply(ctx context.Context, data *JellyfinSecurityPluginConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
@@ -627,6 +631,7 @@ func overlayJellyfinSecurity(ctx context.Context, m map[string]json.RawMessage, 
 	putJSONBool(m, "RequireChallengeIpMatch", data.RequireChallengeIPMatch)
 	putJSONInt64(m, "RegisteredDeviceMaxAgeDays", data.RegisteredDeviceMaxAgeDays)
 	putJSONBool(m, "BareDeviceIdBypassEnabled", data.BareDeviceIDBypassEnabled)
+	putJSONBool(m, "PairDeviceOnSecondScreenApproval", data.PairDeviceOnSecondScreenApproval)
 	putJSONBool(m, "RequireTwoFactorToDisable", data.RequireTwoFactorToDisable)
 	putJSONString(m, "SelfServiceStepUpMode", data.SelfServiceStepUpMode)
 	putJSONString(m, "StepUpLevel", data.StepUpLevel)
@@ -679,6 +684,7 @@ func overlayJellyfinSecurity(ctx context.Context, m map[string]json.RawMessage, 
 	putJSONString(m, "GeoIpAsnDbPath", data.GeoIPAsnDbPath)
 	putJSONString(m, "GeoIpCountryDbPath", data.GeoIPCountryDbPath)
 	putJSONString(m, "WebAuthnRpId", data.WebauthnRpID)
+	putJSONString(m, "PublicBaseUrl", data.PublicBaseURL)
 	putJSONBool(m, "BypassForExternalAuthProviders", data.BypassForExternalAuthProviders)
 	putJSONString(m, "GeoIpCityDbPath", data.GeoIPCityDbPath)
 	putJSONBool(m, "IpBanEnabled", data.IPBanEnabled)
@@ -798,6 +804,7 @@ func overlayOidcProvider(ctx context.Context, m map[string]json.RawMessage, p *O
 	putJSONBool(m, "AllowAdminGroupElevation", p.AllowAdminGroupElevation)
 	putJSONString(m, "TemplateUserId", p.TemplateUserID)
 	putJSONBool(m, "AutoCreateUsers", p.AutoCreateUsers)
+	putJSONBool(m, "LinkExistingUsersByUsername", p.LinkExistingUsersByUsername)
 	putJSONBool(m, "RequireIdpMfa", p.RequireIdpMfa)
 	putJSONBool(m, "BypassPluginTwoFa", p.BypassPluginTwoFa)
 	putJSONBool(m, "Enabled", p.Enabled)
@@ -888,6 +895,7 @@ func flattenJellyfinSecurity(ctx context.Context, raw string, data *JellyfinSecu
 	data.RequireChallengeIPMatch = getJSONBool(m, "RequireChallengeIpMatch")
 	data.RegisteredDeviceMaxAgeDays = getJSONInt64(m, "RegisteredDeviceMaxAgeDays")
 	data.BareDeviceIDBypassEnabled = getJSONBool(m, "BareDeviceIdBypassEnabled")
+	data.PairDeviceOnSecondScreenApproval = getJSONBool(m, "PairDeviceOnSecondScreenApproval")
 	data.RequireTwoFactorToDisable = getJSONBool(m, "RequireTwoFactorToDisable")
 	data.SelfServiceStepUpMode = getJSONString(m, "SelfServiceStepUpMode")
 	data.StepUpLevel = getJSONString(m, "StepUpLevel")
@@ -934,12 +942,13 @@ func flattenJellyfinSecurity(ctx context.Context, raw string, data *JellyfinSecu
 	data.TrustCookieTTLDays = getJSONInt64(m, "TrustCookieTtlDays")
 	data.NatHairpinSelfIPBypass = getJSONBool(m, "NatHairpinSelfIpBypass")
 	data.DefaultMaxConcurrentSessions = getJSONInt64(m, "DefaultMaxConcurrentSessions")
-	data.EnrollmentDeadline = getJSONString(m, "EnrollmentDeadline")
+	data.EnrollmentDeadline = keepSameInstant(data.EnrollmentDeadline, getJSONString(m, "EnrollmentDeadline"))
 	data.WebhookURL = getJSONString(m, "WebhookUrl")
 	data.WebhookSecret = getJSONString(m, "WebhookSecret")
 	data.GeoIPAsnDbPath = getJSONString(m, "GeoIpAsnDbPath")
 	data.GeoIPCountryDbPath = getJSONString(m, "GeoIpCountryDbPath")
 	data.WebauthnRpID = getJSONString(m, "WebAuthnRpId")
+	data.PublicBaseURL = getJSONString(m, "PublicBaseUrl")
 	data.BypassForExternalAuthProviders = getJSONBool(m, "BypassForExternalAuthProviders")
 	data.GeoIPCityDbPath = getJSONString(m, "GeoIpCityDbPath")
 	data.IPBanEnabled = getJSONBool(m, "IpBanEnabled")
@@ -977,6 +986,56 @@ func flattenJellyfinSecurity(ctx context.Context, raw string, data *JellyfinSecu
 
 	// OidcProviders
 	data.OidcProviders = flattenOidcProviders(ctx, m, diags)
+}
+
+// keepSameInstant returns prior when served names the same instant, so a
+// configured date-time survives the server rewriting it in .NET's round-trip
+// layout (2030-01-01T00:00:00Z comes back as 2030-01-01T00:00:00.0000000Z).
+func keepSameInstant(prior, served types.String) types.String {
+	if sameInstant(prior, served) {
+		return prior
+	}
+	return served
+}
+
+func sameInstant(a, b types.String) bool {
+	if a.IsNull() || a.IsUnknown() || b.IsNull() || b.IsUnknown() {
+		return false
+	}
+	at, ok := parseISODateTime(a.ValueString())
+	if !ok {
+		return false
+	}
+	bt, ok := parseISODateTime(b.ValueString())
+	return ok && at.Equal(bt)
+}
+
+// sameInstantPlanModifier plans the prior value when the configuration names
+// the same instant. An imported or server-side value is stored in .NET's
+// layout, which would otherwise show as a diff against the configured spelling.
+type sameInstantPlanModifier struct{}
+
+func (sameInstantPlanModifier) Description(context.Context) string {
+	return "Keeps the prior value when the configured date-time names the same instant."
+}
+
+func (m sameInstantPlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (sameInstantPlanModifier) PlanModifyString(_ context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if sameInstant(req.ConfigValue, req.StateValue) {
+		resp.PlanValue = req.StateValue
+	}
+}
+
+func parseISODateTime(v string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05.999999999"} {
+		if t, err := time.Parse(layout, v); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // flattenUserEmails reads the UserEmails array from the server response.
@@ -1116,6 +1175,7 @@ func oidcProviderObjectTypes() map[string]attr.Type {
 		"allow_admin_group_elevation":      types.BoolType,
 		"template_user_id":                 types.StringType,
 		"auto_create_users":                types.BoolType,
+		"link_existing_users_by_username":  types.BoolType,
 		"require_idp_mfa":                  types.BoolType,
 		"bypass_plugin_two_fa":             types.BoolType,
 		"enabled":                          types.BoolType,
@@ -1170,6 +1230,7 @@ func oidcProviderAttrs(ctx context.Context, m map[string]json.RawMessage, diags 
 	attrs["allow_admin_group_elevation"] = getJSONBool(m, "AllowAdminGroupElevation")
 	attrs["template_user_id"] = getJSONString(m, "TemplateUserId")
 	attrs["auto_create_users"] = getJSONBool(m, "AutoCreateUsers")
+	attrs["link_existing_users_by_username"] = getJSONBool(m, "LinkExistingUsersByUsername")
 	attrs["require_idp_mfa"] = getJSONBool(m, "RequireIdpMfa")
 	attrs["bypass_plugin_two_fa"] = getJSONBool(m, "BypassPluginTwoFa")
 	attrs["enabled"] = getJSONBool(m, "Enabled")

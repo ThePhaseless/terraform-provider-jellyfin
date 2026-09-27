@@ -102,8 +102,8 @@ Optional:
 - `is_hidden` (Boolean) Whether the user is hidden from login screens.
 - `login_attempts_before_lockout` (Number) Number of failed login attempts before the account is locked.
 - `max_active_sessions` (Number) Maximum number of simultaneous sessions.
-- `max_parental_rating` (Number) Maximum parental rating allowed for the user.
-- `max_parental_sub_rating` (Number) Maximum parental sub-rating allowed for the user.
+- `max_parental_rating` (Number) Maximum parental rating allowed for the user. When `policy` is set, leaving this unset or null means no limit.
+- `max_parental_sub_rating` (Number) Maximum parental sub-rating allowed for the user. When `policy` is set, leaving this unset or null means no limit.
 - `password_reset_provider_id` (String) Password reset provider ID.
 - `remote_client_bitrate_limit` (Number) Remote client bitrate limit.
 - `sync_play_access` (String) SyncPlay access level.

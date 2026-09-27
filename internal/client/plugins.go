@@ -9,7 +9,14 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"sync"
 )
+
+// pluginChangeMu serialises plugin installs and uninstalls. Jellyfin's plugin
+// manager adds and removes entries in an unsynchronised list, so overlapping
+// requests fail with ArgumentOutOfRangeException or a missing meta.json and can
+// leave that list inconsistent until the server restarts.
+var pluginChangeMu sync.Mutex
 
 // PluginRepository represents a plugin repository.
 type PluginRepository struct {
@@ -90,16 +97,23 @@ func (c *Client) InstallPlugin(ctx context.Context, name, version, repositoryURL
 
 	path := fmt.Sprintf("/Packages/Installed/%s?%s", url.PathEscape(name), params.Encode())
 
+	pluginChangeMu.Lock()
+	defer pluginChangeMu.Unlock()
 	if err := c.post(ctx, path, nil); err != nil {
 		return fmt.Errorf("installing plugin %s version %s: %w", name, version, err)
 	}
 	return nil
 }
 
-// UninstallPlugin removes an installed plugin by its ID.
-func (c *Client) UninstallPlugin(ctx context.Context, pluginID string) error {
-	if err := c.delete(ctx, fmt.Sprintf("/Plugins/%s", url.PathEscape(pluginID))); err != nil {
-		return fmt.Errorf("uninstalling plugin %s: %w", pluginID, err)
+// UninstallPluginVersion removes one installed version of a plugin. version
+// must be spelled as GET /Plugins lists it: Jellyfin parses it as a .NET
+// Version, which tells 13.0.0 and 13.0.0.0 apart, and answers 404 for a
+// version it does not list.
+func (c *Client) UninstallPluginVersion(ctx context.Context, pluginID, version string) error {
+	pluginChangeMu.Lock()
+	defer pluginChangeMu.Unlock()
+	if err := c.delete(ctx, fmt.Sprintf("/Plugins/%s/%s", url.PathEscape(pluginID), url.PathEscape(version))); err != nil {
+		return fmt.Errorf("uninstalling plugin %s version %s: %w", pluginID, version, err)
 	}
 	return nil
 }

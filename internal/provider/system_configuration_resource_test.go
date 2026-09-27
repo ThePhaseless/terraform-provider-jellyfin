@@ -4,6 +4,7 @@
 package provider
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -14,11 +15,46 @@ func TestAccSystemConfigurationResource(t *testing.T) {
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "jellyfin_system_configuration" "test" {
+  trickplay_options = {
+    process_priority = "idle"
+  }
+}
+`,
+				ExpectError: regexp.MustCompile(`trickplay_options\.process_priority\s+value\s+must\s+be\s+one\s+of`),
+			},
+			{
+				Config: `
+resource "jellyfin_system_configuration" "test" {
+  cast_receiver_applications = [{ id = "F007D354" }]
+}
+`,
+				ExpectError: regexp.MustCompile(`"cast_receiver_applications\[0\]\.name"\s+must\s+be\s+specified`),
+			},
 			// Create and Read.
 			{
-				Config: testAccSystemConfigurationResourceConfig("TestServer"),
+				Config: testAccSystemConfigurationResourceConfig("TestServer", systemConfigurationTestValues{
+					itemIDFlags:              false,
+					imageSavingConvention:    "Compatible",
+					chapterImageResolution:   "P720",
+					scanBehavior:             "Blocking",
+					processPriority:          "Idle",
+					castReceiverApplications: `[{ id = "F007D354", name = "Stable" }]`,
+					pathSubstitutions:        `[]`,
+				}),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "server_name", "TestServer"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "enable_normalized_item_by_name_ids", "false"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "enable_case_sensitive_item_ids", "false"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "image_saving_convention", "Compatible"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "chapter_image_resolution", "P720"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "trickplay_options.scan_behavior", "Blocking"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "trickplay_options.process_priority", "Idle"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.#", "1"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.0.id", "F007D354"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.0.name", "Stable"),
 				),
 			},
 			// ImportState.
@@ -29,21 +65,94 @@ func TestAccSystemConfigurationResource(t *testing.T) {
 				ImportStateId:           "system",
 				ImportStateVerifyIgnore: []string{"server_name"},
 			},
-			// Update.
+			// An entry added at update has no prior values; to is left out, and Jellyfin fills in "".
 			{
-				Config: testAccSystemConfigurationResourceConfig("UpdatedServer"),
+				Config: testAccSystemConfigurationResourceConfig("TestServer", systemConfigurationTestValues{
+					itemIDFlags:              false,
+					imageSavingConvention:    "Compatible",
+					chapterImageResolution:   "P720",
+					scanBehavior:             "Blocking",
+					processPriority:          "Idle",
+					castReceiverApplications: `[{ id = "F007D354", name = "Stable" }]`,
+					pathSubstitutions:        `[{ from = "/mnt/media" }]`,
+				}),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "path_substitutions.#", "1"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "path_substitutions.0.from", "/mnt/media"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "path_substitutions.0.to", ""),
+				),
+			},
+			// Update back to a fresh server's values so later tests start from the defaults.
+			{
+				Config: testAccSystemConfigurationResourceConfig("UpdatedServer", systemConfigurationTestValues{
+					itemIDFlags:              true,
+					imageSavingConvention:    "Legacy",
+					chapterImageResolution:   "MatchSource",
+					scanBehavior:             "NonBlocking",
+					processPriority:          "BelowNormal",
+					castReceiverApplications: `[{ id = "F007D354", name = "Stable" }, { id = "6F511C87", name = "Unstable" }]`,
+					pathSubstitutions:        `[]`,
+				}),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "server_name", "UpdatedServer"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "enable_normalized_item_by_name_ids", "true"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "enable_case_sensitive_item_ids", "true"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "image_saving_convention", "Legacy"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "chapter_image_resolution", "MatchSource"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "trickplay_options.scan_behavior", "NonBlocking"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "trickplay_options.process_priority", "BelowNormal"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.#", "2"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.1.id", "6F511C87"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.1.name", "Unstable"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "path_substitutions.#", "0"),
+				),
+			},
+			// Leaves every nested attribute out so the post-apply empty-plan check covers omitted lists and objects.
+			{
+				Config: `
+resource "jellyfin_system_configuration" "test" {
+  server_name = "UpdatedServer"
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.#", "2"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "trickplay_options.process_priority", "BelowNormal"),
 				),
 			},
 		},
 	})
 }
 
-func testAccSystemConfigurationResourceConfig(serverName string) string {
+type systemConfigurationTestValues struct {
+	itemIDFlags              bool
+	imageSavingConvention    string
+	chapterImageResolution   string
+	scanBehavior             string
+	processPriority          string
+	castReceiverApplications string
+	pathSubstitutions        string
+}
+
+func testAccSystemConfigurationResourceConfig(serverName string, v systemConfigurationTestValues) string {
+	itemIDFlags := "false"
+	if v.itemIDFlags {
+		itemIDFlags = "true"
+	}
 	return `
 resource "jellyfin_system_configuration" "test" {
-  server_name = "` + serverName + `"
+  server_name                        = "` + serverName + `"
+  enable_normalized_item_by_name_ids = ` + itemIDFlags + `
+  enable_case_sensitive_item_ids     = ` + itemIDFlags + `
+  image_saving_convention            = "` + v.imageSavingConvention + `"
+  chapter_image_resolution           = "` + v.chapterImageResolution + `"
+
+  trickplay_options = {
+    scan_behavior    = "` + v.scanBehavior + `"
+    process_priority = "` + v.processPriority + `"
+  }
+
+  cast_receiver_applications = ` + v.castReceiverApplications + `
+  path_substitutions         = ` + v.pathSubstitutions + `
 }
 `
 }
