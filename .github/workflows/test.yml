@@ -92,15 +92,17 @@ jobs:
         run: go test -count=1 -v -timeout 5m -run 'TestAcc' ./cmd/jellyfin-import/
 
       - name: Run restart acceptance tests (isolated)
-        # Runs the tests that restart the server (jellyfin_restart, and the
-        # JellyfinSecurity tests that must restart to load the plugin) on their
-        # own, after the rest of the suite, so a restart cannot disrupt other
-        # acceptance tests sharing this Jellyfin. The main "Run acceptance
-        # tests" step leaves JELLYFIN_RESTART_ACC unset, so they skip there.
+        # Runs the tests that restart the server (jellyfin_restart, the
+        # JellyfinSecurity tests that must restart to load the plugin, and the
+        # jellyfin_plugin test that keeps a pinned version across a restart) on
+        # their own, after the rest of the suite, so a restart cannot disrupt
+        # other acceptance tests sharing this Jellyfin. The main "Run
+        # acceptance tests" step leaves JELLYFIN_RESTART_ACC unset, so they
+        # skip there.
         env:
           TF_ACC: "1"
           JELLYFIN_RESTART_ACC: "1"
-        run: go test -count=1 -v -timeout 10m -run 'TestAccRestartResource|TestAccSecurityPlugin' ./internal/provider/
+        run: go test -count=1 -v -timeout 10m -run 'TestAccRestartResource|TestAccSecurityPlugin|TestAccPluginResourcePin' ./internal/provider/
 
       - name: Stop Jellyfin
         if: always()

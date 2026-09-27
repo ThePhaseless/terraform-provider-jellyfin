@@ -5,6 +5,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"testing"
@@ -255,20 +256,7 @@ func TestAccPluginResourcePinSurvivesRestartWithoutUpdateTriggers(t *testing.T) 
 	}
 	pkg := testAccFindUninstalledPackage(t, stableRepoURL, 2)
 	pinned := pkg.Versions[1].Version
-
-	var taskID string
-	tasks, err := testAccClient(t).GetScheduledTasks(t.Context())
-	if err != nil {
-		t.Fatalf("listing scheduled tasks: %v", err)
-	}
-	for _, task := range tasks {
-		if task.Key == "PluginUpdates" {
-			taskID = task.ID
-		}
-	}
-	if taskID == "" {
-		t.Fatal("scheduled task PluginUpdates not found")
-	}
+	taskID := testAccRestorePluginUpdateTriggers(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -302,6 +290,46 @@ resource "jellyfin_restart" "test" {
 			},
 		},
 	})
+}
+
+// testAccRestorePluginUpdateTriggers gives Jellyfin's PluginUpdates task its
+// default triggers, so that the test's own configuration is what removes
+// them even when an earlier test, such as one that installs JellyfinSecurity,
+// already did, and puts back the triggers it found afterwards. It returns the
+// task's ID.
+func testAccRestorePluginUpdateTriggers(t *testing.T) string {
+	t.Helper()
+
+	c := testAccClient(t)
+	tasks, err := c.GetScheduledTasks(t.Context())
+	if err != nil {
+		t.Fatalf("listing scheduled tasks: %v", err)
+	}
+	for _, task := range tasks {
+		if task.Key != "PluginUpdates" {
+			continue
+		}
+		found := []byte("[]")
+		if task.Triggers != nil {
+			if found, err = json.Marshal(task.Triggers); err != nil {
+				t.Fatalf("encoding the PluginUpdates triggers: %v", err)
+			}
+		}
+		const defaults = `[{"Type":"StartupTrigger"},{"Type":"IntervalTrigger","IntervalTicks":864000000000}]`
+		if err := c.UpdateScheduledTaskTriggers(t.Context(), task.ID, defaults); err != nil {
+			t.Fatalf("restoring the PluginUpdates triggers: %v", err)
+		}
+		t.Cleanup(func() {
+			// The provider's sign-in has signed c out by now, since both share
+			// a device ID.
+			if err := testAccClient(t).UpdateScheduledTaskTriggers(context.Background(), task.ID, string(found)); err != nil {
+				t.Errorf("putting back the PluginUpdates triggers: %v", err)
+			}
+		})
+		return task.ID
+	}
+	t.Fatal("scheduled task PluginUpdates not found")
+	return ""
 }
 
 // testAccCheckPluginStaysAt fails if Jellyfin lists the named plugin at any
