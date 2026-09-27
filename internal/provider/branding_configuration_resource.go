@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -65,9 +66,32 @@ func (r *BrandingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 			"login_disclaimer":      schema.StringAttribute{Description: "The login disclaimer text.", MarkdownDescription: "The login disclaimer text.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 			"custom_css":            schema.StringAttribute{Description: "Custom CSS content.", MarkdownDescription: "Custom CSS content.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 			"splashscreen_enabled":  schema.BoolAttribute{Description: "Whether the splash screen is enabled.", MarkdownDescription: "Whether the splash screen is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
-			"splashscreen_location": schema.StringAttribute{Description: "The splash screen location.", MarkdownDescription: "The splash screen location.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
+			"splashscreen_location": schema.StringAttribute{Description: "The splash screen location. " + splashscreenLocationUnsupportedMessage, MarkdownDescription: "The splash screen location. " + splashscreenLocationUnsupportedMessage, Optional: true, DeprecationMessage: splashscreenLocationUnsupportedMessage, Validators: []validator.String{splashscreenLocationValidator{}}},
 		},
 	}
+}
+
+const splashscreenLocationUnsupportedMessage = "Jellyfin ignores a splash screen location in the branding configuration, so setting it is an error. The attribute will be removed in a future release."
+
+// splashscreenLocationValidator rejects a configured splashscreen_location at
+// plan time. Jellyfin 10.11 and 12 drop the key and read it back as null,
+// which Terraform reports only as an inconsistent result after apply.
+type splashscreenLocationValidator struct{}
+
+func (splashscreenLocationValidator) Description(context.Context) string {
+	return "must not be set, because Jellyfin ignores the splash screen location"
+}
+
+func (v splashscreenLocationValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (splashscreenLocationValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	resp.Diagnostics.AddAttributeError(req.Path, "Unsupported branding option",
+		"Jellyfin ignores a splash screen location in the branding configuration, so the server would drop this value. Remove it from the configuration.")
 }
 
 func (r *BrandingConfigurationResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -182,7 +206,6 @@ func overlayBrandingConfiguration(_ context.Context, m map[string]json.RawMessag
 	putJSONString(m, "LoginDisclaimer", data.LoginDisclaimer)
 	putJSONString(m, "CustomCss", data.CustomCSS)
 	putJSONBool(m, "SplashscreenEnabled", data.SplashscreenEnabled)
-	putJSONString(m, "SplashscreenLocation", data.SplashscreenLocation)
 }
 
 func flattenBrandingConfiguration(_ context.Context, raw string, data *BrandingConfigurationResourceModel, diags *diag.Diagnostics) {
@@ -194,5 +217,7 @@ func flattenBrandingConfiguration(_ context.Context, raw string, data *BrandingC
 	data.LoginDisclaimer = getJSONString(m, "LoginDisclaimer")
 	data.CustomCSS = getJSONString(m, "CustomCss")
 	data.SplashscreenEnabled = getJSONBool(m, "SplashscreenEnabled")
-	data.SplashscreenLocation = getJSONString(m, "SplashscreenLocation")
+	// Jellyfin never returns the location, and the attribute is not computed,
+	// so a value read here could only contradict the plan.
+	data.SplashscreenLocation = types.StringNull()
 }
