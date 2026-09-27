@@ -294,36 +294,18 @@ func TestUnitReduceSecurityPluginPayload(t *testing.T) {
 	}
 }
 
-func TestUnitFillPayloadScalarLists(t *testing.T) {
-	filled, paths, err := fillPayloadScalarLists(`{"Enabled":true,"Entries":9007199254740993,"Empty":[],"Cidrs":["10.0.0.0/8","172.16.0.0/12"],"Ports":[587],"Providers":[{"Scopes":[],"Maps":[{"Role":"r"}]}]}`)
+func TestUnitFillEmptyPayloadLists(t *testing.T) {
+	filled, paths, err := fillEmptyPayloadLists(`{"Enabled":true,"Entries":9007199254740993,"Empty":[],"Cidrs":["10.0.0.0/8"],"Ports":[587],"Smtp":{"Recipients":[]},"Providers":[{"Scopes":[],"Maps":[{"Role":"r","Libraries":[]}]}]}`)
 	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 
-	if want := []string{"Cidrs", "Empty", "Ports", "Providers[].Scopes"}; !slices.Equal(paths, want) {
+	if want := []string{"Empty", "Providers[].Maps[].Libraries", "Providers[].Scopes", "Smtp.Recipients"}; !slices.Equal(paths, want) {
 		t.Errorf("filled paths = %v, want %v", paths, want)
 	}
-	if !strings.Contains(filled, `"Entries":9007199254740993`) {
-		t.Errorf("filled payload %s does not keep Entries exactly", filled)
-	}
-
-	lines, err := reduceSecurityPluginPayload(filled)
-	if err != nil {
-		t.Fatalf("reduce: %v", err)
-	}
-	want := []string{
-		"Cidrs: []string",
-		"Empty: []string",
-		"Enabled: boolean",
-		"Entries: number",
-		"Ports: []string",
-		"Providers: []object",
-		"Providers[].Maps: []object",
-		"Providers[].Maps[].Role: string",
-		"Providers[].Scopes: []string",
-	}
-	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("unexpected lines:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	want := `{"Cidrs":["10.0.0.0/8"],"Empty":["1"],"Enabled":true,"Entries":9007199254740993,"Ports":[587],"Providers":[{"Maps":[{"Libraries":["1"],"Role":"r"}],"Scopes":["1"]}],"Smtp":{"Recipients":["1"]}}`
+	if filled != want {
+		t.Errorf("filled payload:\n%s\nwant:\n%s", filled, want)
 	}
 }
 
@@ -443,11 +425,16 @@ func payloadArrayType(v []any) string {
 	}
 }
 
-// fillPayloadScalarLists puts one string, the element type the resource
-// writes, in every list that holds no objects. An empty list carries no
-// element type, so without this a list's line in the golden would depend on
-// whether the plugin's default for it happens to be empty.
-func fillPayloadScalarLists(raw string) (string, []string, error) {
+// payloadListPlaceholder is the entry the probe writes into each list the
+// plugin serves empty. Jellyfin reads a numeric string into a list of strings
+// and into a list of numbers alike, so either comes back typed by its element.
+const payloadListPlaceholder = "1"
+
+// fillEmptyPayloadLists puts payloadListPlaceholder in every empty list and
+// returns their paths. An empty list carries no element type, so without this
+// a list's line in the golden would depend on whether the plugin's default for
+// it happens to be empty. A list that already holds entries types itself.
+func fillEmptyPayloadLists(raw string) (string, []string, error) {
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.UseNumber()
 	var root map[string]any
@@ -456,27 +443,27 @@ func fillPayloadScalarLists(raw string) (string, []string, error) {
 	}
 
 	var filled []string
-	fillObjectScalarLists(root, "", &filled)
+	fillEmptyObjectLists(root, "", &filled)
 	sort.Strings(filled)
 	out, err := json.Marshal(root)
 	return string(out), filled, err
 }
 
-func fillObjectScalarLists(obj map[string]any, prefix string, filled *[]string) {
+func fillEmptyObjectLists(obj map[string]any, prefix string, filled *[]string) {
 	for key, value := range obj {
 		path := prefix + key
 		switch v := value.(type) {
 		case map[string]any:
-			fillObjectScalarLists(v, path+".", filled)
+			fillEmptyObjectLists(v, path+".", filled)
 		case []any:
-			if payloadArrayType(v) != "[]object" {
-				obj[key] = []any{"x"}
+			if len(v) == 0 {
+				obj[key] = []any{payloadListPlaceholder}
 				*filled = append(*filled, path)
 				continue
 			}
 			for _, elem := range v {
 				if m, ok := elem.(map[string]any); ok {
-					fillObjectScalarLists(m, path+"[].", filled)
+					fillEmptyObjectLists(m, path+"[].", filled)
 				}
 			}
 		}
