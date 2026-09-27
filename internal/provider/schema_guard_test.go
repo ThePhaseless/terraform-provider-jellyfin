@@ -67,9 +67,11 @@ var securityPluginPayloadGuard = schemaGuard{
 	env:    "JELLYFIN_RESTART_ACC=1",
 	records: `Each line is a key of the configuration that the JellyfinSecurity build pinned
 in internal/provider/supported_security_plugin_version.env serves, with its JSON
-type. The golden changes when a new pin adds, removes or retypes a key. The
-test installs the plugin and restarts the server to load it, which it does only
-with JELLYFIN_RESTART_ACC=1, so CI runs it in a step of its own.`,
+type; the test writes an element into every list first, so a list is typed by
+what the plugin keeps, not by its default. The golden changes when a new pin
+adds, removes or retypes a key. The test installs the plugin and restarts the
+server to load it, which it does only with JELLYFIN_RESTART_ACC=1, so CI runs
+it in a step of its own.`,
 	followUp: `jellyfin_security_plugin_configuration maps each key by hand, so update it in
 the same change: TestUnitJellyfinSecurityWritesBackExactlyTheServedKeys fails
 until the resource writes back exactly the keys the golden lists, less those

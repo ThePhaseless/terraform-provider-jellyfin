@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -280,7 +281,9 @@ func findSecurityPlugin(ctx context.Context, c *client.Client) (*client.Installe
 
 // testAccSecurityPluginPayloadShape reduces the payload the plugin serves for
 // its defaults plus one entry in each list of objects, so that the nested
-// models' keys are served too. It puts back the configuration it found.
+// models' keys are served too, and one string in every other list, so that
+// each list is served with an element to type it by. It puts back the
+// configuration it found.
 func testAccSecurityPluginPayloadShape(t *testing.T, c *client.Client) []string {
 	t.Helper()
 
@@ -301,10 +304,22 @@ func testAccSecurityPluginPayloadShape(t *testing.T, c *client.Client) []string 
 	if err := c.UpdatePluginConfiguration(ctx, jellyfinSecurityPluginID, probe); err != nil {
 		t.Fatalf("writing the probe configuration: %v", err)
 	}
+	defaults, err := c.GetPluginConfiguration(ctx, jellyfinSecurityPluginID)
+	if err != nil {
+		t.Fatalf("reading the probe configuration back: %v", err)
+	}
+
+	filled, lists, err := fillPayloadScalarLists(defaults)
+	if err != nil {
+		t.Fatalf("filling the served lists: %v", err)
+	}
+	if err := c.UpdatePluginConfiguration(ctx, jellyfinSecurityPluginID, filled); err != nil {
+		t.Fatalf("writing a string into each of %s: %v\n\nOne of these lists no longer takes strings. If it now holds objects, add an entry for it to the probe in testAccSecurityPluginPayloadShape.", strings.Join(lists, ", "), err)
+	}
 
 	served, err := c.GetPluginConfiguration(ctx, jellyfinSecurityPluginID)
 	if err != nil {
-		t.Fatalf("reading the probe configuration back: %v", err)
+		t.Fatalf("reading the filled configuration back: %v", err)
 	}
 	lines, err := reduceSecurityPluginPayload(served)
 	if err != nil {

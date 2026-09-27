@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -277,7 +278,7 @@ func TestUnitReduceSecurityPluginPayload(t *testing.T) {
 	}
 
 	want := []string{
-		"Cidrs: array",
+		"Cidrs: []string",
 		"Deadline: null",
 		"Empty: array",
 		"Enabled: boolean",
@@ -287,6 +288,39 @@ func TestUnitReduceSecurityPluginPayload(t *testing.T) {
 		"Providers[].Id: string",
 		"Providers[].Maps: []object",
 		"Providers[].Maps[].Role: string",
+	}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected lines:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestUnitFillPayloadScalarLists(t *testing.T) {
+	filled, paths, err := fillPayloadScalarLists(`{"Enabled":true,"Entries":9007199254740993,"Empty":[],"Cidrs":["10.0.0.0/8","172.16.0.0/12"],"Ports":[587],"Providers":[{"Scopes":[],"Maps":[{"Role":"r"}]}]}`)
+	if err != nil {
+		t.Fatalf("fill: %v", err)
+	}
+
+	if want := []string{"Cidrs", "Empty", "Ports", "Providers[].Scopes"}; !slices.Equal(paths, want) {
+		t.Errorf("filled paths = %v, want %v", paths, want)
+	}
+	if !strings.Contains(filled, `"Entries":9007199254740993`) {
+		t.Errorf("filled payload %s does not keep Entries exactly", filled)
+	}
+
+	lines, err := reduceSecurityPluginPayload(filled)
+	if err != nil {
+		t.Fatalf("reduce: %v", err)
+	}
+	want := []string{
+		"Cidrs: []string",
+		"Empty: []string",
+		"Enabled: boolean",
+		"Entries: number",
+		"Ports: []string",
+		"Providers: []object",
+		"Providers[].Maps: []object",
+		"Providers[].Maps[].Role: string",
+		"Providers[].Scopes: []string",
 	}
 	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected lines:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
@@ -395,17 +429,58 @@ func reducePayloadObject(obj map[string]any, prefix string, out *[]string) {
 	}
 }
 
-// payloadArrayType names only lists of objects by their elements. The probe
-// leaves scalar lists at the plugin's defaults, and an empty default carries no
-// element type, so naming theirs would move the golden whenever a default list
-// gained or lost its entries.
 func payloadArrayType(v []any) string {
-	if len(v) > 0 {
-		if _, ok := v[0].(map[string]any); ok {
-			return "[]object"
+	if len(v) == 0 {
+		return "array"
+	}
+	switch v[0].(type) {
+	case map[string]any:
+		return "[]object"
+	case []any:
+		return "[]array"
+	default:
+		return "[]" + payloadScalarType(v[0])
+	}
+}
+
+// fillPayloadScalarLists puts one string, the element type the resource
+// writes, in every list that holds no objects. An empty list carries no
+// element type, so without this a list's line in the golden would depend on
+// whether the plugin's default for it happens to be empty.
+func fillPayloadScalarLists(raw string) (string, []string, error) {
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.UseNumber()
+	var root map[string]any
+	if err := dec.Decode(&root); err != nil {
+		return "", nil, fmt.Errorf("parsing plugin configuration: %w", err)
+	}
+
+	var filled []string
+	fillObjectScalarLists(root, "", &filled)
+	sort.Strings(filled)
+	out, err := json.Marshal(root)
+	return string(out), filled, err
+}
+
+func fillObjectScalarLists(obj map[string]any, prefix string, filled *[]string) {
+	for key, value := range obj {
+		path := prefix + key
+		switch v := value.(type) {
+		case map[string]any:
+			fillObjectScalarLists(v, path+".", filled)
+		case []any:
+			if payloadArrayType(v) != "[]object" {
+				obj[key] = []any{"x"}
+				*filled = append(*filled, path)
+				continue
+			}
+			for _, elem := range v {
+				if m, ok := elem.(map[string]any); ok {
+					fillObjectScalarLists(m, path+"[].", filled)
+				}
+			}
 		}
 	}
-	return "array"
 }
 
 func payloadScalarType(v any) string {
@@ -479,6 +554,8 @@ func samplePayloadValue(typ string) any {
 		return []any{}
 	case "[]object":
 		return []any{map[string]any{}}
+	case "[]string", "[]number", "[]boolean":
+		return []any{samplePayloadValue(strings.TrimPrefix(typ, "[]"))}
 	default:
 		return nil
 	}
