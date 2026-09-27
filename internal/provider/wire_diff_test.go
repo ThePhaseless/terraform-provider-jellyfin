@@ -856,3 +856,33 @@ func TestUnitWireVersionErrorsMatchTheHandWrittenChecks(t *testing.T) {
 		}
 	}
 }
+
+// renameUser posts the served user with only Name changed. The user binding
+// also covers the policy and the three flags, which that request must not
+// write, so the rename selects name alone.
+func TestUnitWireSelectingNameWritesLikeRenameUser(t *testing.T) {
+	ctx := context.Background()
+	root, err := pendingWireMigration["jellyfin_user"]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rename, err := root.Select("name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, d := root.Flatten(ctx, parseDoc(t, string(mustJSON(synthesize(wire.Pinned(), "UserDto", "model", 0)))), types.ObjectNull(root.AttrTypes))
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	model = withAttr(ctx, model, "name", types.StringValue("renamed"))
+	for _, base := range []string{"{}", string(mustJSON(synthesize(wire.Pinned(), "UserDto", "served", 0)))} {
+		oldDoc, newDoc := parseDoc(t, base), parseDoc(t, base)
+		putJSONString(oldDoc, "Name", types.StringValue("renamed"))
+		if d := rename.Overlay(ctx, newDoc, model); d.HasError() {
+			t.Fatal(d)
+		}
+		if got, want := canonicalJSON(t, newDoc), canonicalJSON(t, oldDoc); !reflect.DeepEqual(got, want) {
+			t.Errorf("rename onto %s:\nold %s\nnew %s", base, mustJSON(oldDoc), mustJSON(newDoc))
+		}
+	}
+}

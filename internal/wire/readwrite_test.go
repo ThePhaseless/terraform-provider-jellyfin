@@ -272,6 +272,43 @@ func TestUnitOverlayKeepsAServedKeySpelledOtherwise(t *testing.T) {
 	}
 }
 
+func TestUnitSelectWritesAndReadsOnlyTheNamedAttributes(t *testing.T) {
+	ctx := context.Background()
+	b := testBinding(t)
+	sel, err := b.Select("name", "hoisted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, _ := b.Flatten(ctx, doc(t, testServed), types.ObjectNull(b.AttrTypes))
+	m := with(t, model, "name", types.StringValue("renamed"))
+	m = with(t, m, "hoisted", types.BoolValue(true))
+	m = with(t, m, "count", types.Int64Value(9))
+	m = with(t, m, "limit", types.Int64Null())
+	m = with(t, m, "sub.flag", types.BoolValue(false))
+	m = with(t, m, "hosts[0].url", types.StringValue("elsewhere"))
+
+	served := doc(t, testServed)
+	if d := sel.Overlay(ctx, served, object(t, m)); d.HasError() {
+		t.Fatal(d)
+	}
+	want := doc(t, testServed)
+	want["Name"] = json.RawMessage(`"renamed"`)
+	want["Sub"] = json.RawMessage(`{"Flag": true, "Other": true, "Kept": "sk", "Limit": 9}`)
+	if got, want := canonical(t, served), canonical(t, want); got != want {
+		t.Errorf("select wrote\n%s\nwant\n%s", got, want)
+	}
+
+	read, d := sel.Flatten(ctx, doc(t, `{"Name": "read", "Count": 1, "Limit": 2, "Sub": {"Flag": true, "Other": false}}`), object(t, m))
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	for p, want := range map[string]string{"name": `"read"`, "hoisted": "false", "count": "9", "sub.flag": "false", "limit": "<null>", "hosts[0].url": `"elsewhere"`} {
+		if s := at(t, read, p).String(); s != want {
+			t.Errorf("select read %s = %s, want %s", p, s, want)
+		}
+	}
+}
+
 func subDocument(t *testing.T) (*Binding, types.Object) {
 	t.Helper()
 	b := testBinding(t)

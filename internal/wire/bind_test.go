@@ -341,7 +341,7 @@ func TestUnitBindRejectsAnObjectMissingFromTheFloor(t *testing.T) {
 	}
 }
 
-func TestUnitDocumentAndSelectViews(t *testing.T) {
+func TestUnitDocumentViewCoversTheKeysInTheDocument(t *testing.T) {
 	b := testBinding(t)
 	if _, err := b.Document("Opts"); err == nil {
 		t.Error("Document accepts a key path not declared with the Document option")
@@ -357,14 +357,18 @@ func TestUnitDocumentAndSelectViews(t *testing.T) {
 	if got, want := strings.Join(paths, " "), "hoisted=Other sub.flag=Flag sub.limit=Limit"; got != want {
 		t.Errorf("Document(Sub) covers %s, want %s", got, want)
 	}
+}
+
+func TestUnitSelectRejectsAnAttributeTheBindingLacks(t *testing.T) {
+	b := testBinding(t)
 	if _, err := b.Select("name", "nope"); err == nil {
 		t.Error("Select accepts an unknown attribute")
 	}
-	sel, err := b.Select("name", "count")
+	sub, err := b.Document("Sub")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sel.docs) != 2 {
-		t.Errorf("Select covers %d fields, want 2", len(sel.docs))
+	if _, err := sub.Select("name"); err == nil {
+		t.Error("Select on the Sub document accepts an attribute outside it")
 	}
 }

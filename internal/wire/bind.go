@@ -93,9 +93,6 @@ type Binding struct {
 	Object    string
 	AttrTypes map[string]attr.Type
 	Fields    []*Field
-	// Rebuilt is set when a write builds the object from nothing instead of
-	// merging into the served one.
-	Rebuilt bool
 
 	docs      []docField
 	nodes     *node
@@ -209,7 +206,7 @@ func displayKeyPath(kp string) string {
 }
 
 func (bb *binder) object(object, prefix string, attrs map[string]schema.Attribute, rebuilt bool, inst, since string) *Binding {
-	b := &Binding{Object: object, AttrTypes: map[string]attr.Type{}, Rebuilt: rebuilt}
+	b := &Binding{Object: object, AttrTypes: map[string]attr.Type{}}
 	bb.instance(inst, object, rebuilt, false)
 	names := make([]string, 0, len(attrs))
 	for n := range attrs {
