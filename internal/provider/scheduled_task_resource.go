@@ -37,6 +37,10 @@ const (
 	triggerTypeStartup  = "StartupTrigger"
 
 	ticksPerDay = 864_000_000_000
+
+	// CancellationTokenSource.CancelAfter takes at most 4294967294 whole
+	// milliseconds, and Jellyfin truncates the ticks to milliseconds for it.
+	maxRuntimeTicksLimit = 4_294_967_295*10_000 - 1
 )
 
 // NewScheduledTaskResource creates a new scheduled task resource.
@@ -132,10 +136,17 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 								stringvalidator.OneOf("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"),
 							},
 						},
+						// Jellyfin saves any value but passes it to CancelAfter only when the
+						// trigger starts a run, so a value CancelAfter rejects fails every such
+						// run before the task begins. The few negative values it takes mean no
+						// limit or an immediate cancel.
 						"max_runtime_ticks": schema.Int64Attribute{
-							Description:         "Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns).",
-							MarkdownDescription: "Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns).",
+							Description:         "Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns), from 0 to 42949672949999 (about 49.7 days).",
+							MarkdownDescription: "Maximum time the task may run before Jellyfin cancels it, in ticks (100 ns), from `0` to `42949672949999` (about 49.7 days).",
 							Optional:            true,
+							Validators: []validator.Int64{
+								int64validator.Between(0, maxRuntimeTicksLimit),
+							},
 						},
 					},
 				},
