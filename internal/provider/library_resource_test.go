@@ -104,13 +104,6 @@ resource "jellyfin_library" "test" {
   }
 }
 `,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectKnownValue("jellyfin_library.test",
-							tfjsonpath.New("library_options").AtMapKey("path_infos").AtSliceIndex(0).AtMapKey("network_path"),
-							knownvalue.Null()),
-					},
-				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.path_infos.0.path", "/media/movies"),
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.type_options.0.metadata_fetcher_order.1", "The Open Movie Database"),
@@ -403,7 +396,8 @@ resource "jellyfin_library" "test" {
 				ExpectError: testAccLibrarySimilarItemsRejected,
 			},
 			// disabled and extract_chapters_during_library_scan are stored as
-			// Jellyfin's Enabled and ExtractChapterImagesDuringLibraryScan.
+			// Jellyfin's Enabled and ExtractChapterImagesDuringLibraryScan, and
+			// the create plans the network path left unset as null.
 			{
 				PreConfig: func() {
 					if err := testAccCheckNoLibraryNamed(t, "TestOptions")(nil); err != nil {
@@ -419,9 +413,18 @@ resource "jellyfin_library" "test" {
   library_options = {
     disabled                             = true
     extract_chapters_during_library_scan = true
+    path_infos                           = [{ path = "/media/movies" }]
   }
 }
 `,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("jellyfin_library.test", plancheck.ResourceActionCreate),
+						plancheck.ExpectKnownValue("jellyfin_library.test",
+							tfjsonpath.New("library_options").AtMapKey("path_infos").AtSliceIndex(0).AtMapKey("network_path"),
+							knownvalue.Null()),
+					},
+				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.disabled", "true"),
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.extract_chapters_during_library_scan", "true"),
