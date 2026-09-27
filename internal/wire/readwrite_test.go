@@ -362,6 +362,20 @@ func TestUnitAnUnreadableServedListFailsAMergeButNotACarry(t *testing.T) {
 	}
 }
 
+func TestUnitOverlayRejectsAnUnknownOrNullListElement(t *testing.T) {
+	ctx := context.Background()
+	b := testBinding(t)
+	model, _ := b.Flatten(ctx, doc(t, testServed), types.ObjectNull(b.AttrTypes))
+	hosts, _ := at(t, model, "hosts").(basetypes.ListValue)
+	et, _ := hosts.ElementType(ctx).(basetypes.ObjectType)
+	for name, elem := range map[string]attr.Value{"unknown": types.ObjectUnknown(et.AttrTypes), "null": types.ObjectNull(et.AttrTypes)} {
+		d := b.Overlay(ctx, doc(t, testServed), object(t, with(t, model, "hosts[1]", elem)))
+		if !d.HasError() {
+			t.Errorf("a list with a %s element writes", name)
+		}
+	}
+}
+
 func TestUnitKeepPlannedNullsInsideListElements(t *testing.T) {
 	ctx := context.Background()
 	b := testBinding(t)
@@ -370,13 +384,20 @@ func TestUnitKeepPlannedNullsInsideListElements(t *testing.T) {
 	planned = with(t, planned, "types[0].fetchers", types.ListNull(types.StringType))
 	planned = with(t, planned, "types[0].images[0].type", types.StringNull())
 	planned = with(t, planned, "name", types.StringNull())
+	planned = with(t, planned, "tags", types.ListNull(types.StringType))
+	planned = with(t, planned, "opts.mode", types.StringNull())
 	got := with(t, full, "hosts[1].kind", types.StringValue(""))
 	got = with(t, got, "types[0].fetchers", types.ListValueMust(types.StringType, nil))
 	got = with(t, got, "types[0].images[0].type", types.StringValue(""))
 	got = with(t, got, "name", types.StringValue(""))
+	got = with(t, got, "tags", types.ListValueMust(types.StringType, nil))
+	got = with(t, got, "opts.mode", types.StringValue(""))
 
 	kept := KeepPlannedNulls(object(t, planned), object(t, got))
-	for p, want := range map[string]string{"hosts[1].kind": "<null>", "types[0].fetchers": "<null>", "types[0].images[0].type": "<null>", "name": `""`, "hosts[0].kind": `"k0"`} {
+	for p, want := range map[string]string{
+		"hosts[1].kind": "<null>", "types[0].fetchers": "<null>", "types[0].images[0].type": "<null>",
+		"name": `""`, "tags": "[]", "opts.mode": `""`, "hosts[0].kind": `"k0"`,
+	} {
 		if s := at(t, kept, p).String(); s != want {
 			t.Errorf("%s = %s, want %s", p, s, want)
 		}
@@ -507,6 +528,44 @@ func TestUnitVersionErrorsUseTheDeclaredMessage(t *testing.T) {
 		if len(got) != 1 || got[0] != want {
 			t.Errorf("on %s: %q\nwant %q", version, got, want)
 		}
+	}
+}
+
+func TestUnitVersionErrorsGateANewNestedAttributeAsAWhole(t *testing.T) {
+	ctx := context.Background()
+	c := &catalog{
+		pinned:      parseAPIGolden("schema Doc.Name: string\nschema Doc.News: []#New\nschema New.Title: string\n"),
+		floor:       parseAPIGolden("schema Doc.Name: string\n"),
+		unversioned: map[string]bool{}, floorVer: "1.9", sinceVer: "2.0",
+	}
+	attrs := map[string]schema.Attribute{
+		"name": optString(),
+		"news": schema.ListNestedAttribute{Optional: true, Computed: true, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
+			"title": optString(),
+		}}},
+	}
+	b, err := c.bind(schema.Schema{Attributes: attrs}, "Doc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(b.Describe(), "\n"), "name -> Doc.Name string\nnews -> Doc.News []#New since=2.0\nnews.title -> New.Title string"; got != want {
+		t.Errorf("Describe:\n%s\nwant:\n%s", got, want)
+	}
+	cfg, d := b.Flatten(ctx, doc(t, `{"Name": "n", "News": [{"Title": "t"}]}`), types.ObjectNull(b.AttrTypes))
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	var paths []string
+	for _, line := range versionErrorLines(b.VersionErrors(ctx, configOf(t, attrs, cfg), func() (string, error) { return "1.9", nil })) {
+		p, _, _ := strings.Cut(line, " | ")
+		paths = append(paths, p)
+	}
+	if got := strings.Join(paths, " "); got != "news" {
+		t.Errorf("errors at %q, want news only", got)
+	}
+	message := VersionMessage("news.title", func(VersionGap) (string, string) { return "", "" })
+	if _, err := c.bind(schema.Schema{Attributes: attrs}, "Doc", message); err == nil || !strings.Contains(err.Error(), "news.title: VersionMessage names an attribute VersionErrors never reports") {
+		t.Errorf("a version message inside the gated list binds: %v", err)
 	}
 }
 
