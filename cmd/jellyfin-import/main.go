@@ -4,7 +4,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -418,90 +417,70 @@ func triggersHCL(raw []json.RawMessage) (string, error) {
 }
 
 func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
+	ctx := g.context()
+	singletons := []struct {
+		name   string
+		fields []hclField
+		read   func() (string, error)
+	}{
+		{"system", systemFields, func() (string, error) {
+			c, err := g.client.GetSystemConfiguration(ctx)
+			if err != nil {
+				return "", err
+			}
+			return c.RawJSON, nil
+		}},
+		{"encoding", encodingFields, func() (string, error) {
+			c, err := g.client.GetEncodingOptions(ctx)
+			if err != nil {
+				return "", err
+			}
+			return c.RawJSON, nil
+		}},
+		{"networking", networkingFields, func() (string, error) {
+			c, err := g.client.GetNetworkConfiguration(ctx)
+			if err != nil {
+				return "", err
+			}
+			return c.RawJSON, nil
+		}},
+		{"branding", brandingFields, func() (string, error) {
+			c, err := g.client.GetBrandingConfiguration(ctx)
+			if err != nil {
+				return "", err
+			}
+			return c.RawJSON, nil
+		}},
+		{"livetv", livetvFields, func() (string, error) {
+			c, err := g.client.GetLiveTVConfiguration(ctx)
+			if err != nil {
+				return "", err
+			}
+			return c.RawJSON, nil
+		}},
+		{"metadata", metadataFields, func() (string, error) {
+			c, err := g.client.GetMetadataConfiguration(ctx)
+			if err != nil {
+				return "", err
+			}
+			return c.RawJSON, nil
+		}},
+	}
+
 	var imports, resources []string
-
-	// System Configuration
-	sysConfig, err := g.client.GetSystemConfiguration(g.context())
-	if err != nil {
-		return nil, nil, fmt.Errorf("getting system configuration: %w", err)
+	for _, s := range singletons {
+		raw, err := s.read()
+		if err != nil {
+			return nil, nil, fmt.Errorf("getting %s configuration: %w", s.name, err)
+		}
+		attrs, err := hclAttributes(raw, s.fields, 1)
+		if err != nil {
+			return nil, nil, fmt.Errorf("formatting %s configuration: %w", s.name, err)
+		}
+		resourceType := "jellyfin_" + s.name + "_configuration"
+		imports = append(imports, importBlock(resourceType, "this", s.name))
+		resources = append(resources, resourceBlock(resourceType, "this", attrs))
 	}
-	pretty, err := prettyJSON(sysConfig.RawJSON)
-	if err != nil {
-		return nil, nil, fmt.Errorf("formatting system configuration: %w", err)
-	}
-	imports = append(imports, importBlock("jellyfin_system_configuration", "this", "system"))
-	resources = append(resources, resourceBlock("jellyfin_system_configuration", "this", map[string]string{
-		"server_name":        hclString(sysConfig.ServerName),
-		"configuration_json": "jsonencode(" + pretty + ")",
-	}))
-
-	// Encoding Configuration
-	encConfig, err := g.client.GetEncodingOptions(g.context())
-	if err != nil {
-		return nil, nil, fmt.Errorf("getting encoding configuration: %w", err)
-	}
-	pretty, err = prettyJSON(encConfig.RawJSON)
-	if err != nil {
-		return nil, nil, fmt.Errorf("formatting encoding configuration: %w", err)
-	}
-	imports = append(imports, importBlock("jellyfin_encoding_configuration", "this", "encoding"))
-	resources = append(resources, resourceBlock("jellyfin_encoding_configuration", "this", map[string]string{
-		"configuration_json": "jsonencode(" + pretty + ")",
-	}))
-
-	// Networking Configuration
-	netConfig, err := g.client.GetNetworkConfiguration(g.context())
-	if err != nil {
-		return nil, nil, fmt.Errorf("getting networking configuration: %w", err)
-	}
-	pretty, err = prettyJSON(netConfig.RawJSON)
-	if err != nil {
-		return nil, nil, fmt.Errorf("formatting networking configuration: %w", err)
-	}
-	imports = append(imports, importBlock("jellyfin_networking_configuration", "this", "networking"))
-	resources = append(resources, resourceBlock("jellyfin_networking_configuration", "this", map[string]string{
-		"configuration_json": "jsonencode(" + pretty + ")",
-	}))
-
-	// Branding Configuration
-	brandConfig, err := g.client.GetBrandingConfiguration(g.context())
-	if err != nil {
-		return nil, nil, fmt.Errorf("getting branding configuration: %w", err)
-	}
-	pretty, err = prettyJSON(brandConfig.RawJSON)
-	if err != nil {
-		return nil, nil, fmt.Errorf("formatting branding configuration: %w", err)
-	}
-	imports = append(imports, importBlock("jellyfin_branding_configuration", "this", "branding"))
-	resources = append(resources, resourceBlock("jellyfin_branding_configuration", "this", map[string]string{
-		"configuration_json": "jsonencode(" + pretty + ")",
-	}))
-
-	// Live TV Configuration
-	livetvConfig, err := g.client.GetLiveTVConfiguration(g.context())
-	if err != nil {
-		return nil, nil, fmt.Errorf("getting livetv configuration: %w", err)
-	}
-	livetvAttrs, err := livetvAttributes(livetvConfig.RawJSON)
-	if err != nil {
-		return nil, nil, fmt.Errorf("formatting livetv configuration: %w", err)
-	}
-	imports = append(imports, importBlock("jellyfin_livetv_configuration", "this", "livetv"))
-	resources = append(resources, resourceBlock("jellyfin_livetv_configuration", "this", livetvAttrs))
-
-	// Metadata Configuration
-	metaConfig, err := g.client.GetMetadataConfiguration(g.context())
-	if err != nil {
-		return nil, nil, fmt.Errorf("getting metadata configuration: %w", err)
-	}
-	pretty, err = prettyJSON(metaConfig.RawJSON)
-	if err != nil {
-		return nil, nil, fmt.Errorf("formatting metadata configuration: %w", err)
-	}
-	imports = append(imports, importBlock("jellyfin_metadata_configuration", "this", "metadata"))
-	resources = append(resources, resourceBlock("jellyfin_metadata_configuration", "this", map[string]string{
-		"configuration_json": "jsonencode(" + pretty + ")",
-	}))
 
 	return imports, resources, nil
 }
@@ -523,13 +502,4 @@ func sanitizeName(name string) string {
 		result = "r_" + result
 	}
 	return result
-}
-
-// prettyJSON formats a JSON string with indentation, preserving number precision.
-func prettyJSON(raw string) (string, error) {
-	var buf bytes.Buffer
-	if err := json.Indent(&buf, []byte(raw), "  ", "  "); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
 }

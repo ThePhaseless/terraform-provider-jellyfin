@@ -77,16 +77,6 @@ func TestResourceBlock(t *testing.T) {
 	}
 }
 
-func TestPrettyJSON(t *testing.T) {
-	result, err := prettyJSON(`{"b":2,"a":1}`)
-	if err != nil {
-		t.Fatalf("prettyJSON() error: %v", err)
-	}
-	if !strings.Contains(result, "\n") {
-		t.Error("prettyJSON() should produce multi-line output")
-	}
-}
-
 func TestSortedKeys(t *testing.T) {
 	m := map[string]string{"c": "3", "a": "1", "b": "2"}
 	keys := sortedKeys(m)
@@ -216,8 +206,19 @@ func setupTestServer(t *testing.T) *httptest.Server {
 
 	mux.HandleFunc("/System/Configuration", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, map[string]interface{}{
-			"ServerName":               "Test Server",
-			"IsStartupWizardCompleted": true,
+			"ServerName":                    "Test Server",
+			"IsStartupWizardCompleted":      true,
+			"EnableNormalizedItemByNameIds": true,
+			"CachePath":                     nil,
+			"SortRemoveWords":               []string{"the", "a"},
+			"MetadataOptions": []map[string]interface{}{
+				{"ItemType": "Movie", "DisabledMetadataFetchers": []string{"OMDb"}, "ImageFetcherOrder": nil},
+			},
+			"TrickplayOptions": map[string]interface{}{
+				"Interval":         10000,
+				"ProcessPriority":  "BelowNormal",
+				"WidthResolutions": []int{320},
+			},
 		})
 	})
 
@@ -237,6 +238,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/System/Configuration/branding", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, map[string]interface{}{
 			"SplashscreenEnabled": false,
+			"LoginDisclaimer":     "Hi ${user}\n100%{x}",
 		})
 	})
 
@@ -479,17 +481,63 @@ func TestGenerateSingletonConfigs(t *testing.T) {
 		t.Fatalf("generateSingletonConfigs() error: %v", err)
 	}
 
-	// 6 singleton configs
-	if len(imports) != 6 {
-		t.Errorf("expected 6 import blocks, got %d", len(imports))
+	wantImports := []string{"system", "encoding", "networking", "branding", "livetv", "metadata"}
+	if len(imports) != len(wantImports) {
+		t.Fatalf("expected %d import blocks, got %d", len(wantImports), len(imports))
 	}
-	if len(resources) != 6 {
-		t.Errorf("expected 6 resource blocks, got %d", len(resources))
+	for i, id := range wantImports {
+		want := importBlock("jellyfin_"+id+"_configuration", "this", id)
+		if imports[i] != want {
+			t.Errorf("imports[%d] = %q, want %q", i, imports[i], want)
+		}
 	}
 
-	// Check system config
-	if !strings.Contains(resources[0], `server_name = "Test Server"`) {
-		t.Errorf("expected server_name in system config: %s", resources[0])
+	want := []string{
+		`resource "jellyfin_system_configuration" "this" {
+  metadata_options = [
+    {
+      disabled_metadata_fetchers = ["OMDb"]
+      item_type = "Movie"
+    },
+  ]
+  server_name = "Test Server"
+  sort_remove_words = ["the", "a"]
+  trickplay_options = {
+    interval = 10000
+    width_resolutions = [320]
+  }
+}
+`,
+		`resource "jellyfin_encoding_configuration" "this" {
+  encoding_thread_count = -1
+}
+`,
+		`resource "jellyfin_networking_configuration" "this" {
+  base_url = ""
+  enable_https = false
+}
+`,
+		`resource "jellyfin_branding_configuration" "this" {
+  login_disclaimer = "Hi $${user}\n100%%{x}"
+  splashscreen_enabled = false
+}
+`,
+		`resource "jellyfin_livetv_configuration" "this" {
+  enable_recording_subfolders = false
+}
+`,
+		`resource "jellyfin_metadata_configuration" "this" {
+  use_file_creation_time_for_date_added = true
+}
+`,
+	}
+	if len(resources) != len(want) {
+		t.Fatalf("expected %d resource blocks, got %d", len(want), len(resources))
+	}
+	for i := range want {
+		if resources[i] != want[i] {
+			t.Errorf("resources[%d] =\n%s\nwant\n%s", i, resources[i], want[i])
+		}
 	}
 }
 

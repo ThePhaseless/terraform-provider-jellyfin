@@ -60,9 +60,3 @@ var livetvFields = []hclField{
 	{json: "SaveRecordingNFO", attr: "save_recording_nfo"},
 	{json: "SaveRecordingImages", attr: "save_recording_images"},
 }
-
-// livetvAttributes renders the jellyfin_livetv_configuration attributes for a
-// Live TV configuration as returned by the server.
-func livetvAttributes(raw string) (map[string]string, error) {
-	return hclAttributes(raw, livetvFields, 1)
-}

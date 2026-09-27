@@ -21,9 +21,9 @@ func TestLivetvAttributes(t *testing.T) {
   "RecordingPostProcessorArguments": "\"{path}\""
 }`
 
-	attrs, err := livetvAttributes(raw)
+	attrs, err := hclAttributes(raw, livetvFields, 1)
 	if err != nil {
-		t.Fatalf("livetvAttributes() error: %v", err)
+		t.Fatalf("hclAttributes() error: %v", err)
 	}
 
 	want := map[string]string{
@@ -53,11 +53,11 @@ func TestLivetvAttributes(t *testing.T) {
   ]`,
 	}
 	if len(attrs) != len(want) {
-		t.Errorf("livetvAttributes() keys = %v, want %d keys", sortedKeys(attrs), len(want))
+		t.Errorf("hclAttributes() keys = %v, want %d keys", sortedKeys(attrs), len(want))
 	}
 	for k, v := range want {
 		if attrs[k] != v {
-			t.Errorf("livetvAttributes()[%q] =\n%s\nwant\n%s", k, attrs[k], v)
+			t.Errorf("hclAttributes()[%q] =\n%s\nwant\n%s", k, attrs[k], v)
 		}
 	}
 }

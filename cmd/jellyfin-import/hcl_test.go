@@ -37,3 +37,39 @@ func TestHCLString(t *testing.T) {
 		})
 	}
 }
+
+func TestHCLAttributesRendersObjectFields(t *testing.T) {
+	fields := []hclField{
+		{json: "Name", attr: "name"},
+		{json: "Options", attr: "options", object: true, nested: []hclField{
+			{json: "Size", attr: "size"},
+			{json: "Tags", attr: "tags"},
+			{json: "Missing", attr: "missing"},
+			{json: "Entries", attr: "entries", nested: []hclField{
+				{json: "Key", attr: "key"},
+			}},
+		}},
+	}
+	raw := `{"Name": "n", "Options": {"Size": 1.5, "Tags": ["a"], "Missing": null, "Entries": [{"Key": "k"}]}}`
+
+	attrs, err := hclAttributes(raw, fields, 1)
+	if err != nil {
+		t.Fatalf("hclAttributes() error: %v", err)
+	}
+
+	want := `{
+    entries = [
+      {
+        key = "k"
+      },
+    ]
+    size = 1.5
+    tags = ["a"]
+  }`
+	if attrs["options"] != want {
+		t.Errorf("options =\n%s\nwant\n%s", attrs["options"], want)
+	}
+	if attrs["name"] != `"n"` {
+		t.Errorf("name = %s, want \"n\"", attrs["name"])
+	}
+}

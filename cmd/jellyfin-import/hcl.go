@@ -13,11 +13,12 @@ import (
 
 // hclField maps a Jellyfin JSON property to a Terraform attribute. nested
 // describes the attributes of each element when the property is a list of
-// objects.
+// objects, or of the property itself when object is set.
 type hclField struct {
 	json   string
 	attr   string
 	nested []hclField
+	object bool
 }
 
 // hclAttributes renders the fields present in a JSON object as HCL attribute
@@ -35,7 +36,7 @@ func hclAttributes(raw string, fields []hclField, depth int) (map[string]string,
 		if !ok || string(v) == "null" {
 			continue
 		}
-		rendered, err := hclValue(v, f.nested, depth)
+		rendered, err := hclValue(v, f, depth)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", f.json, err)
 		}
@@ -44,9 +45,15 @@ func hclAttributes(raw string, fields []hclField, depth int) (map[string]string,
 	return attrs, nil
 }
 
-func hclValue(raw json.RawMessage, nested []hclField, depth int) (string, error) {
+func hclValue(raw json.RawMessage, f hclField, depth int) (string, error) {
 	switch {
-	case nested != nil:
+	case f.object:
+		attrs, err := hclAttributes(string(raw), f.nested, depth+1)
+		if err != nil {
+			return "", err
+		}
+		return hclObject(attrs, depth), nil
+	case f.nested != nil:
 		var elements []json.RawMessage
 		if err := json.Unmarshal(raw, &elements); err != nil {
 			return "", err
@@ -58,20 +65,11 @@ func hclValue(raw json.RawMessage, nested []hclField, depth int) (string, error)
 		var b strings.Builder
 		b.WriteString("[\n")
 		for _, e := range elements {
-			attrs, err := hclAttributes(string(e), nested, depth+2)
+			attrs, err := hclAttributes(string(e), f.nested, depth+2)
 			if err != nil {
 				return "", err
 			}
-			b.WriteString(indent + "  {\n")
-			keys := make([]string, 0, len(attrs))
-			for k := range attrs {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				fmt.Fprintf(&b, "%s    %s = %s\n", indent, k, attrs[k])
-			}
-			b.WriteString(indent + "  },\n")
+			b.WriteString(indent + "  " + hclObject(attrs, depth+1) + ",\n")
 		}
 		b.WriteString(indent + "]")
 		return b.String(), nil
@@ -82,7 +80,7 @@ func hclValue(raw json.RawMessage, nested []hclField, depth int) (string, error)
 		}
 		rendered := make([]string, len(elements))
 		for i, e := range elements {
-			s, err := hclValue(e, nil, depth)
+			s, err := hclValue(e, hclField{}, depth)
 			if err != nil {
 				return "", err
 			}
@@ -99,6 +97,19 @@ func hclValue(raw json.RawMessage, nested []hclField, depth int) (string, error)
 		// Numbers and booleans read the same in HCL as in JSON.
 		return string(bytes.TrimSpace(raw)), nil
 	}
+}
+
+// hclObject renders attrs as an HCL object whose closing brace is indented
+// to depth.
+func hclObject(attrs map[string]string, depth int) string {
+	indent := strings.Repeat("  ", depth)
+	var b strings.Builder
+	b.WriteString("{\n")
+	for _, k := range sortedKeys(attrs) {
+		fmt.Fprintf(&b, "%s  %s = %s\n", indent, k, attrs[k])
+	}
+	b.WriteString(indent + "}")
+	return b.String()
 }
 
 // hclString quotes s as an HCL string literal, escaping control characters
