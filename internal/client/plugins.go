@@ -105,13 +105,15 @@ func (c *Client) InstallPlugin(ctx context.Context, name, version, repositoryURL
 	return nil
 }
 
-// UninstallPlugin removes one installed version of a plugin by its ID; with
-// several versions listed, Jellyfin picks one that is not loaded first.
-func (c *Client) UninstallPlugin(ctx context.Context, pluginID string) error {
+// UninstallPluginVersion removes one installed version of a plugin. version
+// must be spelled as GET /Plugins lists it: Jellyfin parses it as a .NET
+// Version, which tells 13.0.0 and 13.0.0.0 apart, and answers 404 for a
+// version it does not list.
+func (c *Client) UninstallPluginVersion(ctx context.Context, pluginID, version string) error {
 	pluginChangeMu.Lock()
 	defer pluginChangeMu.Unlock()
-	if err := c.delete(ctx, fmt.Sprintf("/Plugins/%s", url.PathEscape(pluginID))); err != nil {
-		return fmt.Errorf("uninstalling plugin %s: %w", pluginID, err)
+	if err := c.delete(ctx, fmt.Sprintf("/Plugins/%s/%s", url.PathEscape(pluginID), url.PathEscape(version))); err != nil {
+		return fmt.Errorf("uninstalling plugin %s version %s: %w", pluginID, version, err)
 	}
 	return nil
 }

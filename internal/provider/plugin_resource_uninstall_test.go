@@ -17,6 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
@@ -24,10 +25,11 @@ import (
 const bookshelfID = "9c4e63f1031b4f25988b4f7d78a8b53e"
 
 // fakePluginServer stands in for Jellyfin's plugin endpoints. DELETE
-// /Plugins/{id} removes the last listed version of the plugin that users may
-// uninstall, answers 204 without removing anything when there is none, as
-// Jellyfin does for a plugin it bundles, and answers 400 while another install
-// or uninstall is in flight, as Jellyfin's unsynchronised plugin list can.
+// /Plugins/{id}/{version} removes that version, answers 204 without removing
+// anything when users may not uninstall it, as Jellyfin does for a plugin it
+// bundles, and 404 when it is not listed, and any install or uninstall
+// answers 400 while another one is in flight, as Jellyfin's unsynchronised
+// plugin list can.
 type fakePluginServer struct {
 	mu          sync.Mutex
 	plugins     []client.InstalledPlugin
@@ -82,16 +84,15 @@ func (f *fakePluginServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (f *fakePluginServer) uninstall(id string) int {
+func (f *fakePluginServer) uninstall(idAndVersion string) int {
 	f.deletes++
-	listed := false
-	for i := len(f.plugins) - 1; i >= 0; i-- {
-		if f.plugins[i].ID != id {
+	id, version, _ := strings.Cut(idAndVersion, "/")
+	for i, p := range f.plugins {
+		if normalizeGUID(p.ID) != normalizeGUID(id) || p.Version != version {
 			continue
 		}
-		listed = true
-		if !f.plugins[i].CanUninstall {
-			continue
+		if !p.CanUninstall {
+			return http.StatusNoContent
 		}
 		if !f.keep {
 			f.plugins = append(f.plugins[:i], f.plugins[i+1:]...)
@@ -99,9 +100,6 @@ func (f *fakePluginServer) uninstall(id string) int {
 		if f.status != 0 {
 			return f.status
 		}
-		return http.StatusNoContent
-	}
-	if listed {
 		return http.StatusNoContent
 	}
 	return http.StatusNotFound
@@ -152,7 +150,7 @@ func TestUnitPluginInstallsAndUninstallsDoNotOverlap(t *testing.T) {
 		wg.Go(func() {
 			var err error
 			if i%2 == 0 {
-				err = c.UninstallPlugin(ctx, bookshelfID)
+				err = c.UninstallPluginVersion(ctx, bookshelfID, "13.0.0.0")
 			} else {
 				err = c.InstallPlugin(ctx, "Bookshelf", "13.0.0.0", "https://repo.example/manifest.json")
 			}
@@ -340,6 +338,73 @@ func TestUnitPluginConcurrentUninstallsOfOnePluginSucceed(t *testing.T) {
 		})
 	}
 	wg.Wait()
+
+	if got := fake.listed(); len(got) != 0 {
+		t.Errorf("plugins left = %+v, want none", got)
+	}
+}
+
+// replacePluginVersionFirst creates a Bookshelf 13.0.0.0 resource through
+// creator and then destroys a Bookshelf 12.0.0.0 resource through destroyer,
+// the order create_before_destroy puts a change of version in.
+func replacePluginVersionFirst(t *testing.T, creator, destroyer *PluginResource) {
+	t.Helper()
+	ctx := context.Background()
+	resourceSchema := pluginResourceSchema(t)
+
+	createResp := &resource.CreateResponse{State: tfsdk.State{Schema: resourceSchema, Raw: tftypes.NewValue(resourceSchema.Type().TerraformType(ctx), nil)}}
+	creator.Create(ctx, resource.CreateRequest{Plan: pluginResourcePlan(t, PluginResourceModel{
+		ID:               types.StringUnknown(),
+		Name:             types.StringValue("Bookshelf"),
+		Version:          types.StringValue("13.0.0.0"),
+		InstalledVersion: types.StringUnknown(),
+		RepositoryURL:    types.StringValue(stableRepoURL),
+	})}, createResp)
+	if createResp.Diagnostics.HasError() {
+		t.Fatalf("Create: %v", createResp.Diagnostics.Errors())
+	}
+
+	replaced := pluginResourceState(t, PluginResourceModel{
+		ID:               types.StringValue(bookshelfID),
+		Name:             types.StringValue("Bookshelf"),
+		Version:          types.StringValue("12.0.0.0"),
+		InstalledVersion: types.StringValue("12.0.0.0"),
+		RepositoryURL:    types.StringValue(stableRepoURL),
+	})
+	deleteResp := &resource.DeleteResponse{State: replaced}
+	destroyer.Delete(ctx, resource.DeleteRequest{State: replaced}, deleteResp)
+	if deleteResp.Diagnostics.HasError() {
+		t.Fatalf("Delete: %v", deleteResp.Diagnostics.Errors())
+	}
+}
+
+// bookshelfAfterUpdate lists Bookshelf as Jellyfin does once 13.0.0.0 is
+// installed over a loaded 12.0.0.0.
+func bookshelfAfterUpdate() *fakePluginServer {
+	return &fakePluginServer{plugins: []client.InstalledPlugin{
+		{ID: bookshelfID, Name: "Bookshelf", Version: "12.0.0.0", Status: "Superseded", CanUninstall: true},
+		{ID: bookshelfID, Name: "Bookshelf", Version: "13.0.0.0", Status: "Restart", CanUninstall: true},
+	}}
+}
+
+func TestUnitPluginDeleteLeavesVersionCreatedThroughSameClient(t *testing.T) {
+	fake := bookshelfAfterUpdate()
+	r := newFakePluginResource(t, fake)
+
+	replacePluginVersionFirst(t, r, &PluginResource{client: r.client})
+
+	if got := fake.listed(); len(got) != 1 || got[0].Version != "13.0.0.0" {
+		t.Errorf("plugins left = %+v, want only Bookshelf 13.0.0.0", got)
+	}
+}
+
+func TestUnitPluginDeleteThroughAnotherClientRemovesCreatedVersion(t *testing.T) {
+	fake := bookshelfAfterUpdate()
+	r := newFakePluginResource(t, fake)
+	// Another Terraform run configures the provider, and so its client, anew.
+	other := &PluginResource{client: client.NewClient(r.client.BaseURL, r.client.APIKey)}
+
+	replacePluginVersionFirst(t, r, other)
 
 	if got := fake.listed(); len(got) != 0 {
 		t.Errorf("plugins left = %+v, want none", got)

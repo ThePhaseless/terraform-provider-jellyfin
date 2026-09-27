@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,6 +145,50 @@ resource "jellyfin_plugin" "test" {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", older),
 					resource.TestCheckResourceAttr("jellyfin_plugin.test", "installed_version", older),
+				),
+			},
+		},
+	})
+}
+
+// Under create_before_destroy the replacement installs the new version before
+// the old object is destroyed, and both share the plugin's GUID.
+func TestAccPluginResourceCreateBeforeDestroyKeepsNewVersion(t *testing.T) {
+	pkg := testAccFindUninstalledPackage(t, stableRepoURL, 2)
+	older, newer := pkg.Versions[1].Version, pkg.Versions[0].Version
+	config := func(version string) string {
+		return fmt.Sprintf(`
+resource "jellyfin_plugin" "test" {
+  name           = %q
+  version        = %q
+  repository_url = %q
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+`, pkg.Name, version, stableRepoURL)
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckPluginNotListed(t, pkg.Name),
+		Steps: []resource.TestStep{
+			{
+				Config: config(older),
+				Check:  testAccCheckPluginListedOnlyAt(t, pkg.Name, older),
+			},
+			{
+				Config: config(newer),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("jellyfin_plugin.test", plancheck.ResourceActionCreateBeforeDestroy),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "installed_version", newer),
+					testAccCheckPluginListedOnlyAt(t, pkg.Name, newer),
 				),
 			},
 		},
@@ -364,6 +409,28 @@ func testAccCheckPluginNotListed(t *testing.T, name string) resource.TestCheckFu
 			if p.Name == name && p.Status != pluginStatusDeleted {
 				return fmt.Errorf("plugin %s is still listed at version %s with status %s", name, p.Version, p.Status)
 			}
+		}
+		return nil
+	}
+}
+
+// testAccCheckPluginListedOnlyAt fails unless Jellyfin lists the named plugin
+// at version and at no other version, leaving out one it deletes at the next
+// restart.
+func testAccCheckPluginListedOnlyAt(t *testing.T, name, version string) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		plugins, err := testAccClient(t).GetInstalledPlugins(context.Background())
+		if err != nil {
+			return err
+		}
+		var listed []string
+		for _, p := range plugins {
+			if p.Name == name && p.Status != pluginStatusDeleted {
+				listed = append(listed, p.Version+" ("+p.Status+")")
+			}
+		}
+		if len(listed) != 1 || !strings.HasPrefix(listed[0], version+" ") {
+			return fmt.Errorf("plugin %s is listed at %v, want only %s", name, listed, version)
 		}
 		return nil
 	}

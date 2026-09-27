@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -214,6 +215,7 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 		}
 	}
 
+	r.recordCreated(*installed)
 	data.ID = types.StringValue(installed.ID)
 	data.InstalledVersion = types.StringValue(installed.Version)
 
@@ -362,50 +364,78 @@ func (r *PluginResource) Delete(ctx context.Context, req resource.DeleteRequest,
 }
 
 // uninstall removes every listed version of the plugin with the given id that
-// Jellyfin lets users uninstall, and returns the versions it does not, which
-// are the ones Jellyfin bundles.
+// Jellyfin lets users uninstall, other than a version a jellyfin_plugin
+// created in this run, and returns the versions Jellyfin does not let users
+// uninstall, which are the ones it bundles.
 //
-// DELETE /Plugins/{id} removes one version, and after an update Jellyfin lists
-// both the running version and the one that loads at the next restart;
-// removing only one leaves the other to load at that restart. A failed request
-// still counts once the plugin is no longer listed, which is how an uninstall
-// that raced another one for the same plugin ends.
+// After an update Jellyfin lists both the running version and the one that
+// loads at the next restart, and removing only one leaves the other to load at
+// that restart. Each version goes by its own DELETE: the DELETE without a
+// version removes a version that is not loaded, which under
+// create_before_destroy is the one the replacement just installed. A failed
+// request still counts once its version is no longer listed, which is how an
+// uninstall that raced another one for the same plugin ends.
 func (r *PluginResource) uninstall(ctx context.Context, id string) ([]client.InstalledPlugin, error) {
 	listed, err := r.listedPlugins(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	for {
-		var removable, bundled []client.InstalledPlugin
-		for _, p := range listed {
-			if p.CanUninstall {
-				removable = append(removable, p)
-			} else {
-				bundled = append(bundled, p)
-			}
-		}
+	var errs []error
+	for _, p := range listed {
 		// Jellyfin answers 204 to the DELETE of a plugin it does not let users
 		// uninstall and leaves it in place.
-		if len(removable) == 0 {
-			return bundled, nil
+		if !p.CanUninstall {
+			continue
 		}
-
-		uninstallErr := r.client.UninstallPlugin(ctx, id)
-		remaining, err := r.listedPlugins(ctx, id)
-		if err != nil {
-			return nil, errors.Join(uninstallErr, err)
+		if r.createdThisRun(p) {
+			tflog.Debug(ctx, "Leaving the plugin version another jellyfin_plugin created in this run", map[string]interface{}{"plugin": p.Name, "version": p.Version})
+			continue
 		}
-		if len(remaining) == 0 {
-			return nil, nil
+		if err := r.client.UninstallPluginVersion(ctx, p.ID, p.Version); err != nil {
+			errs = append(errs, err)
 		}
-		if uninstallErr != nil {
-			return nil, uninstallErr
-		}
-		if len(remaining) >= len(listed) {
-			return nil, fmt.Errorf("plugin %s is still listed at version %s after uninstalling it", id, strings.Join(pluginVersions(remaining), ", "))
-		}
-		listed = remaining
 	}
+
+	remaining, err := r.listedPlugins(ctx, id)
+	if err != nil {
+		return nil, errors.Join(append(errs, err)...)
+	}
+	var left, bundled []client.InstalledPlugin
+	for _, p := range remaining {
+		switch {
+		case !p.CanUninstall:
+			bundled = append(bundled, p)
+		case !r.createdThisRun(p):
+			left = append(left, p)
+		}
+	}
+	if len(left) > 0 {
+		return nil, errors.Join(append(errs, fmt.Errorf("plugin %s is still listed at version %s after uninstalling it", id, strings.Join(pluginVersions(left), ", ")))...)
+	}
+	return bundled, nil
+}
+
+// pluginVersionsCreated holds the plugin versions that a jellyfin_plugin
+// created or adopted, keyed by the provider's client, which lasts one
+// Terraform run. Under create_before_destroy a replacement is created before
+// the object it replaces is destroyed, and both share the plugin's GUID, so
+// this is how that destroy tells the replacement's version from an update
+// Jellyfin installed on its own, which it must remove.
+var pluginVersionsCreated sync.Map
+
+type createdPluginVersion struct {
+	client  *client.Client
+	id      string
+	version string
+}
+
+func (r *PluginResource) recordCreated(p client.InstalledPlugin) {
+	pluginVersionsCreated.Store(createdPluginVersion{r.client, normalizeGUID(p.ID), p.Version}, struct{}{})
+}
+
+func (r *PluginResource) createdThisRun(p client.InstalledPlugin) bool {
+	_, ok := pluginVersionsCreated.Load(createdPluginVersion{r.client, normalizeGUID(p.ID), p.Version})
+	return ok
 }
 
 func pluginVersions(plugins []client.InstalledPlugin) []string {
