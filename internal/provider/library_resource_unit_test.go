@@ -332,6 +332,18 @@ func TestUnitUnsupportedLibraryOptionsAreNotComputed(t *testing.T) {
 	}
 }
 
+func TestUnitFlattenCollectionTypeReadsMissingTypeAsMixed(t *testing.T) {
+	for server, want := range map[string]string{
+		"":       "mixed",
+		"mixed":  "mixed",
+		"movies": "movies",
+	} {
+		if got := flattenCollectionType(server); got != types.StringValue(want) {
+			t.Errorf("flattenCollectionType(%q) = %v, want %q", server, got, want)
+		}
+	}
+}
+
 func TestUnitVersionedAttributeErrorsFollowServerVersion(t *testing.T) {
 	similarItems := path.Root("library_options").AtName("type_options").AtListIndex(0).AtName("similar_item_providers")
 	networkPath := path.Root("library_options").AtName("path_infos").AtListIndex(0).AtName("network_path")

@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
@@ -253,6 +254,43 @@ resource "jellyfin_library" "test" {
 }
 `,
 				Check: resource.TestCheckResourceAttr("jellyfin_library.test", "collection_type", "musicvideos"),
+			},
+		},
+	})
+}
+
+func TestAccLibraryResourceImportWithoutCollectionTypeAsMixed(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckNoLibraryNamed(t, "TestUntyped"),
+		Steps: []resource.TestStep{
+			{
+				// Jellyfin's web UI creates a Mixed Movies and Shows library
+				// like this, without a collection type.
+				PreConfig: func() {
+					if err := testAccClient(t).AddVirtualFolder(context.Background(), "TestUntyped", "", []string{"/media/movies"}, nil); err != nil {
+						t.Fatalf("creating a library without a collection type: %v", err)
+					}
+				},
+				Config: `
+import {
+  to = jellyfin_library.test
+  id = "TestUntyped"
+}
+
+resource "jellyfin_library" "test" {
+  name            = "TestUntyped"
+  collection_type = "mixed"
+  paths           = ["/media/movies"]
+}
+`,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("jellyfin_library.test", plancheck.ResourceActionNoop),
+					},
+				},
+				Check: resource.TestCheckResourceAttr("jellyfin_library.test", "collection_type", "mixed"),
 			},
 		},
 	})

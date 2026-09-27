@@ -139,8 +139,8 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"collection_type": schema.StringAttribute{
-				Description:         "The collection type: one of " + strings.Join(collectionTypes, ", ") + ".",
-				MarkdownDescription: "The collection type: one of `" + strings.Join(collectionTypes, "`, `") + "`.",
+				Description:         "The collection type: one of " + strings.Join(collectionTypes, ", ") + ". A library without a collection type, which is how Jellyfin's web UI creates a Mixed Movies and Shows library, reads as mixed: Jellyfin treats the two the same.",
+				MarkdownDescription: "The collection type: one of `" + strings.Join(collectionTypes, "`, `") + "`. A library without a collection type, which is how Jellyfin's web UI creates a Mixed Movies and Shows library, reads as `mixed`: Jellyfin treats the two the same.",
 				Required:            true,
 				Validators: []validator.String{
 					stringvalidator.OneOf(collectionTypes...),
@@ -191,6 +191,17 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 // Jellyfin parses a collection type case-insensitively but returns it in this
 // spelling, so any other spelling would read back as a different value.
 var collectionTypes = []string{"movies", "tvshows", "music", "musicvideos", "homevideos", "boxsets", "books", "mixed"}
+
+// flattenCollectionType reads a library without a collection type as mixed.
+// Jellyfin gives such a library the same null collection type as one created
+// as mixed, and only its library listing tells them apart, so an empty string
+// would force a replacement that changes nothing.
+func flattenCollectionType(collectionType string) types.String {
+	if collectionType == "" {
+		return types.StringValue("mixed")
+	}
+	return types.StringValue(collectionType)
+}
 
 func libraryOptionsAttributes() map[string]schema.Attribute {
 	optionalString := func(desc string) schema.StringAttribute {
@@ -554,7 +565,7 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 	resp.Diagnostics.Append(resp.State.Set(ctx, &LibraryResourceModel{
 		ID:             types.StringValue(folder.Name),
 		Name:           data.Name,
-		CollectionType: types.StringValue(folder.CollectionType),
+		CollectionType: flattenCollectionType(folder.CollectionType),
 		Paths:          data.Paths,
 		LibraryOptions: flattenLibraryOptions(ctx, folder.GetLibraryOptions().RawJSON, &resp.Diagnostics),
 		ItemID:         types.StringValue(folder.ItemID),
@@ -595,7 +606,7 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 
 	data.ItemID = types.StringValue(updated.ItemID)
 	data.ID = types.StringValue(updated.Name)
-	data.CollectionType = types.StringValue(updated.CollectionType)
+	data.CollectionType = flattenCollectionType(updated.CollectionType)
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, updated.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues
@@ -623,7 +634,7 @@ func (r *LibraryResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
-	data.CollectionType = types.StringValue(folder.CollectionType)
+	data.CollectionType = flattenCollectionType(folder.CollectionType)
 	data.ItemID = types.StringValue(folder.ItemID)
 	data.ID = types.StringValue(folder.Name)
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, folder.Locations)
@@ -685,7 +696,7 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	data.ItemID = types.StringValue(updated.ItemID)
 	data.ID = types.StringValue(updated.Name)
-	data.CollectionType = types.StringValue(updated.CollectionType)
+	data.CollectionType = flattenCollectionType(updated.CollectionType)
 	pathValues, diags := types.ListValueFrom(ctx, types.StringType, updated.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues

@@ -56,7 +56,7 @@ resource "jellyfin_library" "movies" {
 
 ### Required
 
-- `collection_type` (String) The collection type: one of `movies`, `tvshows`, `music`, `musicvideos`, `homevideos`, `boxsets`, `books`, `mixed`.
+- `collection_type` (String) The collection type: one of `movies`, `tvshows`, `music`, `musicvideos`, `homevideos`, `boxsets`, `books`, `mixed`. A library without a collection type, which is how Jellyfin's web UI creates a Mixed Movies and Shows library, reads as `mixed`: Jellyfin treats the two the same.
 - `name` (String) The library name.
 - `paths` (List of String) Paths of the library's media folders. Jellyfin looks them up on the server, so when it runs in a container they must be paths inside the container.
 
