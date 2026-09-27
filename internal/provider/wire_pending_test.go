@@ -20,12 +20,6 @@ import (
 // their keys by hand. TestUnitWireBindings checks them like the others, and
 // each moves into its resource's Wire method when the resource switches.
 var pendingWireMigration = map[string]func() (*wire.Binding, error){
-	"jellyfin_encoding_configuration": func() (*wire.Binding, error) {
-		return wire.Bind(schemaOf(NewEncodingConfigurationResource()), "EncodingOptions",
-			wire.Identity("id"),
-			wire.VersionMessage("hls_audio_seek_strategy", encodingVersionMessage),
-			wire.VersionMessage("subtitle_extraction_timeout_minutes", encodingVersionMessage))
-	},
 	"jellyfin_networking_configuration": func() (*wire.Binding, error) {
 		return wire.Bind(schemaOf(NewNetworkingConfigurationResource()), "NetworkConfiguration", wire.Identity("id"))
 	},
@@ -110,11 +104,6 @@ var pendingWireMigration = map[string]func() (*wire.Binding, error){
 		}
 		return wire.Bind(schemaOf(NewJellyfinSecurityPluginConfigurationResource()), wire.SecurityPluginRoot, opts...)
 	},
-}
-
-func encodingVersionMessage(g wire.VersionGap) (string, string) {
-	return "Unsupported Jellyfin server version",
-		fmt.Sprintf("%s requires Jellyfin %s or later: the server's encoding configuration has no %s field, so it would discard the value. Remove %s from the configuration or upgrade the server.", g.Path, g.Since, g.Key, g.Path)
 }
 
 func similarItemsVersionMessage(g wire.VersionGap) (string, string) {

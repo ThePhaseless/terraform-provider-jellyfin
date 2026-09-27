@@ -279,7 +279,11 @@ func findWireDiffCase(t *testing.T, name string) wireDiffCase {
 
 func (c wireDiffCase) binding(t *testing.T) *wire.Binding {
 	t.Helper()
-	root, err := pendingWireMigration["jellyfin_"+c.resourceName()]()
+	bind := pendingWireMigration["jellyfin_"+c.resourceName()]
+	if bound, ok := c.resource.(wireBound); ok {
+		bind = bound.Wire
+	}
+	root, err := bind()
 	if err != nil {
 		t.Fatalf("binding: %v", err)
 	}
@@ -831,7 +835,7 @@ func TestUnitWireVersionErrorsMatchTheHandWrittenChecks(t *testing.T) {
 		}
 	}
 
-	encRoot, err := pendingWireMigration["jellyfin_encoding_configuration"]()
+	encRoot, err := encodingWire()
 	if err != nil {
 		t.Fatal(err)
 	}

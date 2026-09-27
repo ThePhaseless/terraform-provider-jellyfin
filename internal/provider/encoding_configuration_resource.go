@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -25,11 +26,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 var (
 	_ resource.Resource                = &EncodingConfigurationResource{}
 	_ resource.ResourceWithImportState = &EncodingConfigurationResource{}
+	_ resource.ResourceWithModifyPlan  = &EncodingConfigurationResource{}
+	_ wireBound                        = &EncodingConfigurationResource{}
 )
 
 // NewEncodingConfigurationResource creates a new encoding configuration resource.
@@ -94,6 +98,20 @@ type EncodingConfigurationResourceModel struct {
 	HardwareDecodingCodecs                                    types.List    `tfsdk:"hardware_decoding_codecs"`
 	AllowOnDemandMetadataBasedKeyframeExtractionForExtensions types.List    `tfsdk:"allow_on_demand_metadata_based_keyframe_extraction_for_extensions"`
 	HlsAudioSeekStrategy                                      types.String  `tfsdk:"hls_audio_seek_strategy"`
+}
+
+var encodingWire = sync.OnceValues(func() (*wire.Binding, error) {
+	return wire.Bind(schemaOf(&EncodingConfigurationResource{}), "EncodingOptions",
+		wire.Identity("id"),
+		wire.VersionMessage("hls_audio_seek_strategy", encodingVersionMessage),
+		wire.VersionMessage("subtitle_extraction_timeout_minutes", encodingVersionMessage))
+})
+
+func (r *EncodingConfigurationResource) Wire() (*wire.Binding, error) { return encodingWire() }
+
+func encodingVersionMessage(g wire.VersionGap) (string, string) {
+	return "Unsupported Jellyfin server version",
+		fmt.Sprintf("%s requires Jellyfin %s or later: the server's encoding configuration has no %s field, so it would discard the value. Remove %s from the configuration or upgrade the server.", g.Path, g.Since, g.Key, g.Path)
 }
 
 func (r *EncodingConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -225,7 +243,23 @@ func (r *EncodingConfigurationResource) ImportState(ctx context.Context, _ resou
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("encoding"))...)
 }
 
+// ModifyPlan rejects configured fields the server's Jellyfin version lacks,
+// such as the 12.0 ones on 10.11, which the server would accept and drop.
+func (r *EncodingConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	if b := wireBinding(&resp.Diagnostics, encodingWire); b != nil {
+		resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
+	}
+}
+
 func (r *EncodingConfigurationResource) apply(ctx context.Context, data *EncodingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+	b := wireBinding(diags, encodingWire)
+	if b == nil {
+		return
+	}
+
 	current, err := r.client.GetEncodingOptions(ctx)
 	if err != nil {
 		diags.AddError("Failed to read current encoding configuration", err.Error())
@@ -238,13 +272,7 @@ func (r *EncodingConfigurationResource) apply(ctx context.Context, data *Encodin
 		return
 	}
 
-	if d := checkJellyfin12EncodingKeys(base, data); d.HasError() {
-		diags.Append(d...)
-		return
-	}
-
-	d := overlayEncodingConfiguration(ctx, base, data)
-	if d.HasError() {
+	if d := b.OverlayModel(ctx, base, data); d.HasError() {
 		diags.Append(d...)
 		return
 	}
@@ -266,19 +294,24 @@ func (r *EncodingConfigurationResource) apply(ctx context.Context, data *Encodin
 		return
 	}
 
-	flattenEncodingConfiguration(ctx, updated.RawJSON, data, diags)
+	diags.Append(b.FlattenAfterApply(ctx, updated.RawJSON, data)...)
 	data.ID = types.StringValue("encoding")
 	diags.Append(state.Set(ctx, data)...)
 }
 
 func (r *EncodingConfigurationResource) read(ctx context.Context, data *EncodingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+	b := wireBinding(diags, encodingWire)
+	if b == nil {
+		return
+	}
+
 	current, err := r.client.GetEncodingOptions(ctx)
 	if err != nil {
 		diags.AddError("Failed to read encoding configuration", err.Error())
 		return
 	}
 
-	flattenEncodingConfiguration(ctx, current.RawJSON, data, diags)
+	diags.Append(b.FlattenInto(ctx, current.RawJSON, data)...)
 	data.ID = types.StringValue("encoding")
 	diags.Append(state.Set(ctx, data)...)
 }
