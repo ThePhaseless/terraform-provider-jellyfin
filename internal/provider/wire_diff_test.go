@@ -898,3 +898,68 @@ func TestUnitWireSelectingNameWritesLikeRenameUser(t *testing.T) {
 		}
 	}
 }
+
+// The user resource reads its name, flags and policy from one GET of the
+// user through the whole binding, where it read the name and flags through
+// the typed user and the policy through GetUserPolicyRaw.
+func TestUnitWireUserReadsLikeTheTypedUserAndItsPolicy(t *testing.T) {
+	ctx := context.Background()
+	c := findWireDiffCase(t, "user_policy")
+	root := wireOf(t, c.resource)
+
+	users := []namedPayload{{"synthesized user", string(mustJSON(synthesize(wire.Pinned(), "UserDto", "user", 0)))}}
+	for _, p := range c.payloads(t) {
+		users = append(users, namedPayload{"user holding " + p.name, fmt.Sprintf(`{"Id":"u","Name":"n","Policy":%s}`, p.raw)})
+	}
+	oldRead := func(raw string, prior types.Object) (types.Object, diag.Diagnostics) {
+		m, diags := modelOf[UserResourceModel](ctx, prior, "policy")
+		var typed client.User
+		if err := json.Unmarshal([]byte(raw), &typed); err != nil {
+			diags.AddError("decoding user", err.Error())
+			return prior, diags
+		}
+		var policy struct {
+			Policy json.RawMessage `json:"Policy"`
+		}
+		_ = json.Unmarshal([]byte(raw), &policy)
+		m.Name = types.StringValue(typed.Name)
+		m.IsAdministrator = types.BoolValue(typed.Policy.IsAdministrator)
+		m.IsDisabled = types.BoolValue(typed.Policy.IsDisabled)
+		m.EnableAllFolders = types.BoolValue(typed.Policy.EnableAllFolders)
+		m.Policy = policyFromRaw(ctx, string(policy.Policy), &diags)
+		obj, d := objectOf(ctx, prior.AttributeTypes(ctx), &m)
+		return obj, append(diags, d...)
+	}
+
+	attrs := map[string]attr.Value{}
+	for name, at := range root.AttrTypes {
+		attrs[name] = nullValue(ctx, at)
+	}
+	attrs["id"], attrs["password"] = types.StringValue("prior-id"), types.StringValue("prior-password")
+	nullPrior, _ := types.ObjectValue(root.AttrTypes, attrs)
+	fullPrior, d := oldRead(users[0].raw, nullPrior)
+	if d.HasError() {
+		t.Fatalf("old read of the synthesized user: %v", d)
+	}
+
+	for _, u := range users {
+		for pi, prior := range []types.Object{nullPrior, fullPrior} {
+			oldObj, oldDiags := oldRead(u.raw, prior)
+			newObj, newDiags := root.Flatten(ctx, parseDoc(t, u.raw), prior)
+			if oldDiags.HasError() || newDiags.HasError() {
+				t.Errorf("read %s (prior %d): old errors %v, new errors %v", u.name, pi, oldDiags, newDiags)
+				continue
+			}
+			var diffs []string
+			valueDiffs(ctx, oldObj, newObj, "", &diffs)
+			for _, diff := range diffs {
+				at, _, _ := strings.Cut(diff, ":")
+				if reason, ok := c.accepted[withoutIndexes(at)]; ok {
+					t.Logf("read %s: accepted difference at %s: %s", u.name, at, reason)
+					continue
+				}
+				t.Errorf("read %s (prior %d): %s", u.name, pi, diff)
+			}
+		}
+	}
+}

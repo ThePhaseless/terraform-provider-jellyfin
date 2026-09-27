@@ -41,22 +41,6 @@ var pendingWireMigration = map[string]func() (*wire.Binding, error){
 			// The typed client reads missing or null triggers as an empty list.
 			wire.ReadMissingAs("triggers", types.ListValueMust(scheduledTaskTriggerObjectType(), []attr.Value{})))
 	},
-	"jellyfin_user": func() (*wire.Binding, error) {
-		return wire.Bind(schemaOf(NewUserResource()), "UserDto",
-			wire.Identity("id"),
-			wire.Elsewhere("password", "written by POST /Users/Password"),
-			wire.Document("Policy"),
-			wire.Key("is_administrator", "Policy.IsAdministrator"),
-			wire.Key("is_disabled", "Policy.IsDisabled"),
-			wire.Key("enable_all_folders", "Policy.EnableAllFolders"),
-			// The resource reads these three through the typed client, which
-			// reads a missing or null flag as false.
-			wire.ReadMissingAs("is_administrator", types.BoolValue(false)),
-			wire.ReadMissingAs("is_disabled", types.BoolValue(false)),
-			wire.ReadMissingAs("enable_all_folders", types.BoolValue(false)),
-			wire.Unmanaged("AccessSchedule", "Id", "Jellyfin numbers access schedules itself"),
-			wire.Unmanaged("AccessSchedule", "UserId", "Jellyfin fills in the user the policy belongs to"))
-	},
 	"jellyfin_library": func() (*wire.Binding, error) {
 		opts := []wire.Option{
 			wire.Identity("id"),
