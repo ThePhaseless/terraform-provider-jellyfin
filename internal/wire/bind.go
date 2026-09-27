@@ -16,7 +16,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// Mode says whether and how an attribute reaches the JSON.
 type Mode int
 
 const (
@@ -43,10 +42,8 @@ func (m Mode) String() string {
 	return fmt.Sprintf("Mode(%d)", int(m))
 }
 
-// hasKey reports whether the mode reads and writes a JSON key.
 func (m Mode) hasKey() bool { return m == ModeSent || m == ModeLegacy }
 
-// Field is one attribute and the key it maps to.
 type Field struct {
 	// Path is the dotted attribute path from the resource root.
 	Path   string
@@ -76,7 +73,6 @@ type Field struct {
 	MergeKey string
 	CarryKey string
 	CarryBy  string
-	// Document is set on a single nested attribute declared a Document.
 	Document bool
 }
 
@@ -87,8 +83,6 @@ func (f *Field) isList() bool {
 	return ok
 }
 
-// Binding maps the attributes of one object type to the keys of one schema
-// object.
 type Binding struct {
 	Object    string
 	AttrTypes map[string]attr.Type

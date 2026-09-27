@@ -69,7 +69,6 @@ func at(t *testing.T, v attr.Value, p string) attr.Value {
 	return v
 }
 
-// with returns obj with the value at p replaced.
 func with(t *testing.T, obj attr.Value, p string, v attr.Value) attr.Value {
 	t.Helper()
 	ctx := context.Background()

@@ -30,7 +30,6 @@ var floorEnv string
 // describes.
 const SecurityPluginRoot = "JellyfinSecurity"
 
-// Prop is one property of a schema object, as a golden records it.
 type Prop struct {
 	Key  string
 	List bool
@@ -85,7 +84,6 @@ func Pinned() Index { return embedded().pinned }
 // Floor returns the objects of FloorVersion. Callers must not modify it.
 func Floor() Index { return embedded().floor }
 
-// FloorVersion is the Jellyfin release Floor records.
 func FloorVersion() string { return embedded().floorVer }
 
 // SinceVersion is the release a field needs when Pinned has it and Floor does

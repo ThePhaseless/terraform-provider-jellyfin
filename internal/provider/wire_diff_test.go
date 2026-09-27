@@ -445,7 +445,6 @@ func (c wireDiffCase) payloads(t *testing.T) []namedPayload {
 	return out
 }
 
-// requiredPaths lists the attributes a plan cannot leave null or unknown.
 func requiredPaths(attrs map[string]schema.Attribute, prefix string, out map[string]bool) {
 	for name, a := range attrs {
 		p := name
@@ -516,7 +515,6 @@ func isContainer(ctx context.Context, v attr.Value) bool {
 	return false
 }
 
-// valueDiffs lists the attribute paths where a and b differ.
 func valueDiffs(ctx context.Context, a, b attr.Value, at string, out *[]string) {
 	if a.Equal(b) {
 		return
