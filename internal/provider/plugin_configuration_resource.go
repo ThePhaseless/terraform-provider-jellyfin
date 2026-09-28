@@ -70,12 +70,16 @@ func (r *PluginConfigurationResource) Schema(_ context.Context, _ resource.Schem
 					"For SSO-Auth, this would include SAML/OIDC configuration. " +
 					"This allows universal configuration of any plugin. " +
 					"Jellyfin replaces the plugin's whole configuration with it, so a key it leaves out takes the plugin's default, " +
-					"and only the keys it names are compared with what the server holds. An import reads every key.",
+					"and only the keys it names are compared with what the server holds: a key added outside Terraform, " +
+					"such as an SSO provider added on the plugin's page, plans no change, and the next update removes it. " +
+					"An import reads every key.",
 				MarkdownDescription: "The plugin configuration as a JSON string. " +
 					"For SSO-Auth, this would include SAML/OIDC configuration. " +
 					"This allows universal configuration of any plugin. " +
 					"Jellyfin replaces the plugin's whole configuration with it, so a key it leaves out takes the plugin's default, " +
-					"and only the keys it names are compared with what the server holds. An import reads every key.",
+					"and only the keys it names are compared with what the server holds: a key added outside Terraform, " +
+					"such as an SSO provider added on the plugin's page, plans no change, and the next update removes it. " +
+					"An import reads every key.",
 				Required:   true,
 				CustomType: jsontypes.NormalizedType{},
 			},

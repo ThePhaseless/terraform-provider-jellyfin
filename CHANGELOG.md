@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `jellyfin_user`: `policy.access_schedules` paired schedules by index in the same way, and demoting and disabling an administrator in one apply always failed with "Administrators cannot be disabled".
 - `jellyfin_livetv_configuration`: the first apply rebuilt an existing tuner or listing provider from the configured settings alone, dropping its type, name and the rest; an entry with the `id` of an existing one now keeps its settings.
 - `jellyfin_library`: paths listed in another order than Jellyfin's sorted one failed the create and replaced the library on every plan; the configured order is kept, and a change of order alone updates in place.
-- `jellyfin_plugin_configuration`: a configuration that named some of the plugin's keys planned a change after every refresh and failed every update. Only the keys it names are compared with the server's; an import still reads every key.
+- `jellyfin_plugin_configuration`: a configuration that named some of the plugin's keys planned a change after every refresh and failed every update. Only the keys it names are compared with the server's, so a key added outside Terraform, such as an SSO provider added on the plugin's page, plans no change and is removed by the next update; an import still reads every key.
 - `jellyfin_plugin_repository`: repositories created, changed or destroyed in one apply dropped each other's changes, and renaming one failed with an inconsistent result.
 - `jellyfin_api_key`: keys created in one apply could both take the same token.
 - `jellyfin_plugin`: an install of a version no repository offers now fails at once and says so, instead of waiting two minutes for the plugin.
