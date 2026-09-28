@@ -353,24 +353,12 @@ func replacePluginVersionFirst(t *testing.T, creator, destroyer *PluginResource)
 	ctx := t.Context()
 
 	createResp := &resource.CreateResponse{State: pluginResourceNullState(ctx)}
-	creator.Create(ctx, resource.CreateRequest{Plan: pluginResourcePlan(t, PluginResourceModel{
-		ID:               types.StringUnknown(),
-		Name:             types.StringValue("Bookshelf"),
-		Version:          types.StringValue("13.0.0.0"),
-		InstalledVersion: types.StringUnknown(),
-		RepositoryURL:    types.StringValue(stableRepoURL),
-	})}, createResp)
+	creator.Create(ctx, resource.CreateRequest{Plan: pluginResourcePlan(t, plannedBookshelf("13.0.0.0"))}, createResp)
 	if createResp.Diagnostics.HasError() {
 		t.Fatalf("Create: %v", createResp.Diagnostics.Errors())
 	}
 
-	replaced := pluginResourceState(t, PluginResourceModel{
-		ID:               types.StringValue(bookshelfID),
-		Name:             types.StringValue("Bookshelf"),
-		Version:          types.StringValue("12.0.0.0"),
-		InstalledVersion: types.StringValue("12.0.0.0"),
-		RepositoryURL:    types.StringValue(stableRepoURL),
-	})
+	replaced := pluginResourceState(t, installedBookshelf("12.0.0.0", "12.0.0.0"))
 	deleteResp := &resource.DeleteResponse{State: replaced}
 	destroyer.Delete(ctx, resource.DeleteRequest{State: replaced}, deleteResp)
 	if deleteResp.Diagnostics.HasError() {
@@ -431,13 +419,7 @@ func TestUnitPluginCreateReportsAVersionNoRepositoryOffers(t *testing.T) {
 	defer cancel()
 
 	resp := &resource.CreateResponse{State: pluginResourceNullState(ctx)}
-	r.Create(ctx, resource.CreateRequest{Plan: pluginResourcePlan(t, PluginResourceModel{
-		ID:               types.StringUnknown(),
-		Name:             types.StringValue("Bookshelf"),
-		Version:          types.StringValue("13.0.0"),
-		InstalledVersion: types.StringUnknown(),
-		RepositoryURL:    types.StringValue(stableRepoURL),
-	})}, resp)
+	r.Create(ctx, resource.CreateRequest{Plan: pluginResourcePlan(t, plannedBookshelf("13.0.0"))}, resp)
 	if !resp.Diagnostics.HasError() || !strings.Contains(resp.Diagnostics.Errors()[0].Detail(), "No enabled plugin repository offers Bookshelf 13.0.0") {
 		t.Errorf("Create diagnostics = %v, want the version reported as not offered", resp.Diagnostics)
 	}

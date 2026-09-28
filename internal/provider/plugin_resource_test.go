@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"slices"
 	"testing"
 	"time"
@@ -307,9 +306,7 @@ resource "jellyfin_plugin" "test" {
 // task runs at startup, so it only stays pinned across a restart with the
 // task's triggers removed.
 func TestAccPluginResourcePinSurvivesRestartWithoutUpdateTriggers(t *testing.T) {
-	if os.Getenv("JELLYFIN_RESTART_ACC") == "" {
-		t.Skip("set JELLYFIN_RESTART_ACC=1 to run tests that restart the server; run against a disposable Jellyfin (e.g. the bundled docker-compose) in isolation, not a shared instance")
-	}
+	testAccRestartPreCheck(t, "tests that restart the server")
 	pkg := testAccFindUninstalledPackage(t, stableRepoURL, 2)
 	pinned := pkg.Versions[1].Version
 	taskID := testAccRestorePluginUpdateTriggers(t)
@@ -465,34 +462,6 @@ func testAccCheckPluginListed(t *testing.T, name string) resource.TestCheckFunc 
 		}
 		return nil
 	}
-}
-
-// testAccRegisterRepository registers the plugin repository for the rest of the
-// test unless it already is, and puts the previous list back afterwards.
-func testAccRegisterRepository(t *testing.T, name, repoURL string) {
-	t.Helper()
-
-	c := testAccClient(t)
-	repos, err := c.GetPluginRepositories(t.Context())
-	if err != nil {
-		t.Fatalf("failed to get plugin repositories: %v", err)
-	}
-	for _, r := range repos {
-		if r.URL == repoURL {
-			return
-		}
-	}
-
-	if err := c.SetPluginRepositories(t.Context(), append(repos, client.PluginRepository{Name: name, URL: repoURL, Enabled: true})); err != nil {
-		t.Fatalf("failed to register repository %s: %v", repoURL, err)
-	}
-	t.Cleanup(func() {
-		// t.Context() is done by now, and the provider's sign-in has signed c
-		// out, since both share a device ID.
-		if err := testAccClient(t).SetPluginRepositories(context.WithoutCancel(t.Context()), repos); err != nil {
-			t.Errorf("failed to restore plugin repositories: %v", err)
-		}
-	})
 }
 
 // testAccFindInstallablePlugin temporarily registers the given repository, queries

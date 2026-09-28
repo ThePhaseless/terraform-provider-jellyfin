@@ -6,7 +6,6 @@ package provider
 import (
 	"context"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -31,7 +30,6 @@ func TestAccSecurityPluginConfigurationResource(t *testing.T) {
 	testAccInstallSecurityPlugin(t)
 
 	const name = "jellyfin_security_plugin_configuration.test"
-	// jellyfin_plugin's id holds the dash-free spelling the server lists.
 	dashFreeID := normalizeGUID(jellyfinSecurityPluginID)
 	created := testAccSecurityPluginConfigurationConfig(securityPluginTestValues{
 		pluginID:           dashFreeID,
@@ -195,25 +193,22 @@ resource "jellyfin_security_plugin_configuration" "test" {
 `, v.pluginID, v.publicBaseURL, v.pairDevice, v.stepUpWindow, v.enrollmentDeadline, v.displayName, v.linkByUsername)
 }
 
-// testAccSecurityPluginPreCheck gates the tests that install JellyfinSecurity:
-// loading the plugin takes a server restart, which disrupts any other test
-// sharing the instance.
 func testAccSecurityPluginPreCheck(t *testing.T) {
 	t.Helper()
-
-	if os.Getenv("JELLYFIN_RESTART_ACC") == "" {
-		t.Skip("set JELLYFIN_RESTART_ACC=1 to run tests that install the JellyfinSecurity plugin and restart the server; run against a disposable Jellyfin (e.g. the bundled docker-compose) in isolation, not a shared instance")
-	}
-	testAccPreCheck(t)
+	testAccRestartPreCheck(t, "tests that install the JellyfinSecurity plugin and restart the server")
 }
 
 // testAccInstallSecurityPlugin installs the supported JellyfinSecurity build
-// this server accepts and restarts the server so it loads, the way
-// jellyfin_plugin and jellyfin_restart do. It returns at once when that build
-// is already active.
+// and restarts the server to load it, unless that build is already active. It
+// registers the JellyfinSecurity repository for the rest of the test and puts
+// the previous repository list back when the test ends; the plugin stays
+// installed and plugin updates stay disabled.
 func testAccInstallSecurityPlugin(t *testing.T) *client.Client {
 	t.Helper()
 
+	testAccRegisterRepository(t, "JellyfinSecurity", securityPluginRepoURL)
+	// testAccRegisterRepository signs in with its own client, and a sign-in
+	// signs out every earlier client sharing its device ID, so c comes after.
 	c := testAccClient(t)
 	ctx := t.Context()
 
@@ -222,34 +217,18 @@ func testAccInstallSecurityPlugin(t *testing.T) *client.Client {
 		t.Fatalf("listing installed plugins: %v", err)
 	}
 
-	repos, err := c.GetPluginRepositories(ctx)
-	if err != nil {
-		t.Fatalf("listing plugin repositories: %v", err)
-	}
-	registered := false
-	for _, r := range repos {
-		if r.URL == securityPluginRepoURL {
-			registered = true
-			break
-		}
-	}
-	if !registered {
-		repos = append(repos, client.PluginRepository{Name: "JellyfinSecurity", URL: securityPluginRepoURL, Enabled: true})
-		if err := c.SetPluginRepositories(ctx, repos); err != nil {
-			t.Fatalf("registering the JellyfinSecurity repository: %v", err)
-		}
-	}
-
 	installer := &PluginResource{client: c}
 	version, err := installer.resolvePluginVersion(ctx, securityPluginName, types.StringNull())
 	if err != nil {
 		t.Fatalf("resolving the supported JellyfinSecurity build: %v", err)
 	}
-	// samePluginVersion matches any version against an empty one.
 	if version == "" {
 		t.Fatalf("the repositories Jellyfin reads do not offer %s", securityPluginName)
 	}
-	if installed != nil && installed.Status == "Active" && samePluginVersion(installed.Version, version) {
+	active := func(p *client.InstalledPlugin) bool {
+		return p != nil && p.Status == "Active" && samePluginVersion(p.Version, version)
+	}
+	if active(installed) {
 		return c
 	}
 	if installed == nil || !samePluginVersion(installed.Version, version) {
@@ -261,8 +240,8 @@ func testAccInstallSecurityPlugin(t *testing.T) *client.Client {
 		}
 	}
 
-	// Jellyfin updates plugins at startup, which would load a newer release in
-	// place of the build under test at this or any later restart. These tests
+	// Jellyfin updates plugins at startup: once upstream offers a newer release,
+	// it replaces the build under test at this or any later restart. These tests
 	// only run against a disposable server, so the schedule is not put back.
 	if err := disablePluginUpdates(ctx, c); err != nil {
 		t.Fatalf("disabling plugin updates: %v", err)
@@ -277,7 +256,7 @@ func testAccInstallSecurityPlugin(t *testing.T) *client.Client {
 	deadline := time.Now().Add(time.Minute)
 	for {
 		installed, err = findSecurityPlugin(ctx, c)
-		if err == nil && installed != nil && installed.Status == "Active" && samePluginVersion(installed.Version, version) {
+		if err == nil && active(installed) {
 			return c
 		}
 		if time.Now().After(deadline) {
@@ -323,24 +302,31 @@ func findSecurityPlugin(ctx context.Context, c *client.Client) (*client.Installe
 	return found, nil
 }
 
-// testAccSecurityPluginPayloadShape reduces the payload the plugin serves for
-// its defaults plus one entry in each list of objects, so that the nested
-// models' keys are served too, and payloadListPlaceholder in every list still
-// empty, so that each list is served with an element to type it by. It puts
-// back the configuration it found.
-func testAccSecurityPluginPayloadShape(t *testing.T, c *client.Client) []string {
+// testAccPutBackSecurityPluginConfiguration reads the JellyfinSecurity
+// configuration through c and puts it back when the test ends, through a fresh
+// client, since the provider's sign-in has signed c out by then.
+func testAccPutBackSecurityPluginConfiguration(t *testing.T, c *client.Client) {
 	t.Helper()
 
-	ctx := t.Context()
-	original, err := c.GetPluginConfiguration(ctx, jellyfinSecurityPluginID)
+	original, err := c.GetPluginConfiguration(t.Context(), jellyfinSecurityPluginID)
 	if err != nil {
 		t.Fatalf("reading the JellyfinSecurity configuration: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := c.UpdatePluginConfiguration(context.WithoutCancel(t.Context()), jellyfinSecurityPluginID, original); err != nil {
-			t.Errorf("restoring the JellyfinSecurity configuration: %v", err)
+		if err := testAccClient(t).UpdatePluginConfiguration(context.WithoutCancel(t.Context()), jellyfinSecurityPluginID, original); err != nil {
+			t.Errorf("putting back the JellyfinSecurity configuration: %v", err)
 		}
 	})
+}
+
+// testAccSecurityPluginPayloadShape reduces the payload the plugin serves for
+// its defaults plus one entry in each list of objects and
+// payloadListPlaceholder in every list still empty.
+func testAccSecurityPluginPayloadShape(t *testing.T, c *client.Client) []string {
+	t.Helper()
+
+	testAccPutBackSecurityPluginConfiguration(t, c)
+	ctx := t.Context()
 
 	// Properties left out take the plugin's defaults, and a null one is not
 	// served at all, so the deadline is set to make it part of the shape. A

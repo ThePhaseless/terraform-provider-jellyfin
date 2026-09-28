@@ -4,8 +4,8 @@
 package provider
 
 import (
+	"errors"
 	"fmt"
-	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -18,10 +18,7 @@ import (
 // instance — run it against a disposable Jellyfin in isolation, not the shared
 // CI/server instance.
 func TestAccRestartResource(t *testing.T) {
-	if os.Getenv("JELLYFIN_RESTART_ACC") == "" {
-		t.Skip("set JELLYFIN_RESTART_ACC=1 to run the disruptive restart acceptance test; run against a disposable Jellyfin (e.g. the bundled docker-compose) in isolation, not a shared instance")
-	}
-	testAccPreCheck(t)
+	testAccRestartPreCheck(t, "the disruptive restart acceptance test")
 	pluginName, pluginVersion := testAccFindInstallablePlugin(t, stableRepoURL)
 
 	resource.Test(t, resource.TestCase{
@@ -47,13 +44,12 @@ resource "jellyfin_restart" "after_plugin" {
 					resource.TestCheckResourceAttrSet("jellyfin_restart.after_plugin", "completed_at"),
 					resource.TestCheckResourceAttr("jellyfin_restart.after_plugin", "triggers.plugin_version", pluginVersion),
 					func(*terraform.State) error {
-						c := testAccClient(t)
-						info, err := c.GetSystemInfo(t.Context())
+						info, err := testAccClient(t).GetSystemInfo(t.Context())
 						if err != nil {
 							return fmt.Errorf("reading system info after restart: %w", err)
 						}
 						if info.HasPendingRestart {
-							return fmt.Errorf("expected HasPendingRestart=false after restart, got true")
+							return errors.New("expected HasPendingRestart=false after restart, got true")
 						}
 						return nil
 					},

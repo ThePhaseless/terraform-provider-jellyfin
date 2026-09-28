@@ -16,7 +16,6 @@ func TestAccAPIKeyResource(t *testing.T) {
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Create and Read.
 			{
 				Config: `
 resource "jellyfin_api_key" "test" {
@@ -28,7 +27,6 @@ resource "jellyfin_api_key" "test" {
 					resource.TestCheckResourceAttrSet("jellyfin_api_key.test", "access_token"),
 				),
 			},
-			// ImportState.
 			{
 				ResourceName:                         "jellyfin_api_key.test",
 				ImportState:                          true,

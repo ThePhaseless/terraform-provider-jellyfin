@@ -13,57 +13,45 @@ import (
 const testAccPluginRepositoryURL = "https://example.com/terraform-provider-jellyfin/plugin/manifest.json"
 
 func TestAccPluginRepositoryResource(t *testing.T) {
+	const address = "jellyfin_plugin_repository.test"
 	repositoryName := fmt.Sprintf("Terraform Provider Test Repo %s", t.Name())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Create and Read.
 			{
-				Config: testAccPluginRepositoryResourceConfig(repositoryName),
+				Config: testAccPluginRepositoryResourceConfig(repositoryName, true),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("jellyfin_plugin_repository.test", "name", repositoryName),
-					resource.TestCheckResourceAttr("jellyfin_plugin_repository.test", "url", testAccPluginRepositoryURL),
-					resource.TestCheckResourceAttr("jellyfin_plugin_repository.test", "enabled", "true"),
+					resource.TestCheckResourceAttr(address, "name", repositoryName),
+					resource.TestCheckResourceAttr(address, "url", testAccPluginRepositoryURL),
+					resource.TestCheckResourceAttr(address, "enabled", "true"),
 				),
 			},
-			// ImportState.
 			{
-				ResourceName:                         "jellyfin_plugin_repository.test",
+				ResourceName:                         address,
 				ImportState:                          true,
 				ImportStateVerify:                    true,
 				ImportStateVerifyIdentifierAttribute: "name",
 				ImportStateId:                        repositoryName,
 			},
-			// Update.
 			{
-				Config: testAccPluginRepositoryResourceConfigUpdated(repositoryName),
+				Config: testAccPluginRepositoryResourceConfig(repositoryName, false),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("jellyfin_plugin_repository.test", "name", repositoryName),
-					resource.TestCheckResourceAttr("jellyfin_plugin_repository.test", "enabled", "false"),
+					resource.TestCheckResourceAttr(address, "name", repositoryName),
+					resource.TestCheckResourceAttr(address, "enabled", "false"),
 				),
 			},
 		},
 	})
 }
 
-func testAccPluginRepositoryResourceConfig(repositoryName string) string {
+func testAccPluginRepositoryResourceConfig(repositoryName string, enabled bool) string {
 	return fmt.Sprintf(`
 resource "jellyfin_plugin_repository" "test" {
   name    = %q
   url     = %q
-  enabled = true
+  enabled = %t
 }
-`, repositoryName, testAccPluginRepositoryURL)
-}
-
-func testAccPluginRepositoryResourceConfigUpdated(repositoryName string) string {
-	return fmt.Sprintf(`
-resource "jellyfin_plugin_repository" "test" {
-  name    = %q
-  url     = %q
-  enabled = false
-}
-`, repositoryName, testAccPluginRepositoryURL)
+`, repositoryName, testAccPluginRepositoryURL, enabled)
 }

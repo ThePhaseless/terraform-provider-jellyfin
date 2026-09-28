@@ -292,16 +292,7 @@ func TestAccUpgradeFromV038ThenInsertMetadataOptions(t *testing.T) {
 // tests rather than in TestAccUpgradeFromV038.
 func TestAccSecurityPluginUpgradeFromV038(t *testing.T) {
 	testAccSecurityPluginPreCheck(t)
-	c := testAccInstallSecurityPlugin(t)
-	original, err := c.GetPluginConfiguration(t.Context(), jellyfinSecurityPluginID)
-	if err != nil {
-		t.Fatalf("reading the JellyfinSecurity configuration: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := testAccClient(t).UpdatePluginConfiguration(context.WithoutCancel(t.Context()), jellyfinSecurityPluginID, original); err != nil {
-			t.Errorf("putting back the JellyfinSecurity configuration: %v", err)
-		}
-	})
+	testAccPutBackSecurityPluginConfiguration(t, testAccInstallSecurityPlugin(t))
 
 	testAccUpgradeFromV038(t, testAccSecurityPluginConfigurationConfig(securityPluginTestValues{
 		pluginID:           jellyfinSecurityPluginID,
