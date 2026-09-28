@@ -19,7 +19,7 @@ func TestImportedAttributesForLiveTV(t *testing.T) {
   "RecordingPostProcessorArguments": "\"{path}\""
 }`
 
-	attrs, err := importedAttributes(context.Background(), "jellyfin_livetv_configuration", "livetv", raw)
+	attrs, err := importedAttributes(context.Background(), nil, "jellyfin_livetv_configuration", "livetv", raw)
 	if err != nil {
 		t.Fatalf("importedAttributes() error: %v", err)
 	}

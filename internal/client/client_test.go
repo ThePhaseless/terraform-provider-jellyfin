@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"testing"
 )
@@ -355,6 +356,43 @@ func TestDirectoryExistsAsksValidatePathForADirectory(t *testing.T) {
 				t.Fatalf("DirectoryExists(%q) = %t, want %t", test.path, got, test.want)
 			}
 		})
+	}
+}
+
+func TestGetAvailableLibraryOptionsAsksForTheContentType(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/Libraries/AvailableOptions" || r.URL.Query().Get("libraryContentType") != "movies" {
+			t.Errorf("expected GET /Libraries/AvailableOptions?libraryContentType=movies, got %s %s", r.Method, r.URL)
+		}
+		writeJSON(t, w, map[string]any{
+			"SubtitleFetchers": []map[string]any{{"Name": "Open Subtitles", "DefaultEnabled": true}},
+			"TypeOptions": []map[string]any{{
+				"Type":                 "Movie",
+				"MetadataFetchers":     []map[string]any{{"Name": "TheMovieDb", "DefaultEnabled": true}},
+				"ImageFetchers":        []map[string]any{{"Name": "Screen Grabber", "DefaultEnabled": false}},
+				"SimilarItemProviders": []map[string]any{{"Name": "Local Genre/Tag", "DefaultEnabled": true}},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	got, err := NewClient(server.URL, "test-key").GetAvailableLibraryOptions(context.Background(), "movies")
+	if err != nil {
+		t.Fatalf("GetAvailableLibraryOptions() error = %v", err)
+	}
+	want := AvailableLibraryOptions{
+		SubtitleFetchers: []AvailableOption{{Name: "Open Subtitles"}},
+		TypeOptions: []AvailableLibraryTypeInfo{{
+			Type:                 "Movie",
+			MetadataFetchers:     []AvailableOption{{Name: "TheMovieDb"}},
+			ImageFetchers:        []AvailableOption{{Name: "Screen Grabber"}},
+			SimilarItemProviders: []AvailableOption{{Name: "Local Genre/Tag"}},
+		}},
+	}
+	if !reflect.DeepEqual(*got, want) {
+		t.Errorf("GetAvailableLibraryOptions() = %+v, want %+v", *got, want)
 	}
 }
 

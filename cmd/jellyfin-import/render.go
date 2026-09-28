@@ -9,11 +9,13 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/provider"
 )
 
@@ -28,19 +30,37 @@ var omittedAttributes = map[string][]string{
 	"jellyfin_livetv_configuration": {"media_locations_created"},
 }
 
+var sharedKeys = sync.OnceValues(func() (map[string]map[string]string, error) {
+	return provider.SharedKeys(context.Background())
+})
+
 // rendered reports whether the importer writes the attribute at attrPath of
-// resourceType into the configuration. Sensitive values stay out of
-// resources.tf.
-func rendered(resourceType, attrPath string, a schema.Attribute) bool {
-	return (a.IsOptional() || a.IsRequired()) && !a.IsSensitive() && !slices.Contains(omittedAttributes[resourceType], attrPath)
+// resourceType into the configuration, where null reports whether an
+// attribute of the same object reads null. Sensitive values stay out of
+// resources.tf. A deprecated attribute leaves the imported value to the
+// attribute that now writes its Jellyfin keys, unless that one reads null,
+// as it does where it cannot write them.
+func rendered(resourceType, attrPath string, a schema.Attribute, null func(name string) bool) bool {
+	if !a.IsOptional() && !a.IsRequired() || a.IsSensitive() || slices.Contains(omittedAttributes[resourceType], attrPath) {
+		return false
+	}
+	if a.GetDeprecationMessage() == "" {
+		return true
+	}
+	shared, err := sharedKeys()
+	by, ok := shared[resourceType][attrPath]
+	return err == nil && ok && null(by)
 }
 
 // importedAttributes renders the attributes of resourceType as the Read that
 // follows its import with importID reads them from raw, the document
-// Jellyfin serves, so the configuration sets exactly what the imported state
-// holds.
-func importedAttributes(ctx context.Context, resourceType, importID, raw string) (map[string]string, error) {
-	s, state, err := provider.ReadForImport(ctx, resourceType, importID, raw)
+// Jellyfin serves, and from what else c serves, so the configuration sets
+// exactly what the imported state holds.
+func importedAttributes(ctx context.Context, c *client.Client, resourceType, importID, raw string) (map[string]string, error) {
+	if _, err := sharedKeys(); err != nil {
+		return nil, err
+	}
+	s, state, err := provider.ReadForImport(ctx, c, resourceType, importID, raw)
 	if err != nil {
 		return nil, err
 	}
@@ -53,13 +73,14 @@ func importedAttributes(ctx context.Context, resourceType, importID, raw string)
 func renderAttributes(resourceType, parent string, attrs map[string]schema.Attribute, obj basetypes.ObjectValue, depth int) (map[string]string, error) {
 	out := map[string]string{}
 	values := obj.Attributes()
+	null := func(name string) bool { return values[name] == nil || values[name].IsNull() }
 	for name, a := range attrs {
 		p := name
 		if parent != "" {
 			p = parent + "." + name
 		}
 		v := values[name]
-		if !rendered(resourceType, p, a) || v == nil || v.IsNull() || v.IsUnknown() {
+		if !rendered(resourceType, p, a, null) || v == nil || v.IsNull() || v.IsUnknown() {
 			continue
 		}
 		s, err := renderValue(resourceType, p, a, v, depth)

@@ -44,6 +44,19 @@ func describeField(x *Binding, f *Field) string {
 	switch f.Mode {
 	case ModeIdentity, ModeNeverSent, ModeElsewhere:
 		return fmt.Sprintf("%s -> %s", f.Path, f.Mode)
+	case ModeComplement:
+		keys := make([]string, len(f.Shares))
+		for i, s := range f.Shares {
+			keys[i] = s.key()
+		}
+		line := fmt.Sprintf("%s -> %s.%s complement-of=%s", f.Path, x.Object, strings.Join(keys, "+"), f.Offered)
+		if f.Scope != nil {
+			line += "/" + f.Scope.Name
+		}
+		if f.Since != "" {
+			line += " since=" + f.Since
+		}
+		return line
 	}
 	line := fmt.Sprintf("%s -> %s.%s", f.Path, x.Object, strings.Join(f.KeyPath, "."))
 	var flags []string
@@ -74,6 +87,16 @@ func describeField(x *Binding, f *Field) string {
 	}
 	if f.CarryKey != "" {
 		flags = append(flags, fmt.Sprintf("carries=%s/%s", f.CarryKey, f.CarryBy))
+	}
+	for _, s := range f.Shares {
+		flags = append(flags, "orders="+s.key())
+	}
+	if f.Offered != "" {
+		spelt := "spelt-as=" + f.Offered
+		if f.Scope != nil {
+			spelt += "/" + f.Scope.Name
+		}
+		flags = append(flags, spelt)
 	}
 	if f.Document {
 		flags = append(flags, "document")

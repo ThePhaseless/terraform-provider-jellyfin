@@ -425,7 +425,7 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 		// Every trigger attribute the server returns is written out, because
 		// the resource removes unset trigger attributes from the server on
 		// apply.
-		attrs, err := importedAttributes(g.context(), "jellyfin_scheduled_task", task.ID, string(raw))
+		attrs, err := importedAttributes(g.context(), g.client, "jellyfin_scheduled_task", task.ID, string(raw))
 		if err != nil {
 			return nil, nil, fmt.Errorf("formatting task %s: %w", task.ID, err)
 		}
@@ -492,7 +492,7 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 			return nil, nil, fmt.Errorf("getting %s configuration: %w", s.name, err)
 		}
 		resourceType := "jellyfin_" + s.name + "_configuration"
-		attrs, err := importedAttributes(ctx, resourceType, s.name, raw)
+		attrs, err := importedAttributes(ctx, g.client, resourceType, s.name, raw)
 		if err != nil {
 			return nil, nil, fmt.Errorf("formatting %s configuration: %w", s.name, err)
 		}

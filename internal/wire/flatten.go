@@ -119,7 +119,7 @@ func (b *Binding) flattenNode(ctx context.Context, n *node, attrTypes map[string
 		case child == nil:
 			out[name] = pv
 		case child.field != nil:
-			v, d := readField(ctx, *child.field, doc, pv, t, at.AtName(name), trail)
+			v, d := b.readField(ctx, *child.field, doc, pv, t, at.AtName(name), trail)
 			diags.Append(d...)
 			out[name] = v
 		default:
@@ -141,13 +141,15 @@ func (b *Binding) flattenNode(ctx context.Context, n *node, attrTypes map[string
 	return obj, append(diags, d...)
 }
 
-func readField(ctx context.Context, d docField, doc map[string]json.RawMessage, prior attr.Value, t attr.Type, at path.Path, trail string) (attr.Value, diag.Diagnostics) {
+func (b *Binding) readField(ctx context.Context, d docField, doc map[string]json.RawMessage, prior attr.Value, t attr.Type, at path.Path, trail string) (attr.Value, diag.Diagnostics) {
 	f := d.f
 	switch f.Mode {
 	case ModeIdentity, ModeElsewhere:
 		return prior, nil
 	case ModeNeverSent:
 		return nullOf(ctx, t), nil
+	case ModeComplement:
+		return b.readComplement(ctx, d, doc, t, at)
 	}
 	keyTrail := trailOf(trail, d.keyPath)
 	var diags diag.Diagnostics

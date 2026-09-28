@@ -20,6 +20,9 @@ resource "jellyfin_system_configuration" "example" {
   metadata_options = [
     {
       item_type = "Movie"
+      # The enabled fetchers, in priority order; the others are disabled.
+      metadata_fetchers = ["TheMovieDb", "The Open Movie Database"]
+      image_fetchers    = ["TheMovieDb", "Embedded Image Extractor", "Screen Grabber"]
     }
   ]
 
@@ -117,13 +120,15 @@ Optional:
 
 Optional:
 
-- `disabled_image_fetchers` (List of String) Disabled image fetchers.
-- `disabled_metadata_fetchers` (List of String) Disabled metadata fetchers.
+- `disabled_image_fetchers` (List of String, Deprecated) Disabled image fetchers. Deprecated: list the enabled image fetchers in priority order in `image_fetchers` instead, which disables the rest. It will be removed in a future release.
+- `disabled_metadata_fetchers` (List of String, Deprecated) Disabled metadata fetchers. Deprecated: list the enabled metadata fetchers in priority order in `metadata_fetchers` instead, which disables the rest. It will be removed in a future release.
 - `disabled_metadata_savers` (List of String) Disabled metadata savers.
-- `image_fetcher_order` (List of String) Image fetcher order.
+- `image_fetcher_order` (List of String, Deprecated) Image fetcher order. Deprecated: list the enabled image fetchers in priority order in `image_fetchers` instead, which disables the rest. It will be removed in a future release.
+- `image_fetchers` (List of String) Enabled image fetchers for `item_type`, in priority order: Jellyfin asks the first one first and disables every other image fetcher it offers for the item type. Jellyfin applies them to items whose library has no `type_options` entry for their type. Each name must match one the server offers exactly, so it works only for an item type whose fetchers Jellyfin lists, such as Movie or Series; for any other, such as Person, it reads as null and setting it is an error, and `disabled_image_fetchers` and `image_fetcher_order` still apply. Jellyfin enables any image fetcher installed later, which then shows up as a change to this list. Conflicts with `disabled_image_fetchers` and `image_fetcher_order`, which it replaces.
 - `item_type` (String) Item type.
 - `local_metadata_reader_order` (List of String) Local metadata reader order.
-- `metadata_fetcher_order` (List of String) Metadata fetcher order.
+- `metadata_fetcher_order` (List of String, Deprecated) Metadata fetcher order. Deprecated: list the enabled metadata fetchers in priority order in `metadata_fetchers` instead, which disables the rest. It will be removed in a future release.
+- `metadata_fetchers` (List of String) Enabled metadata fetchers for `item_type`, in priority order: Jellyfin asks the first one first and disables every other metadata fetcher it offers for the item type. Jellyfin applies them to items whose library has no `type_options` entry for their type. Each name must match one the server offers exactly, so it works only for an item type whose fetchers Jellyfin lists, such as Movie or Series; for any other, such as Person, it reads as null and setting it is an error, and `disabled_metadata_fetchers` and `metadata_fetcher_order` still apply. Jellyfin enables any metadata fetcher installed later, which then shows up as a change to this list. Conflicts with `disabled_metadata_fetchers` and `metadata_fetcher_order`, which it replaces.
 
 
 <a id="nestedatt--path_substitutions"></a>

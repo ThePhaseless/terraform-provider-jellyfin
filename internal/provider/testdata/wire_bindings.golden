@@ -92,17 +92,18 @@ jellyfin_library library_options.save_local_metadata -> LibraryOptions.SaveLocal
 jellyfin_library library_options.save_local_thumbnail_sets -> never sent
 jellyfin_library library_options.season_zero_display_name -> LibraryOptions.SeasonZeroDisplayName string
 jellyfin_library library_options.subtitle_fetcher_order -> LibraryOptions.SubtitleFetcherOrder []string
+jellyfin_library library_options.subtitle_fetchers -> LibraryOptions.SubtitleFetcherOrder+DisabledSubtitleFetchers complement-of=SubtitleFetchers
 jellyfin_library library_options.type_options -> LibraryOptions.TypeOptions []#TypeOptions merge-by=type
 jellyfin_library library_options.type_options.image_fetcher_order -> TypeOptions.ImageFetcherOrder []string
-jellyfin_library library_options.type_options.image_fetchers -> TypeOptions.ImageFetchers []string
+jellyfin_library library_options.type_options.image_fetchers -> TypeOptions.ImageFetchers []string orders=ImageFetcherOrder spelt-as=ImageFetchers/type
 jellyfin_library library_options.type_options.image_options -> TypeOptions.ImageOptions []#ImageOption merge-by=type
 jellyfin_library library_options.type_options.image_options.limit -> ImageOption.Limit integer:int32
 jellyfin_library library_options.type_options.image_options.min_width -> ImageOption.MinWidth integer:int32
 jellyfin_library library_options.type_options.image_options.type -> ImageOption.Type #ImageType
 jellyfin_library library_options.type_options.metadata_fetcher_order -> TypeOptions.MetadataFetcherOrder []string
-jellyfin_library library_options.type_options.metadata_fetchers -> TypeOptions.MetadataFetchers []string
+jellyfin_library library_options.type_options.metadata_fetchers -> TypeOptions.MetadataFetchers []string orders=MetadataFetcherOrder spelt-as=MetadataFetchers/type
 jellyfin_library library_options.type_options.similar_item_provider_order -> TypeOptions.SimilarItemProviderOrder []string since=12.0
-jellyfin_library library_options.type_options.similar_item_providers -> TypeOptions.SimilarItemProviders []string since=12.0
+jellyfin_library library_options.type_options.similar_item_providers -> TypeOptions.SimilarItemProviders []string since=12.0 orders=SimilarItemProviderOrder spelt-as=SimilarItemProviders/type
 jellyfin_library library_options.type_options.type -> TypeOptions.Type string
 jellyfin_library name -> VirtualFolderInfo.Name string
 jellyfin_library paths -> VirtualFolderInfo.Locations []string
@@ -362,9 +363,11 @@ jellyfin_system_configuration metadata_options.disabled_image_fetchers -> Metada
 jellyfin_system_configuration metadata_options.disabled_metadata_fetchers -> MetadataOptions.DisabledMetadataFetchers []string
 jellyfin_system_configuration metadata_options.disabled_metadata_savers -> MetadataOptions.DisabledMetadataSavers []string
 jellyfin_system_configuration metadata_options.image_fetcher_order -> MetadataOptions.ImageFetcherOrder []string
+jellyfin_system_configuration metadata_options.image_fetchers -> MetadataOptions.ImageFetcherOrder+DisabledImageFetchers complement-of=ImageFetchers/item_type
 jellyfin_system_configuration metadata_options.item_type -> MetadataOptions.ItemType string
 jellyfin_system_configuration metadata_options.local_metadata_reader_order -> MetadataOptions.LocalMetadataReaderOrder []string
 jellyfin_system_configuration metadata_options.metadata_fetcher_order -> MetadataOptions.MetadataFetcherOrder []string
+jellyfin_system_configuration metadata_options.metadata_fetchers -> MetadataOptions.MetadataFetcherOrder+DisabledMetadataFetchers complement-of=MetadataFetchers/item_type
 jellyfin_system_configuration metadata_path -> ServerConfiguration.MetadataPath string
 jellyfin_system_configuration min_audiobook_resume -> ServerConfiguration.MinAudiobookResume integer:int32
 jellyfin_system_configuration min_resume_duration_seconds -> ServerConfiguration.MinResumeDurationSeconds integer:int32

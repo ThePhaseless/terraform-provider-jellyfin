@@ -129,7 +129,8 @@ resource "jellyfin_library" "test" {
 			},
 			// Insert an entry ahead of Movie and leave most of Movie unset: the
 			// unset values stay on the server's Movie entry and do not move to
-			// the new entry at Movie's former index.
+			// the new entry at Movie's former index, while Movie's metadata
+			// fetcher order follows its metadata_fetchers.
 			{
 				Config: `
 resource "jellyfin_library" "test" {
@@ -165,7 +166,7 @@ resource "jellyfin_library" "test" {
 					}),
 					testAccCheckLibraryTypeOptions(t, "TestMovies", "Movie", map[string][]string{
 						"MetadataFetchers":     {"The Open Movie Database"},
-						"MetadataFetcherOrder": {"TheMovieDb", "The Open Movie Database"},
+						"MetadataFetcherOrder": {"The Open Movie Database", "TheMovieDb"},
 						"ImageFetchers":        {"TheMovieDb"},
 						"ImageFetcherOrder":    {"TheMovieDb"},
 					}),
@@ -434,6 +435,185 @@ resource "jellyfin_library" "test" {
 			},
 		},
 	})
+}
+
+// A fresh server offers no subtitle fetchers, as they all come from plugins,
+// so subtitle_fetchers can only enable none of them here.
+func TestAccLibraryResourceProviderLists(t *testing.T) {
+	movie := tfjsonpath.New("library_options").AtMapKey("type_options").AtSliceIndex(0)
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckNoLibraryNamed(t, "TestLists"),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccLibraryProviderListsConfig(`
+    subtitle_fetchers = []
+    type_options = [{
+      type              = "Movie"
+      metadata_fetchers = ["TheMovieDb", "The Open Movie Database"]
+      image_fetchers    = ["TheMovieDb", "The Open Movie Database"]
+    }]`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.subtitle_fetchers.#", "0"),
+					testAccCheckLibraryOption(t, "TestLists", "DisabledSubtitleFetchers", `[]`),
+					testAccCheckLibraryOption(t, "TestLists", "SubtitleFetcherOrder", `[]`),
+					testAccCheckLibraryTypeOptions(t, "TestLists", "Movie", map[string][]string{
+						"MetadataFetchers":     {"TheMovieDb", "The Open Movie Database"},
+						"MetadataFetcherOrder": {"TheMovieDb", "The Open Movie Database"},
+						"ImageFetchers":        {"TheMovieDb", "The Open Movie Database"},
+						"ImageFetcherOrder":    {"TheMovieDb", "The Open Movie Database"},
+					}),
+				),
+			},
+			// Reordering a list reorders the server's order, and leaving a
+			// fetcher out disables it and moves it behind the enabled ones.
+			{
+				Config: testAccLibraryProviderListsConfig(`
+    subtitle_fetchers = []
+    type_options = [{
+      type              = "Movie"
+      metadata_fetchers = ["The Open Movie Database", "TheMovieDb"]
+      image_fetchers    = ["The Open Movie Database"]
+    }]`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectUnknownValue("jellyfin_library.test", movie.AtMapKey("metadata_fetcher_order")),
+						plancheck.ExpectUnknownValue("jellyfin_library.test", movie.AtMapKey("image_fetcher_order")),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.type_options.0.metadata_fetcher_order.0", "The Open Movie Database"),
+					testAccCheckLibraryTypeOptions(t, "TestLists", "Movie", map[string][]string{
+						"MetadataFetchers":     {"The Open Movie Database", "TheMovieDb"},
+						"MetadataFetcherOrder": {"The Open Movie Database", "TheMovieDb"},
+						"ImageFetchers":        {"The Open Movie Database"},
+						"ImageFetcherOrder":    {"The Open Movie Database", "TheMovieDb"},
+					}),
+				),
+			},
+			{
+				Config: testAccLibraryProviderListsConfig(`
+    subtitle_fetchers = []
+    type_options = [{
+      type              = "Movie"
+      metadata_fetchers = ["The Open Movie Database", "TheMovieDb"]
+      image_fetchers    = ["TheMovieDb", "The Open Movie Database"]
+    }]`),
+				Check: testAccCheckLibraryTypeOptions(t, "TestLists", "Movie", map[string][]string{
+					"ImageFetchers":     {"TheMovieDb", "The Open Movie Database"},
+					"ImageFetcherOrder": {"TheMovieDb", "The Open Movie Database"},
+				}),
+			},
+			// The deprecated order attribute still overrides the order the list
+			// would set.
+			{
+				Config: testAccLibraryProviderListsConfig(`
+    subtitle_fetchers = []
+    type_options = [{
+      type                   = "Movie"
+      metadata_fetchers      = ["TheMovieDb"]
+      metadata_fetcher_order = ["The Open Movie Database", "TheMovieDb"]
+      image_fetchers         = ["TheMovieDb", "The Open Movie Database"]
+    }]`),
+				Check: testAccCheckLibraryTypeOptions(t, "TestLists", "Movie", map[string][]string{
+					"MetadataFetchers":     {"TheMovieDb"},
+					"MetadataFetcherOrder": {"The Open Movie Database", "TheMovieDb"},
+				}),
+			},
+			{
+				Config: testAccLibraryProviderListsConfig(`
+    subtitle_fetchers          = []
+    disabled_subtitle_fetchers = []`),
+				ExpectError: regexp.MustCompile(`Attribute\s+"library_options.disabled_subtitle_fetchers"\s+cannot\s+be\s+specified\s+when\s+"library_options.subtitle_fetchers"\s+is\s+specified`),
+			},
+			{
+				Config:      testAccLibraryProviderListsConfig(`subtitle_fetchers = ["Open Subtitles"]`),
+				ExpectError: regexp.MustCompile(`library_options.subtitle_fetchers\s+lists\s+"Open\s+Subtitles",\s+which\s+is\s+not\s+one\s+of\s+the\s+SubtitleFetchers\s+the\s+Jellyfin\s+server\s+offers:\s+none`),
+			},
+			// The attributes subtitle_fetchers replaces still work alone.
+			{
+				Config: testAccLibraryProviderListsConfig(`
+    disabled_subtitle_fetchers = ["Open Subtitles"]
+    subtitle_fetcher_order     = ["Open Subtitles"]`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectUnknownValue("jellyfin_library.test", tfjsonpath.New("library_options").AtMapKey("subtitle_fetchers")),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.subtitle_fetchers.#", "0"),
+					testAccCheckLibraryOption(t, "TestLists", "DisabledSubtitleFetchers", `["Open Subtitles"]`),
+					testAccCheckLibraryOption(t, "TestLists", "SubtitleFetcherOrder", `["Open Subtitles"]`),
+				),
+			},
+		},
+	})
+}
+
+// Jellyfin enables a fetcher whatever the case of its name, but ranks only the
+// name it offers, and a new library's order holds no name to take it from.
+func TestAccLibraryResourceOrderTakesTheOfferedSpelling(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckNoLibraryNamed(t, "TestLists"),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccLibraryProviderListsConfig(`
+    type_options = [{
+      type           = "Movie"
+      image_fetchers = ["the open movie database", "TheMovieDb"]
+    }]`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.type_options.0.image_fetchers.0", "the open movie database"),
+					testAccCheckLibraryTypeOptions(t, "TestLists", "Movie", map[string][]string{
+						"ImageFetchers":     {"the open movie database", "TheMovieDb"},
+						"ImageFetcherOrder": {"the open movie database", "The Open Movie Database", "TheMovieDb"},
+					}),
+				),
+			},
+		},
+	})
+}
+
+func TestAccLibraryResourceCreateWithUnofferedSubtitleFetcherLeavesNoLibrary(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckNoLibraryNamed(t, "TestLists"),
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccLibraryProviderListsConfig(`subtitle_fetchers = ["Open Subtitles"]`),
+				ExpectError: regexp.MustCompile(`library_options.subtitle_fetchers\s+lists\s+"Open\s+Subtitles",\s+which\s+is\s+not\s+one\s+of\s+the\s+SubtitleFetchers\s+the\s+Jellyfin\s+server\s+offers:\s+none`),
+			},
+			{
+				PreConfig: func() {
+					if err := testAccCheckNoLibraryNamed(t, "TestLists")(nil); err != nil {
+						t.Fatal(err)
+					}
+				},
+				Config: testAccLibraryProviderListsConfig(`subtitle_fetchers = []`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction("jellyfin_library.test", plancheck.ResourceActionCreate)},
+				},
+			},
+		},
+	})
+}
+
+func testAccLibraryProviderListsConfig(options string) string {
+	return `
+resource "jellyfin_library" "test" {
+  name            = "TestLists"
+  collection_type = "movies"
+  paths           = ["/media/movies"]
+
+  library_options = {
+    ` + options + `
+  }
+}
+`
 }
 
 const testAccLibrarySimilarItemsConfig = `

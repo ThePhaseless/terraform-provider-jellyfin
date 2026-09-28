@@ -22,29 +22,35 @@ const providerSource = "ThePhaseless/jellyfin"
 
 // testAccUpgradeFromV038 applies config with provider 0.3.8 and then plans it
 // with this provider, which must find nothing to change in the state 0.3.8
-// saved or in what 0.3.8 sent Jellyfin.
-func testAccUpgradeFromV038(t *testing.T, config string) {
+// saved or in what 0.3.8 sent Jellyfin. This provider then runs the steps of
+// then.
+func testAccUpgradeFromV038(t *testing.T, config string, then ...resource.TestStep) {
 	t.Helper()
 
 	// The state 0.3.8 saves names the registry address; the in-process
 	// provider must answer to the same one for Terraform to plan it.
 	namespace, _, _ := strings.Cut(providerSource, "/")
 	t.Setenv(resource.EnvTfAccProviderNamespace, namespace)
-	resource.Test(t, resource.TestCase{
-		PreCheck: func() { testAccPreCheck(t) },
-		Steps: []resource.TestStep{
-			{
-				ExternalProviders: v038,
-				Config:            config,
-			},
-			{
-				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-				Config:                   config,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
-				},
+	steps := []resource.TestStep{
+		{
+			ExternalProviders: v038,
+			Config:            config,
+		},
+		{
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Config:                   config,
+			ConfigPlanChecks: resource.ConfigPlanChecks{
+				PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
 			},
 		},
+	}
+	for _, step := range then {
+		step.ProtoV6ProviderFactories = testAccProtoV6ProviderFactories
+		steps = append(steps, step)
+	}
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() { testAccPreCheck(t) },
+		Steps:    steps,
 	})
 }
 
@@ -166,6 +172,14 @@ resource "jellyfin_system_configuration" "test" {
 
   cast_receiver_applications = [{ id = "F007D354", name = "Stable" }]
   path_substitutions         = [{ from = "/mnt/upgrade", to = "/media/upgrade" }]
+
+  metadata_options = [{
+    item_type                  = "Movie"
+    disabled_metadata_fetchers = ["The Open Movie Database"]
+    metadata_fetcher_order     = ["The Open Movie Database", "TheMovieDb"]
+    disabled_image_fetchers    = []
+    image_fetcher_order        = ["TheMovieDb"]
+  }]
 }
 `},
 		{name: "livetv", config: `
@@ -242,6 +256,8 @@ resource "jellyfin_library" "test" {
     extract_chapters_during_library_scan = true
     disabled                             = false
     path_infos                           = [{ path = "/media/movies" }]
+    disabled_subtitle_fetchers           = ["Open Subtitles"]
+    subtitle_fetcher_order               = ["Open Subtitles", "Podnapisi"]
     type_options = [
       {
         type                   = "Movie"
@@ -260,6 +276,22 @@ resource "jellyfin_library" "test" {
 			testAccUpgradeFromV038(t, c.config)
 		})
 	}
+}
+
+// This provider plans a metadata_options entry inserted ahead of those 0.3.8
+// applied from the entry it displaces, which holds another item type.
+func TestAccUpgradeFromV038ThenInsertMetadataOptions(t *testing.T) {
+	testAccPreCheck(t)
+	testAccPutBackSystemConfiguration(t)
+
+	movie := `{ item_type = "Movie", disabled_metadata_fetchers = ["The Open Movie Database"], metadata_fetcher_order = ["The Open Movie Database", "TheMovieDb"] }`
+	testAccUpgradeFromV038(t, testAccSystemConfigurationEntriesConfig(movie), resource.TestStep{
+		Config: testAccSystemConfigurationEntriesConfig(`{ item_type = "BoxSet", disabled_metadata_fetchers = [] }`, movie),
+		Check: testAccCheckMetadataOptions(t, "Movie", map[string][]string{
+			"DisabledMetadataFetchers": {"The Open Movie Database"},
+			"MetadataFetcherOrder":     {"The Open Movie Database", "TheMovieDb"},
+		}),
+	})
 }
 
 // JellyfinSecurity loads only after a restart, so this runs with the restart

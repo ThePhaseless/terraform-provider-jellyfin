@@ -168,7 +168,7 @@ func compareConfigToState(resourceType, address, parent string, attrs map[string
 	for name, a := range attrs {
 		p := joinPath(parent, name)
 		stateValue := state[name]
-		if stateValue == nil || !rendered(resourceType, p, a) {
+		if stateValue == nil || !rendered(resourceType, p, a, func(name string) bool { return state[name] == nil }) {
 			continue
 		}
 		configValue, ok := config[name]

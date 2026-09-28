@@ -24,6 +24,7 @@ const (
 	ModeNeverSent
 	ModeElsewhere
 	ModeLegacy
+	ModeComplement
 )
 
 func (m Mode) String() string {
@@ -38,6 +39,8 @@ func (m Mode) String() string {
 		return "elsewhere"
 	case ModeLegacy:
 		return "legacy"
+	case ModeComplement:
+		return "complement"
 	}
 	return fmt.Sprintf("Mode(%d)", int(m))
 }
@@ -77,6 +80,13 @@ type Field struct {
 	CarryKey string
 	CarryBy  string
 	Document bool
+	// Shares holds the attributes of the same object whose keys Orders or
+	// Complement also writes, while those attributes have no value to write.
+	Shares []*Field
+	// Offered and Scope are what a Complement or Orders asks its
+	// AvailableFunc for.
+	Offered string
+	Scope   *Field
 }
 
 func (f *Field) key() string { return f.KeyPath[len(f.KeyPath)-1] }
@@ -131,6 +141,9 @@ type binder struct {
 	errs      []string
 	instances map[string]*instance
 	order     []string
+	// shared maps each attribute whose key Orders or Complement also writes
+	// to the attribute that does.
+	shared map[*Field]string
 }
 
 func (c *catalog) bind(s schema.Schema, root string, opts ...Option) (*Binding, error) {
@@ -141,7 +154,7 @@ func (c *catalog) bind(s schema.Schema, root string, opts ...Option) (*Binding, 
 	if _, ok := c.pinned[root]; !ok {
 		return nil, fmt.Errorf("the goldens have no schema %q", root)
 	}
-	bb := &binder{c: c, o: o, errs: slices.Clone(o.errs), instances: map[string]*instance{}}
+	bb := &binder{c: c, o: o, errs: slices.Clone(o.errs), instances: map[string]*instance{}, shared: map[*Field]string{}}
 	b := bb.object(root, "", s.Attributes, false, "", "")
 	bb.check()
 	if len(bb.errs) > 0 {
@@ -216,6 +229,11 @@ func (bb *binder) object(object, prefix string, attrs map[string]schema.Attribut
 		b.Fields = append(b.Fields, f)
 		b.AttrTypes[name] = a.GetType()
 		b.docs = append(b.docs, docField{attrPath: []string{name}, keyPath: f.KeyPath, f: f})
+	}
+	for _, f := range b.Fields {
+		if opt := bb.o.attrs[f.Path]; opt != nil && opt.shares != nil {
+			bb.share(b, f, opt)
+		}
 	}
 	sortDocs(b.docs)
 	b.nodes = trieOf(b.docs)
