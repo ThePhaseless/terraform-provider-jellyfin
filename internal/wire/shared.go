@@ -114,20 +114,16 @@ func (b *Binding) writeShared(ctx context.Context, doc map[string]json.RawMessag
 		return nil
 	}
 	targets := make([]docField, len(f.Shares))
-	left := false
+	leftToUs := make([]bool, len(f.Shares))
 	for i, s := range f.Shares {
 		sd, ok := b.docOf(s)
 		if !ok {
 			return missingShare(f)
 		}
-		targets[i] = sd
-		if sv, ok := valueAt(obj, sd.attrPath); !ok || !writes(s, sv, merged) {
-			left = true
-		} else {
-			targets[i].f = nil
-		}
+		sv, ok := valueAt(obj, sd.attrPath)
+		targets[i], leftToUs[i] = sd, !ok || !writes(s, sv, merged)
 	}
-	if !left {
+	if !slices.Contains(leftToUs, true) {
 		return nil
 	}
 	names, diags := stringsOf(ctx, v)
@@ -137,13 +133,13 @@ func (b *Binding) writeShared(ctx context.Context, doc map[string]json.RawMessag
 
 	var values [][]string
 	if f.Mode == ModeComplement {
-		scope, d := b.writtenScope(obj, f, at)
-		if d.HasError() {
-			return d
+		scope, diags := b.writtenScope(obj, f, at)
+		if diags.HasError() {
+			return diags
 		}
-		offered, d := b.offeredNames(ctx, f, scope, at, true)
-		if d.HasError() {
-			return d
+		offered, diags := offeredNames(ctx, f, scope, at, true)
+		if diags.HasError() {
+			return diags
 		}
 		for _, n := range names {
 			if !slices.Contains(offered, n) {
@@ -157,16 +153,16 @@ func (b *Binding) writeShared(ctx context.Context, doc map[string]json.RawMessag
 	}
 
 	for i, sd := range targets {
-		if sd.f == nil {
+		if !leftToUs[i] {
 			continue
 		}
-		raw, d := marshal(values[i])
-		if d.HasError() {
-			return d
+		raw, diags := marshal(values[i])
+		if diags.HasError() {
+			return diags
 		}
 		tflog.Debug(ctx, "Writing Jellyfin key", map[string]any{"attribute": at.String(), "key": trailOf(trail, sd.keyPath)})
-		if d := put(ctx, doc, sd.keyPath, raw); d.HasError() {
-			return d
+		if diags := put(ctx, doc, sd.keyPath, raw); diags.HasError() {
+			return diags
 		}
 	}
 	return nil
@@ -191,7 +187,7 @@ func (b *Binding) writtenScope(obj types.Object, f *Field, at path.Path) (string
 
 // offeredNames asks the context's AvailableFunc. A read takes a server that
 // does not list the names as offering none, which a write cannot.
-func (b *Binding) offeredNames(ctx context.Context, f *Field, scope string, at path.Path, write bool) ([]string, diag.Diagnostics) {
+func offeredNames(ctx context.Context, f *Field, scope string, at path.Path, write bool) ([]string, diag.Diagnostics) {
 	available, ok := ctx.Value(availableKey{}).(AvailableFunc)
 	if !ok || available == nil {
 		return nil, diag.Diagnostics{diag.NewErrorDiagnostic("Missing offered names",
@@ -264,7 +260,7 @@ func (b *Binding) readComplement(ctx context.Context, d docField, doc map[string
 			_ = json.Unmarshal(raw, &scope)
 		}
 	}
-	offered, diags := b.offeredNames(ctx, f, scope, at, false)
+	offered, diags := offeredNames(ctx, f, scope, at, false)
 	if diags.HasError() {
 		return nullOf(ctx, t), diags
 	}
