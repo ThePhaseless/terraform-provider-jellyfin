@@ -224,11 +224,12 @@ func dropped(n *node, planned, got basetypes.ObjectValue, at path.Path, diags *d
 }
 
 func droppedDiag(p path.Path, f *Field) diag.Diagnostic {
-	detail := fmt.Sprintf("The Jellyfin server read %s back as null after the write, so it did not keep the value. Jellyfin drops a value for a setting it does not have; check that the server's version has it.", p)
+	notKept := fmt.Sprintf("The Jellyfin server read %s back as null after the write, so it did not keep the value.", p)
+	hint := "Jellyfin drops a value for a setting it does not have; check that the server's version has it."
 	if f.Since != "" {
-		detail = fmt.Sprintf("The Jellyfin server read %s back as null after the write, so it did not keep the value. It needs Jellyfin %s or later; remove it from the configuration for older servers.", p, f.Since)
+		hint = fmt.Sprintf("It needs Jellyfin %s or later; remove it from the configuration for older servers.", f.Since)
 	}
-	return diag.NewAttributeErrorDiagnostic(p, "Value not kept by Jellyfin", detail)
+	return diag.NewAttributeErrorDiagnostic(p, "Value not kept by Jellyfin", notKept+" "+hint)
 }
 
 type gatedValue struct {
