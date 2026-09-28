@@ -58,22 +58,20 @@ func (m useStateForUnknownByKeyModifier) PlanModifyList(ctx context.Context, req
 		return
 	}
 
-	configured := knownObjects(req.ConfigValue.Elements())
-	if len(configured) != len(req.PlanValue.Elements()) {
+	configElements, elements := req.ConfigValue.Elements(), req.PlanValue.Elements()
+	if len(configElements) != len(elements) {
 		return
 	}
-	for i, e := range req.ConfigValue.Elements() {
+	configured := knownObjects(configElements)
+	for i, e := range configElements {
 		if e.IsUnknown() || m.hasUnknownKey(configured[i]) {
 			return
 		}
 	}
 
-	planned := knownObjects(req.PlanValue.Elements())
+	planned := knownObjects(elements)
 	prior := knownObjects(req.StateValue.Elements())
-	matches := make([]int, len(planned))
-	for i := range matches {
-		matches[i] = -1
-	}
+	matches := slices.Repeat([]int{-1}, len(planned))
 	claimed := make([]bool, len(prior))
 
 	for _, group := range m.keyGroups {
@@ -88,7 +86,6 @@ func (m useStateForUnknownByKeyModifier) PlanModifyList(ctx context.Context, req
 		}
 	}
 
-	elements := req.PlanValue.Elements()
 	changed := false
 	for i, j := range matches {
 		if j < 0 {
@@ -164,7 +161,7 @@ func fillUnsetInList(ctx context.Context, configured, planned, prior attr.Value)
 	}
 	cs, ps, ss := knownObjects(c.Elements()), knownObjects(p.Elements()), knownObjects(s.Elements())
 	claimed := make([]bool, len(ss))
-	elements := slices.Clone(p.Elements())
+	elements := p.Elements()
 	filled := false
 	for k := range elements {
 		key := nonNullNames(cs[k])

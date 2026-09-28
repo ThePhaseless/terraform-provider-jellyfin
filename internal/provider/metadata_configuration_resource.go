@@ -7,13 +7,10 @@ import (
 	"context"
 	"sync"
 
-	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
@@ -77,33 +74,15 @@ func (r *MetadataConfigurationResource) Configure(_ context.Context, req resourc
 }
 
 func (r *MetadataConfigurationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data MetadataConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *MetadataConfigurationResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var data MetadataConfigurationResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.read(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().read(ctx, req.State, &resp.State, &resp.Diagnostics)
 }
 
 func (r *MetadataConfigurationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data MetadataConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *MetadataConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
@@ -111,38 +90,21 @@ func (r *MetadataConfigurationResource) Delete(_ context.Context, _ resource.Del
 }
 
 func (r *MetadataConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("metadata"))...)
+	r.singleton().setID(ctx, &resp.State, &resp.Diagnostics)
 }
 
 // ModifyPlan gates each configured field on the Jellyfin version it needs, so
 // a field a later pin adds is checked without a change here.
 func (r *MetadataConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() {
-		return
-	}
-	if b := wireBinding(&resp.Diagnostics, metadataWire); b != nil {
-		resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
+	if !req.Plan.Raw.IsNull() {
+		checkServerHasFields(ctx, r.client, metadataWire, req.Config, &resp.Diagnostics)
 	}
 }
 
-func (r *MetadataConfigurationResource) apply(ctx context.Context, data *MetadataConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
-	b := wireBinding(diags, metadataWire)
-	if b == nil || !r.document().write(ctx, b, data, diags) {
-		return
+func (r *MetadataConfigurationResource) singleton() singleton[MetadataConfigurationResourceModel] {
+	return singleton[MetadataConfigurationResourceModel]{
+		id:   "metadata",
+		bind: metadataWire,
+		doc:  document{what: "metadata configuration", get: r.client.GetMetadataConfiguration, put: r.client.UpdateMetadataConfiguration},
 	}
-	data.ID = types.StringValue("metadata")
-	diags.Append(state.Set(ctx, data)...)
-}
-
-func (r *MetadataConfigurationResource) read(ctx context.Context, data *MetadataConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
-	b := wireBinding(diags, metadataWire)
-	if b == nil || !r.document().read(ctx, b, data, diags) {
-		return
-	}
-	data.ID = types.StringValue("metadata")
-	diags.Append(state.Set(ctx, data)...)
-}
-
-func (r *MetadataConfigurationResource) document() document {
-	return document{what: "metadata configuration", get: r.client.GetMetadataConfiguration, put: r.client.UpdateMetadataConfiguration}
 }

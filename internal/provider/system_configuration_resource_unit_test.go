@@ -5,7 +5,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,12 +15,9 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
-	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
-	"github.com/hashicorp/terraform-plugin-framework/resource"
 	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
@@ -31,11 +27,7 @@ import (
 )
 
 func TestUnitSystemConfigurationRoundTrip(t *testing.T) {
-	ctx := context.Background()
-	b, err := systemWire()
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := mustWire(t, systemWire)
 	fixture := `{
 		"EnableMetrics": true,
 		"EnableNormalizedItemByNameIds": false,
@@ -122,54 +114,34 @@ func TestUnitSystemConfigurationRoundTrip(t *testing.T) {
 
 	offered := testUnitOfferingByItemType(map[string][]string{"MetadataFetchers/Movie": {"TheMovieDb"}, "ImageFetchers/Movie": {"TheMovieDb"}})
 	data := readWireIn[SystemConfigurationResourceModel](offered, t, b, fixture)
-	base := map[string]json.RawMessage{}
-	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
-		t.Fatalf("write: %v", d)
-	}
-	checkSameJSON(t, base, fixture)
+	checkSameJSON(t, writeWire(t, b, &data), fixture)
 }
 
 func TestUnitSystemConfigurationEnumValidators(t *testing.T) {
-	ctx := context.Background()
-
-	var resp resource.SchemaResponse
-	(&SystemConfigurationResource{}).Schema(ctx, resource.SchemaRequest{}, &resp)
-	trickplay, ok := resp.Schema.Attributes["trickplay_options"].(rschema.SingleNestedAttribute)
+	attrs := schemaOf(&SystemConfigurationResource{}).Attributes
+	trickplay, ok := attrs["trickplay_options"].(rschema.SingleNestedAttribute)
 	if !ok {
-		t.Fatalf("trickplay_options attribute type = %T, want schema.SingleNestedAttribute", resp.Schema.Attributes["trickplay_options"])
+		t.Fatalf("trickplay_options attribute type = %T, want schema.SingleNestedAttribute", attrs["trickplay_options"])
 	}
 
 	for _, tc := range []struct {
-		path      path.Path
+		name      string
 		attribute rschema.Attribute
 		valid     string
 		wrongCase string
 	}{
-		{path.Root("image_saving_convention"), resp.Schema.Attributes["image_saving_convention"], "Compatible", "compatible"},
-		{path.Root("chapter_image_resolution"), resp.Schema.Attributes["chapter_image_resolution"], "P720", "p720"},
-		{path.Root("trickplay_options").AtName("scan_behavior"), trickplay.Attributes["scan_behavior"], "Blocking", "blocking"},
-		{path.Root("trickplay_options").AtName("process_priority"), trickplay.Attributes["process_priority"], "Idle", "idle"},
+		{"image_saving_convention", attrs["image_saving_convention"], "Compatible", "compatible"},
+		{"chapter_image_resolution", attrs["chapter_image_resolution"], "P720", "p720"},
+		{"trickplay_options.scan_behavior", trickplay.Attributes["scan_behavior"], "Blocking", "blocking"},
+		{"trickplay_options.process_priority", trickplay.Attributes["process_priority"], "Idle", "idle"},
 	} {
 		attr, ok := tc.attribute.(rschema.StringAttribute)
 		if !ok {
-			t.Fatalf("%s attribute type = %T, want schema.StringAttribute", tc.path, tc.attribute)
+			t.Fatalf("%s attribute type = %T, want schema.StringAttribute", tc.name, tc.attribute)
 		}
-
-		for value, wantError := range map[string]bool{tc.valid: false, "": true, tc.wrongCase: true} {
-			var diags diag.Diagnostics
-			for _, v := range attr.Validators {
-				vresp := validator.StringResponse{}
-				v.ValidateString(ctx, validator.StringRequest{
-					Path:        tc.path,
-					ConfigValue: types.StringValue(value),
-				}, &vresp)
-				diags.Append(vresp.Diagnostics...)
-			}
-
-			if diags.HasError() != wantError {
-				t.Errorf("%s = %q: got error %t, want %t: %v", tc.path, value, diags.HasError(), wantError, diags)
-			}
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			testUnitAssertStringValidation(t, attr, map[string]bool{tc.valid: false, "": true, tc.wrongCase: true})
+		})
 	}
 }
 
@@ -189,11 +161,10 @@ func testUnitMetadataOptions(itemType string, lists types.List) metadataOptionsM
 
 func TestUnitPlanMetadataOptionsByItemType(t *testing.T) {
 	ctx := context.Background()
-	var resp resource.SchemaResponse
-	(&SystemConfigurationResource{}).Schema(ctx, resource.SchemaRequest{}, &resp)
-	nested, ok := resp.Schema.Attributes["metadata_options"].(rschema.ListNestedAttribute)
+	attrs := schemaOf(&SystemConfigurationResource{}).Attributes
+	nested, ok := attrs["metadata_options"].(rschema.ListNestedAttribute)
 	if !ok {
-		t.Fatalf("metadata_options attribute type = %T, want schema.ListNestedAttribute", resp.Schema.Attributes["metadata_options"])
+		t.Fatalf("metadata_options attribute type = %T, want schema.ListNestedAttribute", attrs["metadata_options"])
 	}
 	list := func(entries ...metadataOptionsModel) types.List {
 		return testUnitList(t, nested.NestedObject.Type(), entries)
@@ -285,22 +256,21 @@ func TestUnitPlanMetadataOptionsByItemType(t *testing.T) {
 func TestUnitSystemConfigurationEntriesAndRenamedKeysCopyOnlyNonNullPriorValues(t *testing.T) {
 	ctx := context.Background()
 
-	var resp resource.SchemaResponse
-	(&SystemConfigurationResource{}).Schema(ctx, resource.SchemaRequest{}, &resp)
-	trickplay, ok := resp.Schema.Attributes["trickplay_options"].(rschema.SingleNestedAttribute)
+	s := schemaOf(&SystemConfigurationResource{})
+	trickplay, ok := s.Attributes["trickplay_options"].(rschema.SingleNestedAttribute)
 	if !ok {
-		t.Fatalf("trickplay_options attribute type = %T, want schema.SingleNestedAttribute", resp.Schema.Attributes["trickplay_options"])
+		t.Fatalf("trickplay_options attribute type = %T, want schema.SingleNestedAttribute", s.Attributes["trickplay_options"])
 	}
 
 	attributes := map[string]rschema.Attribute{
-		"enable_normalized_item_by_name_ids": resp.Schema.Attributes["enable_normalized_item_by_name_ids"],
-		"enable_case_sensitive_item_ids":     resp.Schema.Attributes["enable_case_sensitive_item_ids"],
+		"enable_normalized_item_by_name_ids": s.Attributes["enable_normalized_item_by_name_ids"],
+		"enable_case_sensitive_item_ids":     s.Attributes["enable_case_sensitive_item_ids"],
 		"trickplay_options.process_priority": trickplay.Attributes["process_priority"],
 	}
 	for _, list := range []string{"metadata_options", "content_types", "path_substitutions", "cast_receiver_applications"} {
-		nested, ok := resp.Schema.Attributes[list].(rschema.ListNestedAttribute)
+		nested, ok := s.Attributes[list].(rschema.ListNestedAttribute)
 		if !ok {
-			t.Fatalf("%s attribute type = %T, want schema.ListNestedAttribute", list, resp.Schema.Attributes[list])
+			t.Fatalf("%s attribute type = %T, want schema.ListNestedAttribute", list, s.Attributes[list])
 		}
 		for name, a := range nested.NestedObject.Attributes {
 			attributes[list+"[*]."+name] = a
@@ -309,10 +279,10 @@ func TestUnitSystemConfigurationEntriesAndRenamedKeysCopyOnlyNonNullPriorValues(
 
 	// UseStateForUnknown leaves the plan alone unless the resource has state.
 	nulls := map[string]tftypes.Value{}
-	for name, a := range resp.Schema.Attributes {
+	for name, a := range s.Attributes {
 		nulls[name] = tftypes.NewValue(a.GetType().TerraformType(ctx), nil)
 	}
-	state := tfsdk.State{Schema: resp.Schema, Raw: tftypes.NewValue(resp.Schema.Type().TerraformType(ctx), nulls)}
+	state := tfsdk.State{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nulls)}
 	config := tfsdk.Config(state)
 	pathOf := func(name string) path.Path {
 		if list, attr, ok := strings.Cut(name, "[*]."); ok {
@@ -579,31 +549,18 @@ func TestUnitSystemReadSurvivesAFailingOfferedProvidersLookup(t *testing.T) {
 // the write must leave as served rather than reset to Jellyfin's defaults.
 func TestUnitSystemTrickplayOptionsKeepWhatTheyLeaveUnset(t *testing.T) {
 	ctx := context.Background()
-	b, err := systemWire()
+	b := mustWire(t, systemWire)
+	const served = `{"TrickplayOptions": {"EnableHwAcceleration": true, "Interval": 10000, "WidthResolutions": [320, 640], "JpegQuality": 80}}`
+	doc, err := parseJSONObject(served)
 	if err != nil {
 		t.Fatal(err)
 	}
-	const served = `{"TrickplayOptions": {"EnableHwAcceleration": true, "Interval": 10000, "WidthResolutions": [320, 640], "JpegQuality": 80}}`
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(served), &doc); err != nil {
-		t.Fatal(err)
-	}
-	read, d := b.Flatten(ctx, doc, types.ObjectNull(b.AttrTypes))
-	if d.HasError() {
-		t.Fatal(d)
-	}
+	read := flattenFromNull(ctx, t, b, served)
 	trickplay, ok := read.Attributes()["trickplay_options"].(types.Object)
 	if !ok {
 		t.Fatal("trickplay_options is not an object")
 	}
-	planned := map[string]attr.Value{}
-	for name, typ := range trickplay.AttributeTypes(ctx) {
-		v, err := typ.ValueFromTerraform(ctx, tftypes.NewValue(typ.TerraformType(ctx), tftypes.UnknownValue))
-		if err != nil {
-			t.Fatal(err)
-		}
-		planned[name] = v
-	}
+	planned := testUnitUnknownAttributes(t, trickplay.AttributeTypes(ctx))
 	planned["interval"] = types.Int64Value(5000)
 	attrs := read.Attributes()
 	attrs["trickplay_options"] = types.ObjectValueMust(trickplay.AttributeTypes(ctx), planned)
@@ -613,4 +570,18 @@ func TestUnitSystemTrickplayOptionsKeepWhatTheyLeaveUnset(t *testing.T) {
 		t.Fatal(d)
 	}
 	checkSameJSON(t, doc["TrickplayOptions"], `{"EnableHwAcceleration": true, "Interval": 5000, "WidthResolutions": [320, 640], "JpegQuality": 80}`)
+}
+
+func testUnitUnknownAttributes(t *testing.T, attrTypes map[string]attr.Type) map[string]attr.Value {
+	t.Helper()
+	ctx := context.Background()
+	values := make(map[string]attr.Value, len(attrTypes))
+	for name, typ := range attrTypes {
+		v, err := typ.ValueFromTerraform(ctx, tftypes.NewValue(typ.TerraformType(ctx), tftypes.UnknownValue))
+		if err != nil {
+			t.Fatal(err)
+		}
+		values[name] = v
+	}
+	return values
 }

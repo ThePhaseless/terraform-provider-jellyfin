@@ -24,7 +24,7 @@ import (
 
 func TestAccLibraryResource(t *testing.T) {
 	testAccPreCheck(t)
-	similarItemsSupported := testAccLibrarySimilarItemsSupported(t)
+	similarItemsSupported := testAccJellyfin12OrLater(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -46,13 +46,7 @@ resource "jellyfin_library" "test" {
 			},
 			// Update library_options in place.
 			{
-				Config: `
-resource "jellyfin_library" "test" {
-  name            = "TestMovies"
-  collection_type = "movies"
-  paths           = ["/media/movies"]
-
-  library_options = {
+				Config: testAccLibraryConfig("TestMovies", `
     enable_realtime_monitor = false
     save_local_metadata     = false
     type_options = [
@@ -62,10 +56,7 @@ resource "jellyfin_library" "test" {
         image_fetchers      = ["TheMovieDb"]
         image_fetcher_order = ["TheMovieDb"]
       }
-    ]
-  }
-}
-`,
+    ]`),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.enable_realtime_monitor", "false"),
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.type_options.0.type", "Movie"),
@@ -73,13 +64,7 @@ resource "jellyfin_library" "test" {
 				),
 			},
 			{
-				Config: `
-resource "jellyfin_library" "test" {
-  name            = "TestMovies"
-  collection_type = "movies"
-  paths           = ["/media/movies"]
-
-  library_options = {
+				Config: testAccLibraryConfig("TestMovies", `
     enable_realtime_monitor = false
     save_local_metadata     = false
     path_infos              = [{ path = "/media/movies" }]
@@ -96,10 +81,7 @@ resource "jellyfin_library" "test" {
         type          = "Trailer"
         image_options = []
       }
-    ]
-  }
-}
-`,
+    ]`),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.path_infos.0.path", "/media/movies"),
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.type_options.0.metadata_fetcher_order.1", "The Open Movie Database"),
@@ -126,13 +108,7 @@ resource "jellyfin_library" "test" {
 			// Insert an entry ahead of Movie: Movie's unset values stay on Movie,
 			// not on the entry at its old index.
 			{
-				Config: `
-resource "jellyfin_library" "test" {
-  name            = "TestMovies"
-  collection_type = "movies"
-  paths           = ["/media/movies"]
-
-  library_options = {
+				Config: testAccLibraryConfig("TestMovies", `
     enable_realtime_monitor = false
     save_local_metadata     = false
     type_options = [
@@ -144,10 +120,7 @@ resource "jellyfin_library" "test" {
         type              = "Movie"
         metadata_fetchers = ["The Open Movie Database"]
       }
-    ]
-  }
-}
-`,
+    ]`),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.type_options.0.type", "Trailer"),
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.type_options.0.image_fetchers.#", "0"),
@@ -317,7 +290,7 @@ func TestAccLibraryResourceDocumentedExample(t *testing.T) {
 
 func TestAccLibraryResourceMappedAndUnsupportedOptions(t *testing.T) {
 	testAccPreCheck(t)
-	similarItemsSupported := testAccLibrarySimilarItemsSupported(t)
+	similarItemsSupported := testAccJellyfin12OrLater(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -326,32 +299,12 @@ func TestAccLibraryResourceMappedAndUnsupportedOptions(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Rejected at plan time, before anything is created.
 			{
-				Config: `
-resource "jellyfin_library" "test" {
-  name            = "TestOptions"
-  collection_type = "movies"
-  paths           = ["/media/movies"]
-
-  library_options = {
-    import_missing_episodes = true
-  }
-}
-`,
+				Config:      testAccLibraryConfig("TestOptions", `import_missing_episodes = true`),
 				ExpectError: regexp.MustCompile(`Unsupported\s+library\s+option`),
 			},
 			// Jellyfin 10.10 removed network paths.
 			{
-				Config: `
-resource "jellyfin_library" "test" {
-  name            = "TestOptions"
-  collection_type = "movies"
-  paths           = ["/media/movies"]
-
-  library_options = {
-    path_infos = [{ path = "/media/movies", network_path = "smb://nas/movies" }]
-  }
-}
-`,
+				Config:      testAccLibraryConfig("TestOptions", `path_infos = [{ path = "/media/movies", network_path = "smb://nas/movies" }]`),
 				ExpectError: testAccLibraryNetworkPathRejected,
 			},
 			// A value unknown at plan time is checked when Terraform plans again
@@ -361,32 +314,12 @@ resource "jellyfin_library" "test" {
 resource "terraform_data" "network_path" {
   input = "smb://nas/movies"
 }
-
-resource "jellyfin_library" "test" {
-  name            = "TestOptions"
-  collection_type = "movies"
-  paths           = ["/media/movies"]
-
-  library_options = {
-    path_infos = [{ path = "/media/movies", network_path = terraform_data.network_path.output }]
-  }
-}
-`,
+` + testAccLibraryConfig("TestOptions", `path_infos = [{ path = "/media/movies", network_path = terraform_data.network_path.output }]`),
 				ExpectError: testAccLibraryNetworkPathRejected,
 			},
 			{
-				SkipFunc: func() (bool, error) { return similarItemsSupported, nil },
-				Config: `
-resource "jellyfin_library" "test" {
-  name            = "TestOptions"
-  collection_type = "movies"
-  paths           = ["/media/movies"]
-
-  library_options = {
-    type_options = [{ type = "Movie", similar_item_providers = ["Local Genre/Tag"] }]
-  }
-}
-`,
+				SkipFunc:    func() (bool, error) { return similarItemsSupported, nil },
+				Config:      testAccLibraryConfig("TestOptions", `type_options = [{ type = "Movie", similar_item_providers = ["Local Genre/Tag"] }]`),
 				ExpectError: testAccLibrarySimilarItemsRejected,
 			},
 			// disabled and extract_chapters_... map to Enabled and
@@ -397,19 +330,10 @@ resource "jellyfin_library" "test" {
 						t.Fatalf("a rejected configuration created the library: %v", err)
 					}
 				},
-				Config: `
-resource "jellyfin_library" "test" {
-  name            = "TestOptions"
-  collection_type = "movies"
-  paths           = ["/media/movies"]
-
-  library_options = {
+				Config: testAccLibraryConfig("TestOptions", `
     disabled                             = true
     extract_chapters_during_library_scan = true
-    path_infos                           = [{ path = "/media/movies" }]
-  }
-}
-`,
+    path_infos                           = [{ path = "/media/movies" }]`),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction("jellyfin_library.test", plancheck.ResourceActionCreate),
@@ -439,7 +363,7 @@ func TestAccLibraryResourceProviderLists(t *testing.T) {
 		CheckDestroy:             testAccCheckNoLibraryNamed(t, "TestLists"),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccLibraryProviderListsConfig(`
+				Config: testAccLibraryConfig("TestLists", `
     subtitle_fetchers = []
     type_options = [{
       type              = "Movie"
@@ -461,7 +385,7 @@ func TestAccLibraryResourceProviderLists(t *testing.T) {
 			// Reordering a list reorders the server's order, and leaving a
 			// fetcher out disables it and moves it behind the enabled ones.
 			{
-				Config: testAccLibraryProviderListsConfig(`
+				Config: testAccLibraryConfig("TestLists", `
     subtitle_fetchers = []
     type_options = [{
       type              = "Movie"
@@ -485,7 +409,7 @@ func TestAccLibraryResourceProviderLists(t *testing.T) {
 				),
 			},
 			{
-				Config: testAccLibraryProviderListsConfig(`
+				Config: testAccLibraryConfig("TestLists", `
     subtitle_fetchers = []
     type_options = [{
       type              = "Movie"
@@ -500,7 +424,7 @@ func TestAccLibraryResourceProviderLists(t *testing.T) {
 			// The deprecated order attribute still overrides the order the list
 			// would set.
 			{
-				Config: testAccLibraryProviderListsConfig(`
+				Config: testAccLibraryConfig("TestLists", `
     subtitle_fetchers = []
     type_options = [{
       type                   = "Movie"
@@ -514,18 +438,18 @@ func TestAccLibraryResourceProviderLists(t *testing.T) {
 				}),
 			},
 			{
-				Config: testAccLibraryProviderListsConfig(`
+				Config: testAccLibraryConfig("TestLists", `
     subtitle_fetchers          = []
     disabled_subtitle_fetchers = []`),
 				ExpectError: regexp.MustCompile(`Attribute\s+"library_options.disabled_subtitle_fetchers"\s+cannot\s+be\s+specified\s+when\s+"library_options.subtitle_fetchers"\s+is\s+specified`),
 			},
 			{
-				Config:      testAccLibraryProviderListsConfig(`subtitle_fetchers = ["Open Subtitles"]`),
-				ExpectError: regexp.MustCompile(`library_options.subtitle_fetchers\s+lists\s+"Open\s+Subtitles",\s+which\s+is\s+not\s+one\s+of\s+the\s+SubtitleFetchers\s+the\s+Jellyfin\s+server\s+offers:\s+none`),
+				Config:      testAccLibraryConfig("TestLists", `subtitle_fetchers = ["Open Subtitles"]`),
+				ExpectError: testAccLibraryUnofferedSubtitleFetcher,
 			},
 			// The attributes subtitle_fetchers replaces still work alone.
 			{
-				Config: testAccLibraryProviderListsConfig(`
+				Config: testAccLibraryConfig("TestLists", `
     disabled_subtitle_fetchers = ["Open Subtitles"]
     subtitle_fetcher_order     = ["Open Subtitles"]`),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
@@ -552,7 +476,7 @@ func TestAccLibraryResourceOrderTakesTheOfferedSpelling(t *testing.T) {
 		CheckDestroy:             testAccCheckNoLibraryNamed(t, "TestLists"),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccLibraryProviderListsConfig(`
+				Config: testAccLibraryConfig("TestLists", `
     type_options = [{
       type           = "Movie"
       image_fetchers = ["the open movie database", "TheMovieDb"]
@@ -576,8 +500,8 @@ func TestAccLibraryResourceCreateWithUnofferedSubtitleFetcherLeavesNoLibrary(t *
 		CheckDestroy:             testAccCheckNoLibraryNamed(t, "TestLists"),
 		Steps: []resource.TestStep{
 			{
-				Config:      testAccLibraryProviderListsConfig(`subtitle_fetchers = ["Open Subtitles"]`),
-				ExpectError: regexp.MustCompile(`library_options.subtitle_fetchers\s+lists\s+"Open\s+Subtitles",\s+which\s+is\s+not\s+one\s+of\s+the\s+SubtitleFetchers\s+the\s+Jellyfin\s+server\s+offers:\s+none`),
+				Config:      testAccLibraryConfig("TestLists", `subtitle_fetchers = ["Open Subtitles"]`),
+				ExpectError: testAccLibraryUnofferedSubtitleFetcher,
 			},
 			{
 				PreConfig: func() {
@@ -585,7 +509,7 @@ func TestAccLibraryResourceCreateWithUnofferedSubtitleFetcherLeavesNoLibrary(t *
 						t.Fatal(err)
 					}
 				},
-				Config: testAccLibraryProviderListsConfig(`subtitle_fetchers = []`),
+				Config: testAccLibraryConfig("TestLists", `subtitle_fetchers = []`),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction("jellyfin_library.test", plancheck.ResourceActionCreate)},
 				},
@@ -594,10 +518,10 @@ func TestAccLibraryResourceCreateWithUnofferedSubtitleFetcherLeavesNoLibrary(t *
 	})
 }
 
-func testAccLibraryProviderListsConfig(options string) string {
+func testAccLibraryConfig(name, options string) string {
 	return `
 resource "jellyfin_library" "test" {
-  name            = "TestLists"
+  name            = "` + name + `"
   collection_type = "movies"
   paths           = ["/media/movies"]
 
@@ -608,13 +532,7 @@ resource "jellyfin_library" "test" {
 `
 }
 
-const testAccLibrarySimilarItemsConfig = `
-resource "jellyfin_library" "test" {
-  name            = "TestMovies"
-  collection_type = "movies"
-  paths           = ["/media/movies"]
-
-  library_options = {
+var testAccLibrarySimilarItemsConfig = testAccLibraryConfig("TestMovies", `
     enable_realtime_monitor = false
     save_local_metadata     = false
     type_options = [
@@ -626,10 +544,9 @@ resource "jellyfin_library" "test" {
         similar_item_providers      = ["Local Genre/Tag"]
         similar_item_provider_order = ["Local Genre/Tag", "TheMovieDb"]
       }
-    ]
-  }
-}
-`
+    ]`)
+
+var testAccLibraryUnofferedSubtitleFetcher = regexp.MustCompile(`library_options.subtitle_fetchers\s+lists\s+"Open\s+Subtitles",\s+which\s+is\s+not\s+one\s+of\s+the\s+SubtitleFetchers\s+the\s+Jellyfin\s+server\s+offers:\s+none`)
 
 var testAccLibraryNetworkPathRejected = regexp.MustCompile(`Jellyfin\s+10\.10\s+removed\s+network\s+paths[\s\S]*Remove\s+library_options\.path_infos\[0\]\.network_path`)
 
@@ -637,27 +554,18 @@ var testAccLibraryNetworkPathRejected = regexp.MustCompile(`Jellyfin\s+10\.10\s+
 // one reported after apply when the server drops the settings.
 var testAccLibrarySimilarItemsRejected = regexp.MustCompile(`similar\s+item\s+providers\s+need\s+Jellyfin\s+12\s+or\s+later\.\s+Remove\s+library_options\.type_options\[0\]\.similar_item_providers`)
 
-func testAccLibrarySimilarItemsSupported(t *testing.T) bool {
-	t.Helper()
-	return testAccJellyfinVersionAtLeast(t, "12")
-}
-
 // testAccCheckLibraryTypeOptions checks string lists of the server's type
 // options entry, where values the configuration leaves unset live.
 func testAccCheckLibraryTypeOptions(t *testing.T, library, typ string, want map[string][]string) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		folders, err := testAccClient(t).GetVirtualFolders(context.Background())
+		served, err := testAccServedLibraryOptions(t, library)
 		if err != nil {
 			return err
-		}
-		idx := slices.IndexFunc(folders, func(f client.VirtualFolder) bool { return f.Name == library })
-		if idx < 0 {
-			return fmt.Errorf("library %q not found", library)
 		}
 		var opts struct {
 			TypeOptions []map[string]json.RawMessage
 		}
-		if err := json.Unmarshal(folders[idx].LibraryOptions, &opts); err != nil {
+		if err := json.Unmarshal(served, &opts); err != nil {
 			return fmt.Errorf("parsing library options of %q: %w", library, err)
 		}
 		entry := slices.IndexFunc(opts.TypeOptions, func(e map[string]json.RawMessage) bool {
@@ -686,16 +594,12 @@ func testAccCheckLibraryTypeOptions(t *testing.T, library, typ string, want map[
 // a JSON literal, to check the key the provider writes an attribute to.
 func testAccCheckLibraryOption(t *testing.T, library, key, want string) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		folders, err := testAccClient(t).GetVirtualFolders(context.Background())
+		served, err := testAccServedLibraryOptions(t, library)
 		if err != nil {
 			return err
 		}
-		idx := slices.IndexFunc(folders, func(f client.VirtualFolder) bool { return f.Name == library })
-		if idx < 0 {
-			return fmt.Errorf("library %q not found", library)
-		}
 		var opts map[string]json.RawMessage
-		if err := json.Unmarshal(folders[idx].LibraryOptions, &opts); err != nil {
+		if err := json.Unmarshal(served, &opts); err != nil {
 			return fmt.Errorf("parsing library options of %q: %w", library, err)
 		}
 		if got := string(opts[key]); got != want {
@@ -703,6 +607,18 @@ func testAccCheckLibraryOption(t *testing.T, library, key, want string) resource
 		}
 		return nil
 	}
+}
+
+func testAccServedLibraryOptions(t *testing.T, library string) (json.RawMessage, error) {
+	folders, err := testAccClient(t).GetVirtualFolders(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	idx := slices.IndexFunc(folders, func(f client.VirtualFolder) bool { return f.Name == library })
+	if idx < 0 {
+		return nil, fmt.Errorf("library %q not found", library)
+	}
+	return folders[idx].LibraryOptions, nil
 }
 
 // testAccCheckNoLibraryNamed also catches the numbered copies Jellyfin makes

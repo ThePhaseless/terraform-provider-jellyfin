@@ -189,9 +189,11 @@ func (r *JellyfinSecurityPluginConfigurationResource) Wire() (*wire.Binding, err
 func NewJellyfinSecurityPluginConfigurationResource() resource.Resource {
 	return &JellyfinSecurityPluginConfigurationResource{}
 }
+
 func (r *JellyfinSecurityPluginConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_security_plugin_configuration"
 }
+
 func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	sensitiveString := func(desc string) schema.StringAttribute {
 		return schema.StringAttribute{
@@ -417,33 +419,11 @@ func (r *JellyfinSecurityPluginConfigurationResource) Configure(_ context.Contex
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data JellyfinSecurityPluginConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	version, ok := r.requireInstalled(ctx, &resp.Diagnostics)
-	if !ok {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	warnIfNewerThanSupported(version, &resp.Diagnostics)
+	r.apply(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var data JellyfinSecurityPluginConfigurationResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.read(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.read(ctx, req.State, &resp.State, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -454,23 +434,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) Read(ctx context.Context, 
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data JellyfinSecurityPluginConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	version, ok := r.requireInstalled(ctx, &resp.Diagnostics)
-	if !ok {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	warnIfNewerThanSupported(version, &resp.Diagnostics)
+	r.apply(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
@@ -521,13 +485,26 @@ func warnIfNewerThanSupported(version string, diags *diag.Diagnostics) {
 	}
 }
 
-func (r *JellyfinSecurityPluginConfigurationResource) apply(ctx context.Context, data *JellyfinSecurityPluginConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+func (r *JellyfinSecurityPluginConfigurationResource) apply(ctx context.Context, plan tfsdk.Plan, state *tfsdk.State, diags *diag.Diagnostics) {
+	var data JellyfinSecurityPluginConfigurationResourceModel
+	diags.Append(plan.Get(ctx, &data)...)
+	if diags.HasError() {
+		return
+	}
+	version, ok := r.requireInstalled(ctx, diags)
+	if !ok {
+		return
+	}
 	b := wireBinding(diags, securityPluginWire)
-	if b == nil || !r.document(data.PluginID.ValueString()).write(ctx, b, data, diags) {
+	if b == nil || !r.document(data.PluginID.ValueString()).write(ctx, b, &data, diags) {
 		return
 	}
 	data.ID = data.PluginID
-	diags.Append(state.Set(ctx, data)...)
+	diags.Append(state.Set(ctx, &data)...)
+	if diags.HasError() {
+		return
+	}
+	warnIfNewerThanSupported(version, diags)
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) document(pluginID string) document {
@@ -542,26 +519,23 @@ func (r *JellyfinSecurityPluginConfigurationResource) document(pluginID string) 
 	}
 }
 
-func (r *JellyfinSecurityPluginConfigurationResource) read(ctx context.Context, data *JellyfinSecurityPluginConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
+func (r *JellyfinSecurityPluginConfigurationResource) read(ctx context.Context, prior tfsdk.State, state *tfsdk.State, diags *diag.Diagnostics) {
+	var data JellyfinSecurityPluginConfigurationResourceModel
+	diags.Append(prior.Get(ctx, &data)...)
+	if diags.HasError() {
+		return
+	}
 	b := wireBinding(diags, securityPluginWire)
 	if b == nil {
 		return
 	}
-
-	current, err := r.client.GetPluginConfiguration(ctx, data.PluginID.ValueString())
-	if err != nil {
-		if client.IsNotFound(err) {
-			state.RemoveResource(ctx)
-			return
-		}
-		diags.AddError("Failed to read JellyfinSecurity plugin configuration", err.Error())
+	doc := r.document(data.PluginID.ValueString())
+	doc.gone = state.RemoveResource
+	if !doc.read(ctx, b, &data, diags) {
 		return
 	}
-
-	diags.Append(b.FlattenInto(ctx, current, data)...)
 	data.ID = data.PluginID
-
-	diags.Append(state.Set(ctx, data)...)
+	diags.Append(state.Set(ctx, &data)...)
 }
 
 // keepSameInstant returns prior when served names the same instant, so a

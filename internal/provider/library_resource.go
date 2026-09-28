@@ -4,6 +4,7 @@
 package provider
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -256,10 +257,7 @@ func LibraryCollectionType(served string) (string, bool) {
 }
 
 func flattenCollectionType(collectionType string) types.String {
-	if collectionType == "" {
-		return types.StringValue("mixed")
-	}
-	return types.StringValue(collectionType)
+	return types.StringValue(cmp.Or(collectionType, "mixed"))
 }
 
 func collectionTypeRequiresReplace(_ context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
@@ -293,56 +291,18 @@ func samePaths(a, b []string) bool {
 }
 
 func libraryOptionsAttributes() map[string]schema.Attribute {
-	unsupportedBool := func(desc string) schema.BoolAttribute {
-		return schema.BoolAttribute{
-			Description:         desc + " " + unsupportedLibraryOptionMessage,
-			MarkdownDescription: desc + " " + unsupportedLibraryOptionMessage,
-			Optional:            true,
-			DeprecationMessage:  unsupportedLibraryOptionMessage,
-			Validators:          []validator.Bool{unsupportedLibraryOptionValidator},
-		}
-	}
-	unsupportedInt := func(desc string) schema.Int64Attribute {
-		return schema.Int64Attribute{
-			Description:         desc + " " + unsupportedLibraryOptionMessage,
-			MarkdownDescription: desc + " " + unsupportedLibraryOptionMessage,
-			Optional:            true,
-			DeprecationMessage:  unsupportedLibraryOptionMessage,
-			Validators:          []validator.Int64{unsupportedLibraryOptionValidator},
-		}
-	}
-	unsupportedString := func(desc string) schema.StringAttribute {
-		return schema.StringAttribute{
-			Description:         desc + " " + unsupportedLibraryOptionMessage,
-			MarkdownDescription: desc + " " + unsupportedLibraryOptionMessage,
-			Optional:            true,
-			DeprecationMessage:  unsupportedLibraryOptionMessage,
-			Validators:          []validator.String{unsupportedLibraryOptionValidator},
-		}
-	}
-	unsupportedStringList := func(desc string) schema.ListAttribute {
-		return schema.ListAttribute{
-			ElementType:         types.StringType,
-			Description:         desc + " " + unsupportedLibraryOptionMessage,
-			MarkdownDescription: desc + " " + unsupportedLibraryOptionMessage,
-			Optional:            true,
-			DeprecationMessage:  unsupportedLibraryOptionMessage,
-			Validators:          []validator.List{unsupportedLibraryOptionValidator},
-		}
-	}
-
 	return map[string]schema.Attribute{
 		"enable_photos":                                 optionalBool("Whether photos are enabled."),
 		"enable_realtime_monitor":                       optionalBool("Whether realtime monitoring is enabled."),
-		"enable_emby_photos":                            unsupportedBool("Whether Emby photos are enabled."),
-		"enable_photo_subtitle":                         unsupportedBool("Whether photo subtitles are enabled."),
+		"enable_emby_photos":                            unsupportedLibraryOption.boolAttribute("Whether Emby photos are enabled."),
+		"enable_photo_subtitle":                         unsupportedLibraryOption.boolAttribute("Whether photo subtitles are enabled."),
 		"extract_chapters_during_library_scan":          optionalBool("Whether chapter images are extracted during the library scan."),
 		"enable_chapter_image_extraction":               optionalBool("Whether chapter image extraction is enabled."),
-		"chapter_image_interval_seconds":                unsupportedInt("Chapter image interval in seconds."),
-		"extract_media_information_during_library_scan": unsupportedBool("Whether media information is extracted during library scan."),
-		"download_images_in_advance":                    unsupportedBool("Whether images are downloaded in advance."),
-		"cache_images_in_library":                       unsupportedBool("Whether images are cached in the library."),
-		"enable_media_conversion":                       unsupportedBool("Whether media conversion is enabled."),
+		"chapter_image_interval_seconds":                unsupportedLibraryOption.intAttribute("Chapter image interval in seconds."),
+		"extract_media_information_during_library_scan": unsupportedLibraryOption.boolAttribute("Whether media information is extracted during library scan."),
+		"download_images_in_advance":                    unsupportedLibraryOption.boolAttribute("Whether images are downloaded in advance."),
+		"cache_images_in_library":                       unsupportedLibraryOption.boolAttribute("Whether images are cached in the library."),
+		"enable_media_conversion":                       unsupportedLibraryOption.boolAttribute("Whether media conversion is enabled."),
 		"path_infos": schema.ListNestedAttribute{
 			NestedObject: schema.NestedAttributeObject{
 				Attributes: pathInfoAttributes(),
@@ -357,21 +317,21 @@ func libraryOptionsAttributes() map[string]schema.Attribute {
 		},
 		"preferred_metadata_language":      optionalString("Preferred metadata language."),
 		"metadata_country_code":            optionalString("Metadata country code."),
-		"disabled_metadata_savers":         unsupportedStringList("Disabled metadata savers."),
+		"disabled_metadata_savers":         unsupportedLibraryOption.stringListAttribute("Disabled metadata savers."),
 		"local_metadata_reader_order":      optionalStringList("Local metadata reader order."),
-		"disabled_metadata_fetchers":       unsupportedStringList("Disabled metadata fetchers for the whole library; Jellyfin only has them per item type, where `metadata_fetchers` in `type_options` enables the fetchers it lists."),
-		"metadata_fetcher_order":           unsupportedStringList("Metadata fetcher order for the whole library; Jellyfin only has it per item type, which `metadata_fetchers` in `type_options` sets."),
-		"disabled_image_fetchers":          unsupportedStringList("Disabled image fetchers for the whole library; Jellyfin only has them per item type, where `image_fetchers` in `type_options` enables the fetchers it lists."),
-		"image_fetcher_order":              unsupportedStringList("Image fetcher order for the whole library; Jellyfin only has it per item type, which `image_fetchers` in `type_options` sets."),
+		"disabled_metadata_fetchers":       unsupportedLibraryOption.stringListAttribute("Disabled metadata fetchers for the whole library; Jellyfin only has them per item type, where `metadata_fetchers` in `type_options` enables the fetchers it lists."),
+		"metadata_fetcher_order":           unsupportedLibraryOption.stringListAttribute("Metadata fetcher order for the whole library; Jellyfin only has it per item type, which `metadata_fetchers` in `type_options` sets."),
+		"disabled_image_fetchers":          unsupportedLibraryOption.stringListAttribute("Disabled image fetchers for the whole library; Jellyfin only has them per item type, where `image_fetchers` in `type_options` enables the fetchers it lists."),
+		"image_fetcher_order":              unsupportedLibraryOption.stringListAttribute("Image fetcher order for the whole library; Jellyfin only has it per item type, which `image_fetchers` in `type_options` sets."),
 		"subtitle_fetchers":                combinedStringList(subtitleFetchersDescription, "disabled_subtitle_fetchers", "subtitle_fetcher_order"),
 		"disabled_subtitle_fetchers":       replacedBy(optionalStringList("Disabled subtitle fetchers."), subtitleFetchersDeprecation, "subtitle_fetchers"),
 		"subtitle_fetcher_order":           replacedBy(optionalStringList("Subtitle fetcher order."), subtitleFetchersDeprecation, "subtitle_fetchers"),
 		"save_local_metadata":              optionalBool("Whether local metadata is saved."),
-		"save_local_thumbnail_sets":        unsupportedBool("Whether local thumbnail sets are saved."),
-		"import_missing_episodes":          unsupportedBool("Whether missing episodes are imported."),
+		"save_local_thumbnail_sets":        unsupportedLibraryOption.boolAttribute("Whether local thumbnail sets are saved."),
+		"import_missing_episodes":          unsupportedLibraryOption.boolAttribute("Whether missing episodes are imported."),
 		"enable_automatic_series_grouping": optionalBool("Whether automatic series grouping is enabled."),
 		"season_zero_display_name":         optionalString("Season zero display name."),
-		"metadata_refresh_mode":            unsupportedString("Metadata refresh mode."),
+		"metadata_refresh_mode":            unsupportedLibraryOption.stringAttribute("Metadata refresh mode."),
 		"disabled":                         optionalBool("Whether the library is disabled, the inverse of Jellyfin's `Enabled` option."),
 		"type_options": schema.ListNestedAttribute{
 			NestedObject: schema.NestedAttributeObject{
@@ -389,16 +349,8 @@ func libraryOptionsAttributes() map[string]schema.Attribute {
 }
 
 func pathInfoAttributes() map[string]schema.Attribute {
-	unsupportedString := func(desc string, sensitive bool) schema.StringAttribute {
-		return schema.StringAttribute{
-			Description:         desc + " " + unsupportedLibraryOptionMessage,
-			MarkdownDescription: desc + " " + unsupportedLibraryOptionMessage,
-			Optional:            true,
-			Sensitive:           sensitive,
-			DeprecationMessage:  unsupportedLibraryOptionMessage,
-			Validators:          []validator.String{unsupportedLibraryOptionValidator},
-		}
-	}
+	password := unsupportedLibraryOption.stringAttribute("Password.")
+	password.Sensitive = true
 	return map[string]schema.Attribute{
 		"path": optionalString("Local path."),
 		"network_path": schema.StringAttribute{
@@ -411,8 +363,8 @@ func pathInfoAttributes() map[string]schema.Attribute {
 				priorValueEvenIfNull{},
 			},
 		},
-		"username": unsupportedString("Username.", false),
-		"password": unsupportedString("Password.", true),
+		"username": unsupportedLibraryOption.stringAttribute("Username."),
+		"password": password,
 	}
 }
 
@@ -435,6 +387,14 @@ func (priorValueEvenIfNull) PlanModifyString(_ context.Context, req planmodifier
 }
 
 const unsupportedLibraryOptionMessage = "Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release."
+
+var unsupportedLibraryOption = unsupported{
+	message: unsupportedLibraryOptionMessage,
+	reject: unsetValidator{
+		summary: "Unsupported library option",
+		reason:  "Jellyfin has no such library option, so the server would ignore this value",
+	},
+}
 
 func typeOptionsAttributes() map[string]schema.Attribute {
 	deprecatedOrder := func(desc, deprecation string) schema.ListAttribute {
@@ -742,13 +702,10 @@ func unchangedOptions(planned, prior types.Object) bool {
 	priorAttrs := prior.Attributes()
 	for name, v := range planned.Attributes() {
 		p, ok := priorAttrs[name]
-		switch {
-		case !ok:
+		unchanged := ok && (v.Equal(p) || v.IsUnknown() && p.IsNull())
+		if !unchanged {
 			return false
-		case v.IsUnknown() && p.IsNull(), v.Equal(p):
-			continue
 		}
-		return false
 	}
 	return true
 }
@@ -801,11 +758,7 @@ func (r *LibraryResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	if req.Plan.Raw.IsNull() {
 		return
 	}
-	b := wireBinding(&resp.Diagnostics, libraryWire)
-	if b == nil {
-		return
-	}
-	resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
+	checkServerHasFields(ctx, r.client, libraryWire, req.Config, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() || req.State.Raw.IsNull() {
 		return
 	}
@@ -831,61 +784,56 @@ func (r *LibraryResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 }
 
 func planTypeOptionsByType(ctx context.Context, config, plan, state types.List) (types.List, diag.Diagnostics) {
-	var diags diag.Diagnostics
-	var c, p, s []TypeOptionsModel
-	if config.ElementsAs(ctx, &c, false).HasError() || plan.ElementsAs(ctx, &p, false).HasError() || len(c) != len(p) {
-		return plan, diags
-	}
-	if !state.IsNull() && !state.IsUnknown() && state.ElementsAs(ctx, &s, false).HasError() {
-		return plan, diags
-	}
-
 	unknownList := types.ListUnknown(types.StringType)
-	for i := range p {
-		prior, found := entryWithType(s, c[i].Type, func(e TypeOptionsModel) types.String { return e.Type })
-		p[i].MetadataFetchers = unsetFromPrior(c[i].MetadataFetchers, p[i].MetadataFetchers, prior.MetadataFetchers, found, unknownList)
-		p[i].MetadataFetcherOrder = orderFromPrior(c[i].MetadataFetchers, prior.MetadataFetchers, c[i].MetadataFetcherOrder, p[i].MetadataFetcherOrder, prior.MetadataFetcherOrder, found)
-		p[i].ImageFetchers = unsetFromPrior(c[i].ImageFetchers, p[i].ImageFetchers, prior.ImageFetchers, found, unknownList)
-		p[i].ImageFetcherOrder = orderFromPrior(c[i].ImageFetchers, prior.ImageFetchers, c[i].ImageFetcherOrder, p[i].ImageFetcherOrder, prior.ImageFetcherOrder, found)
-		p[i].SimilarItemProviders = unsetFromPrior(c[i].SimilarItemProviders, p[i].SimilarItemProviders, prior.SimilarItemProviders, found, unknownList)
-		p[i].SimilarItemProviderOrder = orderFromPrior(c[i].SimilarItemProviders, prior.SimilarItemProviders, c[i].SimilarItemProviderOrder, p[i].SimilarItemProviderOrder, prior.SimilarItemProviderOrder, found)
+	return replanEntries(ctx, config, plan, state, func(_ int, c TypeOptionsModel, p *TypeOptionsModel, s []TypeOptionsModel) diag.Diagnostics {
+		prior, found := entryWithType(s, c.Type, func(e TypeOptionsModel) types.String { return e.Type })
+		p.MetadataFetchers = unsetFromPrior(c.MetadataFetchers, p.MetadataFetchers, prior.MetadataFetchers, found, unknownList)
+		p.MetadataFetcherOrder = orderFromPrior(c.MetadataFetchers, prior.MetadataFetchers, c.MetadataFetcherOrder, p.MetadataFetcherOrder, prior.MetadataFetcherOrder, found)
+		p.ImageFetchers = unsetFromPrior(c.ImageFetchers, p.ImageFetchers, prior.ImageFetchers, found, unknownList)
+		p.ImageFetcherOrder = orderFromPrior(c.ImageFetchers, prior.ImageFetchers, c.ImageFetcherOrder, p.ImageFetcherOrder, prior.ImageFetcherOrder, found)
+		p.SimilarItemProviders = unsetFromPrior(c.SimilarItemProviders, p.SimilarItemProviders, prior.SimilarItemProviders, found, unknownList)
+		p.SimilarItemProviderOrder = orderFromPrior(c.SimilarItemProviders, prior.SimilarItemProviders, c.SimilarItemProviderOrder, p.SimilarItemProviderOrder, prior.SimilarItemProviderOrder, found)
 
-		if c[i].ImageOptions.IsNull() {
-			p[i].ImageOptions = unsetFromPrior(c[i].ImageOptions, p[i].ImageOptions, prior.ImageOptions, found, types.ListUnknown(p[i].ImageOptions.ElementType(ctx)))
-			continue
+		if c.ImageOptions.IsNull() {
+			p.ImageOptions = unsetFromPrior(c.ImageOptions, p.ImageOptions, prior.ImageOptions, found, types.ListUnknown(p.ImageOptions.ElementType(ctx)))
+			return nil
 		}
-		imageOptions, d := planImageOptionsByType(ctx, c[i].ImageOptions, p[i].ImageOptions, prior.ImageOptions)
-		diags.Append(d...)
-		if diags.HasError() {
-			return plan, diags
-		}
-		p[i].ImageOptions = imageOptions
-	}
-
-	out, d := types.ListValueFrom(ctx, plan.ElementType(ctx), p)
-	diags.Append(d...)
-	return out, diags
+		imageOptions, diags := planImageOptionsByType(ctx, c.ImageOptions, p.ImageOptions, prior.ImageOptions)
+		p.ImageOptions = imageOptions
+		return diags
+	})
 }
 
 func planImageOptionsByType(ctx context.Context, config, plan, state types.List) (types.List, diag.Diagnostics) {
-	var diags diag.Diagnostics
 	if config.IsUnknown() || plan.IsNull() || plan.IsUnknown() {
-		return plan, diags
+		return plan, nil
 	}
-	var c, p, s []ImageOptionsModel
+	return replanEntries(ctx, config, plan, state, func(_ int, c ImageOptionsModel, p *ImageOptionsModel, s []ImageOptionsModel) diag.Diagnostics {
+		prior, found := entryWithType(s, c.Type, func(e ImageOptionsModel) types.String { return e.Type })
+		p.Limit = unsetFromPrior(c.Limit, p.Limit, prior.Limit, found, types.Int64Unknown())
+		p.MinWidth = unsetFromPrior(c.MinWidth, p.MinWidth, prior.MinWidth, found, types.Int64Unknown())
+		return nil
+	})
+}
+
+// replanEntries returns plan as it is when config, plan or a known state does
+// not decode, or config and plan hold different numbers of entries.
+func replanEntries[T any](ctx context.Context, config, plan, state types.List, replan func(i int, config T, planned *T, prior []T) diag.Diagnostics) (types.List, diag.Diagnostics) {
+	var c, p, s []T
 	if config.ElementsAs(ctx, &c, false).HasError() || plan.ElementsAs(ctx, &p, false).HasError() || len(c) != len(p) {
-		return plan, diags
+		return plan, nil
 	}
 	if !state.IsNull() && !state.IsUnknown() && state.ElementsAs(ctx, &s, false).HasError() {
-		return plan, diags
+		return plan, nil
 	}
 
+	var diags diag.Diagnostics
 	for i := range p {
-		prior, found := entryWithType(s, c[i].Type, func(e ImageOptionsModel) types.String { return e.Type })
-		p[i].Limit = unsetFromPrior(c[i].Limit, p[i].Limit, prior.Limit, found, types.Int64Unknown())
-		p[i].MinWidth = unsetFromPrior(c[i].MinWidth, p[i].MinWidth, prior.MinWidth, found, types.Int64Unknown())
+		diags.Append(replan(i, c[i], &p[i], s)...)
+		if diags.HasError() {
+			return plan, diags
+		}
 	}
-
 	out, d := types.ListValueFrom(ctx, plan.ElementType(ctx), p)
 	diags.Append(d...)
 	return out, diags

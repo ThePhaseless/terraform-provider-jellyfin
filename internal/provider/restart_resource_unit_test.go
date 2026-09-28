@@ -31,7 +31,7 @@ func systemInfoHandler(pending func() (down bool, hasPendingRestart bool)) http.
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"Id": "s", "HasPendingRestart": hasPending})
+		_ = json.NewEncoder(w).Encode(map[string]any{"Id": "s", "HasPendingRestart": hasPending})
 	}
 }
 

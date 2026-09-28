@@ -7,14 +7,11 @@ import (
 	"context"
 	"sync"
 
-	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
@@ -163,14 +160,13 @@ func tunerHostAttributes() map[string]schema.Attribute {
 }
 
 func listingProviderAttributes() map[string]schema.Attribute {
+	password := elementString("Password.")
+	password.Sensitive = true
 	return map[string]schema.Attribute{
-		"id":       elementString("Provider ID."),
-		"type":     elementString("Provider type."),
-		"username": elementString("Username."),
-		"password": schema.StringAttribute{
-			Description: "Password.", MarkdownDescription: "Password.",
-			Optional: true, Computed: true, Sensitive: true,
-		},
+		"id":                elementString("Provider ID."),
+		"type":              elementString("Provider type."),
+		"username":          elementString("Username."),
+		"password":          password,
 		"listings_id":       elementString("Listings ID."),
 		"zip_code":          elementString("ZIP code."),
 		"country":           elementString("Country."),
@@ -202,33 +198,15 @@ func (r *LiveTVConfigurationResource) Configure(_ context.Context, req resource.
 }
 
 func (r *LiveTVConfigurationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data LiveTVConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *LiveTVConfigurationResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var data LiveTVConfigurationResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.read(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().read(ctx, req.State, &resp.State, &resp.Diagnostics)
 }
 
 func (r *LiveTVConfigurationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data LiveTVConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *LiveTVConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
@@ -236,41 +214,21 @@ func (r *LiveTVConfigurationResource) Delete(_ context.Context, _ resource.Delet
 }
 
 func (r *LiveTVConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Set only the id: the framework types every other attribute from the
-	// schema, and the Read that follows an import fills them. A zero-valued
-	// model would leave list attributes without an element type.
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("livetv"))...)
+	r.singleton().setID(ctx, &resp.State, &resp.Diagnostics)
 }
 
 // ModifyPlan gates each configured field on the Jellyfin version it needs, so
 // a field a later pin adds is checked without a change here.
 func (r *LiveTVConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() {
-		return
-	}
-	if b := wireBinding(&resp.Diagnostics, livetvWire); b != nil {
-		resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
+	if !req.Plan.Raw.IsNull() {
+		checkServerHasFields(ctx, r.client, livetvWire, req.Config, &resp.Diagnostics)
 	}
 }
 
-func (r *LiveTVConfigurationResource) apply(ctx context.Context, data *LiveTVConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
-	b := wireBinding(diags, livetvWire)
-	if b == nil || !r.document().write(ctx, b, data, diags) {
-		return
+func (r *LiveTVConfigurationResource) singleton() singleton[LiveTVConfigurationResourceModel] {
+	return singleton[LiveTVConfigurationResourceModel]{
+		id:   "livetv",
+		bind: livetvWire,
+		doc:  document{what: "Live TV configuration", get: r.client.GetLiveTVConfiguration, put: r.client.UpdateLiveTVConfiguration},
 	}
-	data.ID = types.StringValue("livetv")
-	diags.Append(state.Set(ctx, data)...)
-}
-
-func (r *LiveTVConfigurationResource) read(ctx context.Context, data *LiveTVConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
-	b := wireBinding(diags, livetvWire)
-	if b == nil || !r.document().read(ctx, b, data, diags) {
-		return
-	}
-	data.ID = types.StringValue("livetv")
-	diags.Append(state.Set(ctx, data)...)
-}
-
-func (r *LiveTVConfigurationResource) document() document {
-	return document{what: "Live TV configuration", get: r.client.GetLiveTVConfiguration, put: r.client.UpdateLiveTVConfiguration}
 }

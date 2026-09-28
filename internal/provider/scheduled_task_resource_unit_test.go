@@ -26,15 +26,21 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 func scheduledTaskSchema(t *testing.T) rschema.Schema {
 	t.Helper()
+	return schemaOf(&ScheduledTaskResource{})
+}
 
-	var resp resource.SchemaResponse
-	(&ScheduledTaskResource{}).Schema(context.Background(), resource.SchemaRequest{}, &resp)
-	return resp.Schema
+func scheduledTaskTriggerAttributes(t *testing.T) map[string]rschema.Attribute {
+	t.Helper()
+
+	triggers, ok := scheduledTaskSchema(t).Attributes["triggers"].(rschema.ListNestedAttribute)
+	if !ok {
+		t.Fatalf("triggers attribute type = %T, want schema.ListNestedAttribute", scheduledTaskSchema(t).Attributes["triggers"])
+	}
+	return triggers.NestedObject.Attributes
 }
 
 func scheduledTaskTriggerType(t *testing.T) attr.Type {
@@ -70,11 +76,7 @@ func triggerList(t *testing.T, triggers ...ScheduledTaskTriggerModel) types.List
 func TestScheduledTaskTriggerAttributesAreNotComputed(t *testing.T) {
 	t.Parallel()
 
-	triggers, ok := scheduledTaskSchema(t).Attributes["triggers"].(rschema.ListNestedAttribute)
-	if !ok {
-		t.Fatalf("triggers attribute type = %T, want schema.ListNestedAttribute", scheduledTaskSchema(t).Attributes["triggers"])
-	}
-	for name, a := range triggers.NestedObject.Attributes {
+	for name, a := range scheduledTaskTriggerAttributes(t) {
 		if a.IsComputed() {
 			t.Errorf("triggers.%s is computed; an omitted value would plan as unknown and never resolve", name)
 		}
@@ -84,10 +86,7 @@ func TestScheduledTaskTriggerAttributesAreNotComputed(t *testing.T) {
 func TestScheduledTaskTriggerTickValidators(t *testing.T) {
 	t.Parallel()
 
-	triggers, ok := scheduledTaskSchema(t).Attributes["triggers"].(rschema.ListNestedAttribute)
-	if !ok {
-		t.Fatalf("triggers attribute type = %T, want schema.ListNestedAttribute", scheduledTaskSchema(t).Attributes["triggers"])
-	}
+	triggers := scheduledTaskTriggerAttributes(t)
 
 	tests := map[string]struct {
 		attribute string
@@ -110,9 +109,9 @@ func TestScheduledTaskTriggerTickValidators(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			a, ok := triggers.NestedObject.Attributes[tc.attribute].(rschema.Int64Attribute)
+			a, ok := triggers[tc.attribute].(rschema.Int64Attribute)
 			if !ok {
-				t.Fatalf("triggers.%s type = %T, want schema.Int64Attribute", tc.attribute, triggers.NestedObject.Attributes[tc.attribute])
+				t.Fatalf("triggers.%s type = %T, want schema.Int64Attribute", tc.attribute, triggers[tc.attribute])
 			}
 
 			var diags diag.Diagnostics
@@ -176,16 +175,6 @@ var triggerSerialisationCases = map[string]struct {
 	},
 }
 
-func scheduledTaskBinding(t *testing.T) *wire.Binding {
-	t.Helper()
-
-	b, err := scheduledTaskWire()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
-}
-
 func TestScheduledTaskApplyPostsTriggersWithoutNullAttributes(t *testing.T) {
 	t.Parallel()
 
@@ -231,7 +220,7 @@ func TestScheduledTaskReadNullsAbsentTriggerAttributes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := readWire[ScheduledTaskResourceModel](t, scheduledTaskBinding(t), `{"Triggers":[`+tc.json+`]}`).Triggers
+			got := readWire[ScheduledTaskResourceModel](t, mustWire(t, scheduledTaskWire), `{"Triggers":[`+tc.json+`]}`).Triggers
 			if want := triggerList(t, tc.trigger); !got.Equal(want) {
 				t.Fatalf("triggers = %v, want %v", got, want)
 			}
@@ -242,7 +231,7 @@ func TestScheduledTaskReadNullsAbsentTriggerAttributes(t *testing.T) {
 func TestScheduledTaskReadTreatsExplicitJSONNullAsNull(t *testing.T) {
 	t.Parallel()
 
-	got := readWire[ScheduledTaskResourceModel](t, scheduledTaskBinding(t), `{"Triggers":[{"Type":"IntervalTrigger","IntervalTicks":1,"TimeOfDayTicks":null,"DayOfWeek":null,"MaxRuntimeTicks":null}]}`).Triggers
+	got := readWire[ScheduledTaskResourceModel](t, mustWire(t, scheduledTaskWire), `{"Triggers":[{"Type":"IntervalTrigger","IntervalTicks":1,"TimeOfDayTicks":null,"DayOfWeek":null,"MaxRuntimeTicks":null}]}`).Triggers
 
 	want := newTrigger(triggerTypeInterval)
 	want.IntervalTicks = types.Int64Value(1)
@@ -255,7 +244,7 @@ func TestScheduledTaskReadReturnsKnownEmptyListForNoTriggers(t *testing.T) {
 	t.Parallel()
 
 	for _, task := range []string{`{"Triggers":[]}`, `{"Triggers":null}`, `{}`} {
-		got := readWire[ScheduledTaskResourceModel](t, scheduledTaskBinding(t), task).Triggers
+		got := readWire[ScheduledTaskResourceModel](t, mustWire(t, scheduledTaskWire), task).Triggers
 		if got.IsNull() || got.IsUnknown() || len(got.Elements()) != 0 {
 			t.Errorf("triggers read from %s = %v, want a known empty list", task, got)
 		}
@@ -307,26 +296,23 @@ func TestMissingTriggerAttributes(t *testing.T) {
 	}
 }
 
-func validateScheduledTaskConfig(t *testing.T, triggers ...ScheduledTaskTriggerModel) diag.Diagnostics {
+func validateScheduledTask(t *testing.T, m ScheduledTaskResourceModel) diag.Diagnostics {
 	t.Helper()
 
-	ctx := context.Background()
-	s := scheduledTaskSchema(t)
-
-	plan := tfsdk.Plan{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nil)}
-	if diags := plan.Set(ctx, &ScheduledTaskResourceModel{
-		ID:       types.StringNull(),
-		TaskID:   types.StringValue("7738148ffcd07979c7ceb148e06b3aed"),
-		Triggers: triggerList(t, triggers...),
-	}); diags.HasError() {
-		t.Fatalf("building config: %v", diags)
-	}
-
 	var resp resource.ValidateConfigResponse
-	(&ScheduledTaskResource{}).ValidateConfig(ctx, resource.ValidateConfigRequest{
-		Config: tfsdk.Config{Schema: s, Raw: plan.Raw},
+	(&ScheduledTaskResource{}).ValidateConfig(context.Background(), resource.ValidateConfigRequest{
+		Config: tfsdk.Config{Schema: scheduledTaskSchema(t), Raw: scheduledTaskValue(t, &m)},
 	}, &resp)
 	return resp.Diagnostics
+}
+
+func validateScheduledTaskConfig(t *testing.T, triggers ...ScheduledTaskTriggerModel) diag.Diagnostics {
+	t.Helper()
+	return validateScheduledTask(t, ScheduledTaskResourceModel{
+		ID:       types.StringNull(),
+		TaskID:   types.StringValue(scanMediaLibraryID),
+		Triggers: triggerList(t, triggers...),
+	})
 }
 
 func errorPaths(t *testing.T, diags diag.Diagnostics) []string {
@@ -372,22 +358,6 @@ func TestScheduledTaskValidateConfigReportsEveryInvalidTrigger(t *testing.T) {
 	}
 }
 
-func validateScheduledTaskSelectors(t *testing.T, key, taskID types.String) diag.Diagnostics {
-	t.Helper()
-
-	ctx := context.Background()
-	s := scheduledTaskSchema(t)
-	var resp resource.ValidateConfigResponse
-	(&ScheduledTaskResource{}).ValidateConfig(ctx, resource.ValidateConfigRequest{
-		Config: tfsdk.Config{Schema: s, Raw: scheduledTaskValue(t, &ScheduledTaskResourceModel{
-			ID:     types.StringNull(),
-			Key:    key,
-			TaskID: taskID,
-		})},
-	}, &resp)
-	return resp.Diagnostics
-}
-
 func TestScheduledTaskValidateConfigWantsKeyOrTaskID(t *testing.T) {
 	t.Parallel()
 
@@ -410,7 +380,7 @@ func TestScheduledTaskValidateConfigWantsKeyOrTaskID(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			diags := validateScheduledTaskSelectors(t, tc.key, tc.taskID)
+			diags := validateScheduledTask(t, ScheduledTaskResourceModel{ID: types.StringNull(), Key: tc.key, TaskID: tc.taskID})
 			switch {
 			case tc.wantError == "" && diags.HasError():
 				t.Fatalf("ValidateConfig() = %v, want no error", diags)
@@ -436,10 +406,14 @@ func testTasks() []client.ScheduledTask {
 	}
 }
 
+func testTasksSharingAKey() []client.ScheduledTask {
+	return append(testTasks(), client.ScheduledTask{ID: "aaaa", Key: "Shared"}, client.ScheduledTask{ID: "bbbb", Key: "Shared"})
+}
+
 func TestFindTask(t *testing.T) {
 	t.Parallel()
 
-	shared := append(testTasks(), client.ScheduledTask{ID: "aaaa", Key: "Shared"}, client.ScheduledTask{ID: "bbbb", Key: "Shared"})
+	shared := testTasksSharingAKey()
 	tests := map[string]struct {
 		tasks      []client.ScheduledTask
 		ref        string
@@ -644,7 +618,7 @@ func TestScheduledTaskPlanKeepsTheStoredTaskItsKeySelects(t *testing.T) {
 func TestScheduledTaskPlanRejectsASharedKeyTheStateHolds(t *testing.T) {
 	t.Parallel()
 
-	srv := &fakeTaskServer{tasks: append(testTasks(), client.ScheduledTask{ID: "aaaa", Key: "Shared"}, client.ScheduledTask{ID: "bbbb", Key: "Shared"})}
+	srv := &fakeTaskServer{tasks: testTasksSharingAKey()}
 	state := storedTask("aaaa", types.StringValue("Shared"))
 	_, resp := planScheduledTask(t, srv.client(t), keyConfig("Shared"), state, *state)
 	if got, want := errorPaths(t, resp.Diagnostics), []string{path.Root("key").String()}; !reflect.DeepEqual(got, want) {
@@ -717,7 +691,7 @@ func TestScheduledTaskPlanWithKeyAndTaskID(t *testing.T) {
 		"with a task_id and a key no task has": {key: types.StringValue("NoSuchTask"), taskID: types.StringValue(cleanLogFilesID), wantError: notFound, wantAt: "key"},
 		"with a task_id unknown until apply":   {key: key, taskID: types.StringUnknown()},
 		"naming one of the tasks sharing a key": {
-			tasks: append(testTasks(), client.ScheduledTask{ID: "aaaa", Key: "Shared"}, client.ScheduledTask{ID: "bbbb", Key: "Shared"}),
+			tasks: testTasksSharingAKey(),
 			key:   types.StringValue("Shared"), taskID: types.StringValue("aaaa"),
 		},
 	}
@@ -892,15 +866,7 @@ func TestUnitScheduledTaskKeyPlansUnknownOverANullPriorKey(t *testing.T) {
 	ctx := context.Background()
 
 	s := scheduledTaskSchema(t)
-	state := tfsdk.State{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nil)}
-	if d := state.Set(ctx, &ScheduledTaskResourceModel{
-		ID:       types.StringValue("abc"),
-		Key:      types.StringNull(),
-		TaskID:   types.StringValue("abc"),
-		Triggers: types.ListValueMust(scheduledTaskTriggerType(t), nil),
-	}); d.HasError() {
-		t.Fatal(d)
-	}
+	state := tfsdk.State{Schema: s, Raw: scheduledTaskValue(t, storedTask("abc", types.StringNull()))}
 
 	key, ok := s.Attributes["key"].(rschema.StringAttribute)
 	if !ok {

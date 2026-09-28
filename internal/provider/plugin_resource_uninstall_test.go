@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
@@ -22,7 +21,10 @@ import (
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
-const bookshelfID = "9c4e63f1031b4f25988b4f7d78a8b53e"
+const (
+	bookshelfID = "9c4e63f1031b4f25988b4f7d78a8b53e"
+	tmdbID      = "b8715ed16c4745289ad3f72deb539cd4"
+)
 
 const requestOverlapWindow = 20 * time.Millisecond
 
@@ -127,19 +129,14 @@ func newFakePluginResource(t *testing.T, fake *fakePluginServer) *PluginResource
 	return &PluginResource{client: client.NewClient(server.URL, "test-key")}
 }
 
-func pluginResourceSchema(t *testing.T) schema.Schema {
-	t.Helper()
-	var resp resource.SchemaResponse
-	NewPluginResource().Schema(context.Background(), resource.SchemaRequest{}, &resp)
-	if resp.Diagnostics.HasError() {
-		t.Fatalf("schema: %v", resp.Diagnostics.Errors())
-	}
-	return resp.Schema
+func pluginResourceNullState() tfsdk.State {
+	s := schemaOf(NewPluginResource())
+	return tfsdk.State{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(context.Background()), nil)}
 }
 
 func pluginResourceState(t *testing.T, m PluginResourceModel) tfsdk.State {
 	t.Helper()
-	state := tfsdk.State{Schema: pluginResourceSchema(t)}
+	state := tfsdk.State{Schema: schemaOf(NewPluginResource())}
 	if diags := state.Set(context.Background(), &m); diags.HasError() {
 		t.Fatalf("state: %v", diags.Errors())
 	}
@@ -247,7 +244,6 @@ func TestUnitPluginUninstallReportsNotFoundWhilePluginIsListed(t *testing.T) {
 }
 
 func TestUnitPluginUninstallLeavesBundledPlugin(t *testing.T) {
-	const tmdbID = "b8715ed16c4745289ad3f72deb539cd4"
 	fake := &fakePluginServer{plugins: []client.InstalledPlugin{
 		{ID: tmdbID, Name: "TMDb", Version: "12.1.0.0", Status: "Active"},
 	}}
@@ -266,7 +262,6 @@ func TestUnitPluginUninstallLeavesBundledPlugin(t *testing.T) {
 }
 
 func TestUnitPluginUninstallRemovesVersionInstalledOverBundledPlugin(t *testing.T) {
-	const tmdbID = "b8715ed16c4745289ad3f72deb539cd4"
 	fake := &fakePluginServer{plugins: []client.InstalledPlugin{
 		{ID: tmdbID, Name: "TMDb", Version: "12.1.0.0", Status: "Superseded"},
 		{ID: tmdbID, Name: "TMDb", Version: "12.2.0.0", Status: "Restart", CanUninstall: true},
@@ -286,7 +281,6 @@ func TestUnitPluginUninstallRemovesVersionInstalledOverBundledPlugin(t *testing.
 }
 
 func TestUnitPluginDeleteWarnsWhenJellyfinKeepsBundledPlugin(t *testing.T) {
-	const tmdbID = "b8715ed16c4745289ad3f72deb539cd4"
 	fake := &fakePluginServer{plugins: []client.InstalledPlugin{
 		{ID: tmdbID, Name: "TMDb", Version: "12.1.0.0", Status: "Active"},
 	}}
@@ -357,9 +351,8 @@ func TestUnitPluginConcurrentUninstallsOfOnePluginSucceed(t *testing.T) {
 func replacePluginVersionFirst(t *testing.T, creator, destroyer *PluginResource) {
 	t.Helper()
 	ctx := context.Background()
-	resourceSchema := pluginResourceSchema(t)
 
-	createResp := &resource.CreateResponse{State: tfsdk.State{Schema: resourceSchema, Raw: tftypes.NewValue(resourceSchema.Type().TerraformType(ctx), nil)}}
+	createResp := &resource.CreateResponse{State: pluginResourceNullState()}
 	creator.Create(ctx, resource.CreateRequest{Plan: pluginResourcePlan(t, PluginResourceModel{
 		ID:               types.StringUnknown(),
 		Name:             types.StringValue("Bookshelf"),
@@ -437,8 +430,7 @@ func TestUnitPluginCreateReportsAVersionNoRepositoryOffers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	resourceSchema := pluginResourceSchema(t)
-	resp := &resource.CreateResponse{State: tfsdk.State{Schema: resourceSchema, Raw: tftypes.NewValue(resourceSchema.Type().TerraformType(ctx), nil)}}
+	resp := &resource.CreateResponse{State: pluginResourceNullState()}
 	r.Create(ctx, resource.CreateRequest{Plan: pluginResourcePlan(t, PluginResourceModel{
 		ID:               types.StringUnknown(),
 		Name:             types.StringValue("Bookshelf"),

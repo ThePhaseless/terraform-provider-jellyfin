@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -141,10 +142,7 @@ type systemConfigurationTestValues struct {
 }
 
 func testAccSystemConfigurationResourceConfig(serverName string, v systemConfigurationTestValues) string {
-	itemIDFlags := "false"
-	if v.itemIDFlags {
-		itemIDFlags = "true"
-	}
+	itemIDFlags := strconv.FormatBool(v.itemIDFlags)
 	return `
 resource "jellyfin_system_configuration" "test" {
   server_name                        = "` + serverName + `"

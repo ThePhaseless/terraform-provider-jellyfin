@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
+	"slices"
 	"testing"
 	"time"
 
@@ -388,18 +388,28 @@ func testAccRestorePluginUpdateTriggers(t *testing.T) string {
 	return ""
 }
 
+func testAccListedPlugins(c *client.Client, name string) ([]client.InstalledPlugin, error) {
+	plugins, err := c.GetInstalledPlugins(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(plugins, func(p client.InstalledPlugin) bool {
+		return p.Name != name || p.Status == pluginStatusDeleted
+	}), nil
+}
+
 // testAccCheckPluginStaysAt fails if Jellyfin lists the named plugin at any
 // version other than want during the time its startup tasks take to run.
 func testAccCheckPluginStaysAt(t *testing.T, name, want string) resource.TestCheckFunc {
 	return func(*terraform.State) error {
 		c := testAccClient(t)
 		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(pluginPollInterval) {
-			plugins, err := c.GetInstalledPlugins(context.Background())
+			listed, err := testAccListedPlugins(c, name)
 			if err != nil {
 				return err
 			}
-			for _, p := range plugins {
-				if p.Name == name && p.Status != pluginStatusDeleted && p.Version != want {
+			for _, p := range listed {
+				if p.Version != want {
 					return fmt.Errorf("%s is listed at %s (%s) next to the pinned %s", name, p.Version, p.Status, want)
 				}
 			}
@@ -412,14 +422,12 @@ func testAccCheckPluginStaysAt(t *testing.T, name, want string) resource.TestChe
 // named plugin other than one it deletes at the next restart.
 func testAccCheckPluginNotListed(t *testing.T, name string) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		plugins, err := testAccClient(t).GetInstalledPlugins(context.Background())
+		listed, err := testAccListedPlugins(testAccClient(t), name)
 		if err != nil {
 			return err
 		}
-		for _, p := range plugins {
-			if p.Name == name && p.Status != pluginStatusDeleted {
-				return fmt.Errorf("plugin %s is still listed at version %s with status %s", name, p.Version, p.Status)
-			}
+		if len(listed) > 0 {
+			return fmt.Errorf("plugin %s is still listed at version %s with status %s", name, listed[0].Version, listed[0].Status)
 		}
 		return nil
 	}
@@ -430,18 +438,16 @@ func testAccCheckPluginNotListed(t *testing.T, name string) resource.TestCheckFu
 // restart.
 func testAccCheckPluginListedOnlyAt(t *testing.T, name, version string) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		plugins, err := testAccClient(t).GetInstalledPlugins(context.Background())
+		listed, err := testAccListedPlugins(testAccClient(t), name)
 		if err != nil {
 			return err
 		}
-		var listed []string
-		for _, p := range plugins {
-			if p.Name == name && p.Status != pluginStatusDeleted {
-				listed = append(listed, p.Version+" ("+p.Status+")")
+		if len(listed) != 1 || listed[0].Version != version {
+			var found []string
+			for _, p := range listed {
+				found = append(found, p.Version+" ("+p.Status+")")
 			}
-		}
-		if len(listed) != 1 || !strings.HasPrefix(listed[0], version+" ") {
-			return fmt.Errorf("plugin %s is listed at %v, want only %s", name, listed, version)
+			return fmt.Errorf("plugin %s is listed at %v, want only %s", name, found, version)
 		}
 		return nil
 	}
@@ -450,16 +456,14 @@ func testAccCheckPluginListedOnlyAt(t *testing.T, name, version string) resource
 // testAccCheckPluginListed fails unless Jellyfin lists the named plugin.
 func testAccCheckPluginListed(t *testing.T, name string) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		plugins, err := testAccClient(t).GetInstalledPlugins(context.Background())
+		listed, err := testAccListedPlugins(testAccClient(t), name)
 		if err != nil {
 			return err
 		}
-		for _, p := range plugins {
-			if p.Name == name && p.Status != pluginStatusDeleted {
-				return nil
-			}
+		if len(listed) == 0 {
+			return fmt.Errorf("plugin %s is no longer listed", name)
 		}
-		return fmt.Errorf("plugin %s is no longer listed", name)
+		return nil
 	}
 }
 

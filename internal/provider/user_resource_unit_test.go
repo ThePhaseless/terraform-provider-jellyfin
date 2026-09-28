@@ -25,10 +25,7 @@ import (
 
 func TestUnitUserPolicyRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	b, err := userPolicyWire()
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := mustWire(t, userPolicyWire)
 	fixture := `{"IsAdministrator":false,"IsDisabled":false,"EnableAllFolders":true,` +
 		`"IsHidden":true,"EnableMediaPlayback":false,"MaxParentalRating":13,"MaxParentalSubRating":1,` +
 		`"LoginAttemptsBeforeLockout":3,"MaxActiveSessions":2,"SyncPlayAccess":"JoinGroups",` +
@@ -45,19 +42,12 @@ func TestUnitUserPolicyRoundTrip(t *testing.T) {
 		t.Errorf("name = %v, want the prior value: the policy document has no name", data.Name)
 	}
 
-	base := map[string]json.RawMessage{}
-	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
-		t.Fatalf("write: %v", d)
-	}
-	checkSameJSON(t, base, fixture)
+	checkSameJSON(t, writeWire(t, b, &data), fixture)
 }
 
 func TestUnitUserPolicyWriteSendsNullParentalRatings(t *testing.T) {
 	ctx := context.Background()
-	b, err := userPolicyWire()
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := mustWire(t, userPolicyWire)
 	var data UserResourceModel
 	if d := b.FlattenInto(ctx, `{}`, &data); d.HasError() {
 		t.Fatalf("read: %v", d)
@@ -163,13 +153,9 @@ func TestUnitUserPolicyDemotesBeforeDisabling(t *testing.T) {
 
 // Jellyfin lists IDs as 32 lowercase hex digits, whatever spelling it read.
 func TestUnitUserPolicyTakesIDsAsJellyfinListsThem(t *testing.T) {
-	s := schemaOf(&UserResource{})
-	policy, ok := s.Attributes["policy"].(schema.SingleNestedAttribute)
-	if !ok {
-		t.Fatal("policy is not a nested object")
-	}
+	policy := userPolicyAttributes()
 	for _, name := range []string{"enabled_folders", "blocked_media_folders", "enabled_channels", "blocked_channels"} {
-		a, ok := policy.Attributes[name].(schema.ListAttribute)
+		a, ok := policy[name].(schema.ListAttribute)
 		if !ok {
 			t.Fatalf("%s is not a list", name)
 		}
@@ -193,12 +179,7 @@ func TestUnitUserPolicyTakesIDsAsJellyfinListsThem(t *testing.T) {
 // schedule leaves unset comes from the prior schedule with the same day.
 func TestUnitUserAccessSchedulesPlanByDay(t *testing.T) {
 	ctx := context.Background()
-	s := schemaOf(&UserResource{})
-	policy, ok := s.Attributes["policy"].(schema.SingleNestedAttribute)
-	if !ok {
-		t.Fatal("policy is not a nested object")
-	}
-	schedules, ok := policy.Attributes["access_schedules"].(schema.ListNestedAttribute)
+	schedules, ok := userPolicyAttributes()["access_schedules"].(schema.ListNestedAttribute)
 	if !ok {
 		t.Fatal("access_schedules is not a nested list")
 	}

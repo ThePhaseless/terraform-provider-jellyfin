@@ -44,7 +44,7 @@ func (o *offeredProviders) forContentType(ctx context.Context, contentType strin
 		return served.options, served.err
 	}
 	if o.c == nil {
-		return nil, fmt.Errorf("no Jellyfin client to ask which providers the server offers")
+		return nil, errors.New("no Jellyfin client to ask which providers the server offers")
 	}
 	options, err := o.c.GetAvailableLibraryOptions(ctx, contentType)
 	o.served[contentType] = servedOptions{options: options, err: err}

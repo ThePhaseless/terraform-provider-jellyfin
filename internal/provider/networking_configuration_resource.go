@@ -9,14 +9,11 @@ import (
 	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
@@ -79,6 +76,9 @@ func (r *NetworkingConfigurationResource) Metadata(_ context.Context, req resour
 }
 
 func (r *NetworkingConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	certificatePassword := optionalString("Password for the TLS certificate.")
+	certificatePassword.Sensitive = true
+
 	resp.Schema = schema.Schema{
 		Description:         "Manages the Jellyfin networking configuration.",
 		MarkdownDescription: "Manages the Jellyfin networking configuration.",
@@ -95,7 +95,7 @@ func (r *NetworkingConfigurationResource) Schema(_ context.Context, _ resource.S
 			"enable_https":                           optionalBool("Whether HTTPS is enabled."),
 			"require_https":                          optionalBool("Whether HTTPS is required."),
 			"certificate_path":                       optionalString("Path to the TLS certificate."),
-			"certificate_password":                   schema.StringAttribute{Description: "Password for the TLS certificate.", MarkdownDescription: "Password for the TLS certificate.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}, Sensitive: true},
+			"certificate_password":                   certificatePassword,
 			"internal_http_port":                     optionalInt("Internal HTTP port."),
 			"internal_https_port":                    optionalInt("Internal HTTPS port."),
 			"public_http_port":                       optionalInt("Public HTTP port."),
@@ -126,33 +126,15 @@ func (r *NetworkingConfigurationResource) Configure(_ context.Context, req resou
 }
 
 func (r *NetworkingConfigurationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data NetworkingConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *NetworkingConfigurationResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var data NetworkingConfigurationResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.read(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().read(ctx, req.State, &resp.State, &resp.Diagnostics)
 }
 
 func (r *NetworkingConfigurationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data NetworkingConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *NetworkingConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
@@ -160,38 +142,21 @@ func (r *NetworkingConfigurationResource) Delete(_ context.Context, _ resource.D
 }
 
 func (r *NetworkingConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("networking"))...)
+	r.singleton().setID(ctx, &resp.State, &resp.Diagnostics)
 }
 
 // ModifyPlan gates each configured field on the Jellyfin version it needs, so
 // a field a later pin adds is checked without a change here.
 func (r *NetworkingConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() {
-		return
-	}
-	if b := wireBinding(&resp.Diagnostics, networkingWire); b != nil {
-		resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
+	if !req.Plan.Raw.IsNull() {
+		checkServerHasFields(ctx, r.client, networkingWire, req.Config, &resp.Diagnostics)
 	}
 }
 
-func (r *NetworkingConfigurationResource) apply(ctx context.Context, data *NetworkingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
-	b := wireBinding(diags, networkingWire)
-	if b == nil || !r.document().write(ctx, b, data, diags) {
-		return
+func (r *NetworkingConfigurationResource) singleton() singleton[NetworkingConfigurationResourceModel] {
+	return singleton[NetworkingConfigurationResourceModel]{
+		id:   "networking",
+		bind: networkingWire,
+		doc:  document{what: "networking configuration", get: r.client.GetNetworkConfiguration, put: r.client.UpdateNetworkConfiguration},
 	}
-	data.ID = types.StringValue("networking")
-	diags.Append(state.Set(ctx, data)...)
-}
-
-func (r *NetworkingConfigurationResource) read(ctx context.Context, data *NetworkingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
-	b := wireBinding(diags, networkingWire)
-	if b == nil || !r.document().read(ctx, b, data, diags) {
-		return
-	}
-	data.ID = types.StringValue("networking")
-	diags.Append(state.Set(ctx, data)...)
-}
-
-func (r *NetworkingConfigurationResource) document() document {
-	return document{what: "networking configuration", get: r.client.GetNetworkConfiguration, put: r.client.UpdateNetworkConfiguration}
 }

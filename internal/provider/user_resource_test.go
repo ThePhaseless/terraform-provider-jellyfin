@@ -18,7 +18,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/release"
 )
 
 func TestAccUserResource(t *testing.T) {
@@ -59,7 +58,9 @@ func TestAccUserResourceRenameLetterCaseOnly(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck: func() {
 			testAccPreCheck(t)
-			testAccPreCheckJellyfinVersionAtLeast(t, "12")
+			if !testAccJellyfin12OrLater(t) {
+				t.Skip("requires Jellyfin 12 or newer")
+			}
 		},
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
@@ -255,7 +256,7 @@ type expectPriorStateAttributesSet struct {
 
 func (e expectPriorStateAttributesSet) CheckPlan(_ context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
 	if req.Plan.PriorState == nil || req.Plan.PriorState.Values == nil {
-		resp.Error = fmt.Errorf("plan has no prior state")
+		resp.Error = errors.New("plan has no prior state")
 		return
 	}
 	for _, r := range req.Plan.PriorState.Values.RootModule.Resources {
@@ -271,18 +272,6 @@ func (e expectPriorStateAttributesSet) CheckPlan(_ context.Context, req planchec
 		return
 	}
 	resp.Error = fmt.Errorf("%s is not in the prior state", e.address)
-}
-
-func testAccPreCheckJellyfinVersionAtLeast(t *testing.T, minVersion string) {
-	t.Helper()
-
-	info, err := testAccClient(t).GetSystemInfo(context.Background())
-	if err != nil {
-		t.Fatalf("reading Jellyfin version: %v", err)
-	}
-	if release.Compare(info.Version, minVersion) < 0 {
-		t.Skipf("requires Jellyfin %s or newer, server is %s", minVersion, info.Version)
-	}
 }
 
 // testAccSetUserSubtitleLanguage changes a per-user setting of

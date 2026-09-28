@@ -92,13 +92,7 @@ func (r *PluginConfigurationResource) Configure(_ context.Context, req resource.
 }
 
 func (r *PluginConfigurationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data PluginConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.write(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.write(ctx, req.Plan, &resp.Diagnostics, &resp.State)
 }
 
 func (r *PluginConfigurationResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -119,11 +113,7 @@ func (r *PluginConfigurationResource) Read(ctx context.Context, req resource.Rea
 	}
 
 	// An import has no configuration yet, and reads the whole of it.
-	managed := ""
-	if !data.Configuration.IsNull() && !data.Configuration.IsUnknown() {
-		managed = data.Configuration.ValueString()
-	}
-	served, err := servedConfiguration(configJSON, managed)
+	served, err := servedConfiguration(configJSON, data.Configuration.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read plugin configuration", err.Error())
 		return
@@ -136,17 +126,18 @@ func (r *PluginConfigurationResource) Read(ctx context.Context, req resource.Rea
 }
 
 func (r *PluginConfigurationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	r.write(ctx, req.Plan, &resp.Diagnostics, &resp.State)
+}
+
+// write posts the planned configuration and reads back what the server keeps
+// of it.
+func (r *PluginConfigurationResource) write(ctx context.Context, plan tfsdk.Plan, diags *diag.Diagnostics, state *tfsdk.State) {
 	var data PluginConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
+	diags.Append(plan.Get(ctx, &data)...)
+	if diags.HasError() {
 		return
 	}
 
-	r.write(ctx, &data, &resp.Diagnostics, &resp.State)
-}
-
-// write posts the configuration and reads back what the server keeps of it.
-func (r *PluginConfigurationResource) write(ctx context.Context, data *PluginConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
 	if err := r.client.UpdatePluginConfiguration(ctx, data.PluginID.ValueString(), data.Configuration.ValueString()); err != nil {
 		diags.AddError("Failed to update plugin configuration", err.Error())
 		return
@@ -165,7 +156,7 @@ func (r *PluginConfigurationResource) write(ctx context.Context, data *PluginCon
 	data.Configuration = jsontypes.NewNormalizedValue(served)
 	data.ID = data.PluginID
 
-	diags.Append(state.Set(ctx, data)...)
+	diags.Append(state.Set(ctx, &data)...)
 }
 
 // servedConfiguration returns the normalized configuration served holds,
@@ -342,9 +333,5 @@ func normalizeJSONRecursive(raw json.RawMessage, depth int) (json.RawMessage, er
 	if err := json.Unmarshal(trimmed, &rawValue); err != nil {
 		return nil, err
 	}
-	result, err := json.Marshal(rawValue)
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
+	return json.Marshal(rawValue)
 }

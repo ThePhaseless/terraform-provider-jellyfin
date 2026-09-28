@@ -314,9 +314,7 @@ func (r *ScheduledTaskResource) ModifyPlan(ctx context.Context, req resource.Mod
 	if req.Plan.Raw.IsNull() {
 		return
 	}
-	if b := wireBinding(&resp.Diagnostics, scheduledTaskWire); b != nil {
-		resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
-	}
+	checkServerHasFields(ctx, r.client, scheduledTaskWire, req.Config, &resp.Diagnostics)
 	resp.Diagnostics.Append(r.planTaskForKey(ctx, req, resp)...)
 }
 

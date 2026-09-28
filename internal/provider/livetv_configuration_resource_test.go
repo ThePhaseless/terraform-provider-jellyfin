@@ -241,8 +241,6 @@ resource "jellyfin_livetv_configuration" "test" {
 // Jellyfin rewrites MediaLocationsCreated asynchronously after the POST
 // returns, so a refresh right after apply may read the old list.
 func testAccWaitForLiveTVMediaLocations(t *testing.T, want ...string) resource.TestCheckFunc {
-	t.Helper()
-
 	return func(*terraform.State) error {
 		const timeout = time.Minute
 		c := testAccClient(t)

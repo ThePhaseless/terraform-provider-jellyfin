@@ -51,56 +51,36 @@ func (p *JellyfinProvider) Metadata(_ context.Context, _ provider.MetadataReques
 }
 
 func (p *JellyfinProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
+	const description = "The Jellyfin provider allows you to manage a Jellyfin media server instance. " +
+		"It supports managing users, libraries, plugins, system configuration, and initial setup."
+	setting := func(desc string) schema.StringAttribute {
+		return schema.StringAttribute{
+			Description:         desc,
+			MarkdownDescription: desc,
+			Optional:            true,
+			Validators: []validator.String{
+				stringvalidator.LengthAtLeast(1),
+			},
+		}
+	}
+	secret := func(desc string) schema.StringAttribute {
+		a := setting(desc)
+		a.Sensitive = true
+		return a
+	}
 	resp.Schema = schema.Schema{
-		Description: "The Jellyfin provider allows you to manage a Jellyfin media server instance. " +
-			"It supports managing users, libraries, plugins, system configuration, and initial setup.",
-		MarkdownDescription: "The Jellyfin provider allows you to manage a Jellyfin media server instance. " +
-			"It supports managing users, libraries, plugins, system configuration, and initial setup.",
+		Description:         description,
+		MarkdownDescription: description,
 		Attributes: map[string]schema.Attribute{
-			"endpoint": schema.StringAttribute{
-				Description: "The URL of the Jellyfin server (e.g., `http://localhost:8096`). " +
-					"Can also be set via the `JELLYFIN_ENDPOINT` environment variable.",
-				MarkdownDescription: "The URL of the Jellyfin server (e.g., `http://localhost:8096`). " +
-					"Can also be set via the `JELLYFIN_ENDPOINT` environment variable.",
-				Optional: true,
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-			},
-			"api_key": schema.StringAttribute{
-				Description: "The API key for authenticating with the Jellyfin server. " +
-					"Can also be set via the `JELLYFIN_API_KEY` environment variable. " +
-					"Use username and password instead when bootstrapping a new server.",
-				MarkdownDescription: "The API key for authenticating with the Jellyfin server. " +
-					"Can also be set via the `JELLYFIN_API_KEY` environment variable. " +
-					"Use username and password instead when bootstrapping a new server.",
-				Optional:  true,
-				Sensitive: true,
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-			},
-			"username": schema.StringAttribute{
-				Description: "Username for authenticating with the Jellyfin server and creating the initial admin during bootstrap. " +
-					"Can also be set via the `JELLYFIN_USERNAME` environment variable.",
-				MarkdownDescription: "Username for authenticating with the Jellyfin server and creating the initial admin during bootstrap. " +
-					"Can also be set via the `JELLYFIN_USERNAME` environment variable.",
-				Optional: true,
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-			},
-			"password": schema.StringAttribute{
-				Description: "Password for authenticating with the Jellyfin server and creating the initial admin during bootstrap. " +
-					"Can also be set via the `JELLYFIN_PASSWORD` environment variable.",
-				MarkdownDescription: "Password for authenticating with the Jellyfin server and creating the initial admin during bootstrap. " +
-					"Can also be set via the `JELLYFIN_PASSWORD` environment variable.",
-				Optional:  true,
-				Sensitive: true,
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-			},
+			"endpoint": setting("The URL of the Jellyfin server (e.g., `http://localhost:8096`). " +
+				"Can also be set via the `JELLYFIN_ENDPOINT` environment variable."),
+			"api_key": secret("The API key for authenticating with the Jellyfin server. " +
+				"Can also be set via the `JELLYFIN_API_KEY` environment variable. " +
+				"Use username and password instead when bootstrapping a new server."),
+			"username": setting("Username for authenticating with the Jellyfin server and creating the initial admin during bootstrap. " +
+				"Can also be set via the `JELLYFIN_USERNAME` environment variable."),
+			"password": secret("Password for authenticating with the Jellyfin server and creating the initial admin during bootstrap. " +
+				"Can also be set via the `JELLYFIN_PASSWORD` environment variable."),
 		},
 	}
 }
@@ -128,25 +108,10 @@ func (p *JellyfinProvider) Configure(ctx context.Context, req provider.Configure
 		return
 	}
 
-	endpoint := os.Getenv("JELLYFIN_ENDPOINT")
-	if !data.Endpoint.IsNull() {
-		endpoint = data.Endpoint.ValueString()
-	}
-
-	apiKey := os.Getenv("JELLYFIN_API_KEY")
-	if !data.APIKey.IsNull() {
-		apiKey = data.APIKey.ValueString()
-	}
-
-	username := os.Getenv("JELLYFIN_USERNAME")
-	if !data.Username.IsNull() {
-		username = data.Username.ValueString()
-	}
-
-	password := os.Getenv("JELLYFIN_PASSWORD")
-	if !data.Password.IsNull() {
-		password = data.Password.ValueString()
-	}
+	endpoint := configuredOrEnv(data.Endpoint, "JELLYFIN_ENDPOINT")
+	apiKey := configuredOrEnv(data.APIKey, "JELLYFIN_API_KEY")
+	username := configuredOrEnv(data.Username, "JELLYFIN_USERNAME")
+	password := configuredOrEnv(data.Password, "JELLYFIN_PASSWORD")
 
 	if endpoint == "" {
 		resp.Diagnostics.AddError(
@@ -174,6 +139,13 @@ func (p *JellyfinProvider) Configure(ctx context.Context, req provider.Configure
 
 	resp.DataSourceData = c
 	resp.ResourceData = c
+}
+
+func configuredOrEnv(v types.String, env string) string {
+	if v.IsNull() {
+		return os.Getenv(env)
+	}
+	return v.ValueString()
 }
 
 func unknownAttributes(data JellyfinProviderModel) []string {
@@ -235,7 +207,7 @@ func configureClient(ctx context.Context, endpoint, apiKey, username, password s
 
 func getPublicSystemInfo(ctx context.Context, c *client.Client) (*client.PublicSystemInfo, error) {
 	var lastErr error
-	for i := 0; i < startupStatusRetries; i++ {
+	for range startupStatusRetries {
 		info, err := c.GetPublicSystemInfo(ctx)
 		if err == nil {
 			return info, nil

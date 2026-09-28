@@ -9,14 +9,11 @@ import (
 	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
@@ -113,6 +110,9 @@ func (r *EncodingConfigurationResource) Metadata(_ context.Context, req resource
 }
 
 func (r *EncodingConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	hlsAudioSeekStrategy := optionalString("Method used to seek the audio stream when transcoding HLS segments. One of `TrimCopiedAudio`, `TranscodeAudio`. Requires Jellyfin 12.0 or later.")
+	hlsAudioSeekStrategy.Validators = []validator.String{stringvalidator.OneOf("TrimCopiedAudio", "TranscodeAudio")}
+
 	resp.Schema = schema.Schema{
 		Description:         "Manages the Jellyfin encoding configuration.",
 		MarkdownDescription: "Manages the Jellyfin encoding configuration.",
@@ -173,7 +173,7 @@ func (r *EncodingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 			"subtitle_extraction_timeout_minutes":     optionalInt("Subtitle extraction timeout in minutes. Requires Jellyfin 12.0 or later."),
 			"hardware_decoding_codecs":                optionalStringList("Hardware decoding codecs."),
 			"allow_on_demand_metadata_based_keyframe_extraction_for_extensions": optionalStringList("Extensions allowing on-demand metadata-based keyframe extraction."),
-			"hls_audio_seek_strategy": schema.StringAttribute{Description: "Method used to seek the audio stream when transcoding HLS segments. One of `TrimCopiedAudio`, `TranscodeAudio`. Requires Jellyfin 12.0 or later.", MarkdownDescription: "Method used to seek the audio stream when transcoding HLS segments. One of `TrimCopiedAudio`, `TranscodeAudio`. Requires Jellyfin 12.0 or later.", Optional: true, Computed: true, Validators: []validator.String{stringvalidator.OneOf("TrimCopiedAudio", "TranscodeAudio")}, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
+			"hls_audio_seek_strategy": hlsAudioSeekStrategy,
 		},
 	}
 }
@@ -183,33 +183,15 @@ func (r *EncodingConfigurationResource) Configure(_ context.Context, req resourc
 }
 
 func (r *EncodingConfigurationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data EncodingConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *EncodingConfigurationResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var data EncodingConfigurationResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.read(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().read(ctx, req.State, &resp.State, &resp.Diagnostics)
 }
 
 func (r *EncodingConfigurationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data EncodingConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *EncodingConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
@@ -217,42 +199,21 @@ func (r *EncodingConfigurationResource) Delete(_ context.Context, _ resource.Del
 }
 
 func (r *EncodingConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Singleton resource, so the import ID is not used. Set only the id: the
-	// framework types every other attribute from the schema, and the Read that
-	// follows an import fills them. A zero-valued model would leave list
-	// attributes without an element type.
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("encoding"))...)
+	r.singleton().setID(ctx, &resp.State, &resp.Diagnostics)
 }
 
 // ModifyPlan rejects configured fields the server's Jellyfin version lacks,
 // such as the 12.0 ones on 10.11, which the server would accept and drop.
 func (r *EncodingConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() {
-		return
-	}
-	if b := wireBinding(&resp.Diagnostics, encodingWire); b != nil {
-		resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
+	if !req.Plan.Raw.IsNull() {
+		checkServerHasFields(ctx, r.client, encodingWire, req.Config, &resp.Diagnostics)
 	}
 }
 
-func (r *EncodingConfigurationResource) apply(ctx context.Context, data *EncodingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
-	b := wireBinding(diags, encodingWire)
-	if b == nil || !r.document().write(ctx, b, data, diags) {
-		return
+func (r *EncodingConfigurationResource) singleton() singleton[EncodingConfigurationResourceModel] {
+	return singleton[EncodingConfigurationResourceModel]{
+		id:   "encoding",
+		bind: encodingWire,
+		doc:  document{what: "encoding configuration", get: r.client.GetEncodingOptions, put: r.client.UpdateEncodingOptions},
 	}
-	data.ID = types.StringValue("encoding")
-	diags.Append(state.Set(ctx, data)...)
-}
-
-func (r *EncodingConfigurationResource) read(ctx context.Context, data *EncodingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
-	b := wireBinding(diags, encodingWire)
-	if b == nil || !r.document().read(ctx, b, data, diags) {
-		return
-	}
-	data.ID = types.StringValue("encoding")
-	diags.Append(state.Set(ctx, data)...)
-}
-
-func (r *EncodingConfigurationResource) document() document {
-	return document{what: "encoding configuration", get: r.client.GetEncodingOptions, put: r.client.UpdateEncodingOptions}
 }

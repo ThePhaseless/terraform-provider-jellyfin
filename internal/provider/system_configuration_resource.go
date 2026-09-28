@@ -315,33 +315,15 @@ func (r *SystemConfigurationResource) Configure(_ context.Context, req resource.
 }
 
 func (r *SystemConfigurationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data SystemConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *SystemConfigurationResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var data SystemConfigurationResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.read(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().read(wire.WithAvailable(ctx, r.offered(r.client)), req.State, &resp.State, &resp.Diagnostics)
 }
 
 func (r *SystemConfigurationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data SystemConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *SystemConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
@@ -349,7 +331,7 @@ func (r *SystemConfigurationResource) Delete(_ context.Context, _ resource.Delet
 }
 
 func (r *SystemConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("system"))...)
+	r.singleton().setID(ctx, &resp.State, &resp.Diagnostics)
 }
 
 // ModifyPlan gates each configured field on the Jellyfin version it needs, so
@@ -362,9 +344,7 @@ func (r *SystemConfigurationResource) ModifyPlan(ctx context.Context, req resour
 	if req.Plan.Raw.IsNull() {
 		return
 	}
-	if b := wireBinding(&resp.Diagnostics, systemWire); b != nil {
-		resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
-	}
+	checkServerHasFields(ctx, r.client, systemWire, req.Config, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() || req.State.Raw.IsNull() {
 		return
 	}
@@ -401,22 +381,13 @@ type metadataOptionsModel struct {
 // planMetadataOptionsByItemType plans each entry's attributes as its schema's
 // plan modifiers do, but against the prior entry with its item type.
 func planMetadataOptionsByItemType(ctx context.Context, config, plan, state types.List) (types.List, diag.Diagnostics) {
-	var diags diag.Diagnostics
-	var c, p, s []metadataOptionsModel
-	if config.ElementsAs(ctx, &c, false).HasError() || plan.ElementsAs(ctx, &p, false).HasError() || len(c) != len(p) {
-		return plan, diags
-	}
-	if !state.IsNull() && !state.IsUnknown() && state.ElementsAs(ctx, &s, false).HasError() {
-		return plan, diags
-	}
-
-	for i := range p {
+	return replanEntries(ctx, config, plan, state, func(i int, e metadataOptionsModel, p *metadataOptionsModel, s []metadataOptionsModel) diag.Diagnostics {
 		// Without an item type, an entry takes the one of the prior entry at
 		// its index, so its plan from that entry stands.
-		if c[i].ItemType.IsNull() {
-			continue
+		if e.ItemType.IsNull() {
+			return nil
 		}
-		prior, found := priorMetadataOptions(s, i, c[i].ItemType)
+		prior, found := priorMetadataOptions(s, i, e.ItemType)
 		fromPrior := func(configured, planned, prior types.List, sharedKeysChange bool) types.List {
 			switch {
 			case !configured.IsNull():
@@ -430,22 +401,18 @@ func planMetadataOptionsByItemType(ctx context.Context, config, plan, state type
 			}
 			return types.ListUnknown(types.StringType)
 		}
-		e := c[i]
-		p[i].DisabledMetadataSavers = fromPrior(e.DisabledMetadataSavers, p[i].DisabledMetadataSavers, prior.DisabledMetadataSavers, false)
-		p[i].LocalMetadataReaderOrder = fromPrior(e.LocalMetadataReaderOrder, p[i].LocalMetadataReaderOrder, prior.LocalMetadataReaderOrder, false)
-		p[i].MetadataFetchers = fromPrior(e.MetadataFetchers, p[i].MetadataFetchers, prior.MetadataFetchers,
+		p.DisabledMetadataSavers = fromPrior(e.DisabledMetadataSavers, p.DisabledMetadataSavers, prior.DisabledMetadataSavers, false)
+		p.LocalMetadataReaderOrder = fromPrior(e.LocalMetadataReaderOrder, p.LocalMetadataReaderOrder, prior.LocalMetadataReaderOrder, false)
+		p.MetadataFetchers = fromPrior(e.MetadataFetchers, p.MetadataFetchers, prior.MetadataFetchers,
 			changes(e.DisabledMetadataFetchers, prior.DisabledMetadataFetchers) || changes(e.MetadataFetcherOrder, prior.MetadataFetcherOrder))
-		p[i].DisabledMetadataFetchers = fromPrior(e.DisabledMetadataFetchers, p[i].DisabledMetadataFetchers, prior.DisabledMetadataFetchers, changes(e.MetadataFetchers, prior.MetadataFetchers))
-		p[i].MetadataFetcherOrder = fromPrior(e.MetadataFetcherOrder, p[i].MetadataFetcherOrder, prior.MetadataFetcherOrder, changes(e.MetadataFetchers, prior.MetadataFetchers))
-		p[i].ImageFetchers = fromPrior(e.ImageFetchers, p[i].ImageFetchers, prior.ImageFetchers,
+		p.DisabledMetadataFetchers = fromPrior(e.DisabledMetadataFetchers, p.DisabledMetadataFetchers, prior.DisabledMetadataFetchers, changes(e.MetadataFetchers, prior.MetadataFetchers))
+		p.MetadataFetcherOrder = fromPrior(e.MetadataFetcherOrder, p.MetadataFetcherOrder, prior.MetadataFetcherOrder, changes(e.MetadataFetchers, prior.MetadataFetchers))
+		p.ImageFetchers = fromPrior(e.ImageFetchers, p.ImageFetchers, prior.ImageFetchers,
 			changes(e.DisabledImageFetchers, prior.DisabledImageFetchers) || changes(e.ImageFetcherOrder, prior.ImageFetcherOrder))
-		p[i].DisabledImageFetchers = fromPrior(e.DisabledImageFetchers, p[i].DisabledImageFetchers, prior.DisabledImageFetchers, changes(e.ImageFetchers, prior.ImageFetchers))
-		p[i].ImageFetcherOrder = fromPrior(e.ImageFetcherOrder, p[i].ImageFetcherOrder, prior.ImageFetcherOrder, changes(e.ImageFetchers, prior.ImageFetchers))
-	}
-
-	out, d := types.ListValueFrom(ctx, plan.ElementType(ctx), p)
-	diags.Append(d...)
-	return out, diags
+		p.DisabledImageFetchers = fromPrior(e.DisabledImageFetchers, p.DisabledImageFetchers, prior.DisabledImageFetchers, changes(e.ImageFetchers, prior.ImageFetchers))
+		p.ImageFetcherOrder = fromPrior(e.ImageFetcherOrder, p.ImageFetcherOrder, prior.ImageFetcherOrder, changes(e.ImageFetchers, prior.ImageFetchers))
+		return nil
+	})
 }
 
 // priorMetadataOptions prefers the prior entry at index when it has the item type,
@@ -457,38 +424,19 @@ func priorMetadataOptions(state []metadataOptionsModel, index int, itemType type
 	return entryWithType(state, itemType, func(e metadataOptionsModel) types.String { return e.ItemType })
 }
 
-func (r *SystemConfigurationResource) apply(ctx context.Context, data *SystemConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
-	b := wireBinding(diags, systemWire)
-	if b == nil {
-		return
-	}
-	ctx = wire.WithAvailable(ctx, r.offered(r.client))
-
+func (r *SystemConfigurationResource) write(ctx context.Context, plan tfsdk.Plan, state *tfsdk.State, diags *diag.Diagnostics) {
 	// The document holds the plugin repositories, which the write posts back
 	// as read.
 	serverConfigurationMu.Lock()
 	defer serverConfigurationMu.Unlock()
 
-	if !r.document().write(ctx, b, data, diags) {
-		return
-	}
-	data.ID = types.StringValue("system")
-	diags.Append(state.Set(ctx, data)...)
+	r.singleton().write(wire.WithAvailable(ctx, r.offered(r.client)), plan, state, diags)
 }
 
-func (r *SystemConfigurationResource) read(ctx context.Context, data *SystemConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
-	b := wireBinding(diags, systemWire)
-	if b == nil {
-		return
+func (r *SystemConfigurationResource) singleton() singleton[SystemConfigurationResourceModel] {
+	return singleton[SystemConfigurationResourceModel]{
+		id:   "system",
+		bind: systemWire,
+		doc:  document{what: "system configuration", get: r.client.GetSystemConfiguration, put: r.client.UpdateSystemConfiguration},
 	}
-	ctx = wire.WithAvailable(ctx, r.offered(r.client))
-	if !r.document().read(ctx, b, data, diags) {
-		return
-	}
-	data.ID = types.StringValue("system")
-	diags.Append(state.Set(ctx, data)...)
-}
-
-func (r *SystemConfigurationResource) document() document {
-	return document{what: "system configuration", get: r.client.GetSystemConfiguration, put: r.client.UpdateSystemConfiguration}
 }

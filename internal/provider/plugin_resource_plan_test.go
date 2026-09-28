@@ -14,14 +14,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-go/tftypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 func pluginResourcePlan(t *testing.T, m PluginResourceModel) tfsdk.Plan {
 	t.Helper()
-	plan := tfsdk.Plan{Schema: pluginResourceSchema(t)}
+	plan := tfsdk.Plan{Schema: schemaOf(NewPluginResource())}
 	if diags := plan.Set(context.Background(), &m); diags.HasError() {
 		t.Fatalf("plan: %v", diags.Errors())
 	}
@@ -174,8 +173,7 @@ func TestUnitPluginSupportedKeywordFailsPlanUnlessPackagesResolveIt(t *testing.T
 // each the previous one's plan value as the framework does.
 func TestUnitPluginVersionPlan(t *testing.T) {
 	ctx := context.Background()
-	resourceSchema := pluginResourceSchema(t)
-	attr, ok := resourceSchema.Attributes["version"].(schema.StringAttribute)
+	attr, ok := schemaOf(NewPluginResource()).Attributes["version"].(schema.StringAttribute)
 	if !ok {
 		t.Fatal("version is not a schema.StringAttribute")
 	}
@@ -214,7 +212,7 @@ func TestUnitPluginVersionPlan(t *testing.T) {
 				ConfigValue: c.config,
 				StateValue:  types.StringNull(),
 				PlanValue:   planned,
-				State:       tfsdk.State{Schema: resourceSchema, Raw: tftypes.NewValue(resourceSchema.Type().TerraformType(ctx), nil)},
+				State:       pluginResourceNullState(),
 			}
 			if c.state != nil {
 				req.State = pluginResourceState(t, *c.state)

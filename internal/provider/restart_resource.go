@@ -45,6 +45,8 @@ type RestartResourceModel struct {
 // how many poll intervals to wait before the first of them.
 const restartSettleReads = 3
 
+const defaultRestartTimeoutSeconds = 120
+
 func (r *RestartResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_restart"
 }
@@ -76,7 +78,7 @@ func (r *RestartResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				MarkdownDescription: "Maximum number of seconds to wait for the server to come back up after restart. Defaults to 120.",
 				Optional:            true,
 				Computed:            true,
-				Default:             int64default.StaticInt64(120),
+				Default:             int64default.StaticInt64(defaultRestartTimeoutSeconds),
 			},
 			"completed_at": schema.StringAttribute{
 				Description:         "RFC3339 timestamp marking when the server was ready after the restart.",
@@ -106,11 +108,11 @@ func (r *RestartResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	timeout := 120 * time.Second
+	timeout := defaultRestartTimeoutSeconds * time.Second
 	if !data.Timeout.IsNull() && !data.Timeout.IsUnknown() {
 		timeout = time.Duration(data.Timeout.ValueInt64()) * time.Second
 	}
-	if err := waitForServerReady(ctx, r.client, timeout); err != nil {
+	if err := awaitRestart(ctx, r.client, timeout, startupStatusDelay); err != nil {
 		resp.Diagnostics.AddError("Jellyfin server did not become ready after restart", err.Error())
 		return
 	}
@@ -148,12 +150,6 @@ func (r *RestartResource) Update(ctx context.Context, req resource.UpdateRequest
 }
 
 func (r *RestartResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
-}
-
-// waitForServerReady blocks until a restart already requested has completed,
-// or timeout elapses.
-func waitForServerReady(ctx context.Context, c *client.Client, timeout time.Duration) error {
-	return awaitRestart(ctx, c, timeout, startupStatusDelay)
 }
 
 // awaitRestart waits out a restart that has already been requested, returning

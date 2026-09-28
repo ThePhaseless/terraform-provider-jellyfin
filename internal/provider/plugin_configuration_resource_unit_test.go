@@ -48,20 +48,18 @@ func TestUnitPluginIDPlan(t *testing.T) {
 	}
 
 	for _, r := range []resource.Resource{NewPluginConfigurationResource(), &JellyfinSecurityPluginConfigurationResource{}} {
-		var meta resource.MetadataResponse
-		r.Metadata(ctx, resource.MetadataRequest{ProviderTypeName: "jellyfin"}, &meta)
-		var schemaResp resource.SchemaResponse
-		r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
-		attr, ok := schemaResp.Schema.Attributes["plugin_id"].(schema.StringAttribute)
+		typeName := resourceTypeName(ctx, r)
+		resourceSchema := schemaOf(r)
+		attr, ok := resourceSchema.Attributes["plugin_id"].(schema.StringAttribute)
 		if !ok {
-			t.Fatalf("%s: plugin_id is %T, want schema.StringAttribute", meta.TypeName, schemaResp.Schema.Attributes["plugin_id"])
+			t.Fatalf("%s: plugin_id is %T, want schema.StringAttribute", typeName, resourceSchema.Attributes["plugin_id"])
 		}
 
 		// RequiresReplace skips a create or a destroy, which it tells apart by
 		// a null state or plan object.
-		typ, ok := schemaResp.Schema.Type().TerraformType(ctx).(tftypes.Object)
+		typ, ok := resourceSchema.Type().TerraformType(ctx).(tftypes.Object)
 		if !ok {
-			t.Fatalf("%s: schema type is not an object", meta.TypeName)
+			t.Fatalf("%s: schema type is not an object", typeName)
 		}
 		attrs := make(map[string]tftypes.Value, len(typ.AttributeTypes))
 		for name, attrType := range typ.AttributeTypes {
@@ -70,13 +68,13 @@ func TestUnitPluginIDPlan(t *testing.T) {
 		object := tftypes.NewValue(typ, attrs)
 
 		for _, c := range cases {
-			t.Run(meta.TypeName+"/"+c.name, func(t *testing.T) {
+			t.Run(typeName+"/"+c.name, func(t *testing.T) {
 				req := planmodifier.StringRequest{
 					ConfigValue: c.config,
 					StateValue:  c.state,
 					PlanValue:   c.config,
-					State:       tfsdk.State{Schema: schemaResp.Schema, Raw: object},
-					Plan:        tfsdk.Plan{Schema: schemaResp.Schema, Raw: object},
+					State:       tfsdk.State{Schema: resourceSchema, Raw: object},
+					Plan:        tfsdk.Plan{Schema: resourceSchema, Raw: object},
 				}
 				if c.state.IsNull() {
 					req.State.Raw = tftypes.NewValue(typ, nil)

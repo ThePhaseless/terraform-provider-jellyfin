@@ -41,22 +41,15 @@ func TestVersionNewerWarning(t *testing.T) {
 			if ok != tt.wantOk {
 				t.Errorf("versionNewerWarning() ok = %v, want %v", ok, tt.wantOk)
 			}
-			if tt.wantOk {
-				if detail == "" {
-					t.Errorf("versionNewerWarning() returned empty detail but ok=true")
-				}
-				if !strings.Contains(detail, tt.installed) {
-					t.Errorf("versionNewerWarning() detail missing installed version %q: %s", tt.installed, detail)
-				}
-				if !strings.Contains(detail, tt.supported) {
-					t.Errorf("versionNewerWarning() detail missing supported version %q: %s", tt.supported, detail)
-				}
-				if !strings.Contains(detail, "https://github.com/ThePhaseless/terraform-provider-jellyfin/issues") {
-					t.Errorf("versionNewerWarning() detail missing issue URL: %s", detail)
-				}
-			} else {
+			if !tt.wantOk {
 				if detail != "" {
 					t.Errorf("versionNewerWarning() returned non-empty detail when ok=false: %s", detail)
+				}
+				return
+			}
+			for _, want := range []string{tt.installed, tt.supported, "https://github.com/ThePhaseless/terraform-provider-jellyfin/issues"} {
+				if !strings.Contains(detail, want) {
+					t.Errorf("versionNewerWarning() detail missing %q: %s", want, detail)
 				}
 			}
 		})

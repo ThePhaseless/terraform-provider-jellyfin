@@ -5,20 +5,16 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
-	"sort"
+	"slices"
 	"sync/atomic"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -26,27 +22,13 @@ import (
 )
 
 func TestUnitEncodingConfigurationRoundTrip(t *testing.T) {
-	ctx := context.Background()
-	b, err := encodingWire()
-	if err != nil {
-		t.Fatal(err)
-	}
 	fixture := `{"EncodingThreadCount":-1,"TranscodingTempPath":"/tmp","FallbackFontPath":"/fonts","EnableFallbackFont":false,"EnableAudioVbr":false,"DownMixAudioBoost":2,"DownMixStereoAlgorithm":"None","MaxMuxingQueueSize":2048,"EnableThrottling":false,"ThrottleDelaySeconds":180,"EnableSegmentDeletion":false,"SegmentKeepSeconds":720,"HardwareAccelerationType":"none","EncoderAppPath":"","EncoderAppPathDisplay":"","VaapiDevice":"/dev/dri/renderD128","QsvDevice":"","EnableTonemapping":false,"EnableVppTonemapping":false,"EnableVideoToolboxTonemapping":false,"TonemappingAlgorithm":"bt2390","TonemappingMode":"auto","TonemappingRange":"auto","TonemappingDesat":0,"TonemappingPeak":100,"TonemappingParam":0,"VppTonemappingBrightness":16,"VppTonemappingContrast":1,"H264Crf":23,"H265Crf":28,"EncoderPreset":"auto","DeinterlaceDoubleRate":false,"DeinterlaceMethod":"yadif","EnableDecodingColorDepth10Hevc":true,"EnableDecodingColorDepth10Vp9":true,"EnableDecodingColorDepth10HevcRext":false,"EnableDecodingColorDepth12HevcRext":false,"EnableEnhancedNvdecDecoder":true,"PreferSystemNativeHwDecoder":true,"EnableIntelLowPowerH264HwEncoder":false,"EnableIntelLowPowerHevcHwEncoder":false,"EnableHardwareEncoding":true,"AllowHevcEncoding":false,"AllowAv1Encoding":false,"EnableSubtitleExtraction":true,"SubtitleExtractionTimeoutMinutes":45,"HardwareDecodingCodecs":["h264","vc1"],"AllowOnDemandMetadataBasedKeyframeExtractionForExtensions":["mkv"],"HlsAudioSeekStrategy":"TranscodeAudio"}`
-
-	data := readWire[EncodingConfigurationResourceModel](t, b, fixture)
-	base := map[string]json.RawMessage{}
-	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
-		t.Fatalf("write: %v", d)
-	}
-	checkSameJSON(t, base, fixture)
+	checkRoundTrip[EncodingConfigurationResourceModel](t, mustWire(t, encodingWire), fixture)
 }
 
 func TestUnitEncodingConfigurationJellyfin12FieldsResolveToNullWhenKeysMissing(t *testing.T) {
 	ctx := context.Background()
-	b, err := encodingWire()
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := mustWire(t, encodingWire)
 	fixture := `{"EnableSubtitleExtraction":true,"HardwareDecodingCodecs":["h264","vc1"]}`
 
 	data := readWire[EncodingConfigurationResourceModel](t, b, fixture)
@@ -74,11 +56,7 @@ func TestUnitEncodingConfigurationJellyfin12FieldsResolveToNullWhenKeysMissing(t
 }
 
 func TestUnitEncodingConfigurationEnumValidators(t *testing.T) {
-	ctx := context.Background()
-
-	var resp resource.SchemaResponse
-	(&EncodingConfigurationResource{}).Schema(ctx, resource.SchemaRequest{}, &resp)
-
+	attrs := schemaOf(&EncodingConfigurationResource{}).Attributes
 	for name, valid := range map[string]string{
 		"down_mix_stereo_algorithm":  "None",
 		"hardware_acceleration_type": "none",
@@ -89,26 +67,13 @@ func TestUnitEncodingConfigurationEnumValidators(t *testing.T) {
 		"deinterlace_method":         "yadif",
 		"hls_audio_seek_strategy":    "TrimCopiedAudio",
 	} {
-		attr, ok := resp.Schema.Attributes[name].(rschema.StringAttribute)
+		attr, ok := attrs[name].(rschema.StringAttribute)
 		if !ok {
-			t.Fatalf("%s attribute type = %T, want schema.StringAttribute", name, resp.Schema.Attributes[name])
+			t.Fatalf("%s attribute type = %T, want schema.StringAttribute", name, attrs[name])
 		}
-
-		for value, wantError := range map[string]bool{valid: false, "": true} {
-			var diags diag.Diagnostics
-			for _, v := range attr.Validators {
-				vresp := validator.StringResponse{}
-				v.ValidateString(ctx, validator.StringRequest{
-					Path:        path.Root(name),
-					ConfigValue: types.StringValue(value),
-				}, &vresp)
-				diags.Append(vresp.Diagnostics...)
-			}
-
-			if diags.HasError() != wantError {
-				t.Errorf("%s = %q: got error %t, want %t: %v", name, value, diags.HasError(), wantError, diags)
-			}
-		}
+		t.Run(name, func(t *testing.T) {
+			testUnitAssertStringValidation(t, attr, map[string]bool{valid: false, "": true})
+		})
 	}
 }
 
@@ -162,9 +127,7 @@ func TestUnitEncodingConfigurationPlanRejectsJellyfin12FieldsOnOlderServers(t *t
 
 			ctx := context.Background()
 			r := &EncodingConfigurationResource{client: client.NewClient(server.URL, "k")}
-			var schemaResp resource.SchemaResponse
-			r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
-			plan := tfsdk.Plan{Schema: schemaResp.Schema}
+			plan := tfsdk.Plan{Schema: schemaOf(r)}
 			if d := plan.Set(ctx, &tc.config); d.HasError() {
 				t.Fatalf("plan: %v", d)
 			}
@@ -186,8 +149,8 @@ func TestUnitEncodingConfigurationPlanRejectsJellyfin12FieldsOnOlderServers(t *t
 					t.Errorf("error at %s:\n got %q: %q\nwant %q: %q", p, d.Summary(), d.Detail(), "Unsupported Jellyfin server version", wantDetails[p])
 				}
 			}
-			sort.Strings(gotPaths)
-			if !reflect.DeepEqual(gotPaths, tc.wantPaths) {
+			slices.Sort(gotPaths)
+			if !slices.Equal(gotPaths, tc.wantPaths) {
 				t.Errorf("errors at %v, want %v", gotPaths, tc.wantPaths)
 			}
 		})

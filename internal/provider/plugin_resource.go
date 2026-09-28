@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -148,7 +149,7 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	if data.RepositoryURL.IsUnknown() || data.RepositoryURL.IsNull() || data.RepositoryURL.ValueString() == "" {
+	if data.RepositoryURL.ValueString() == "" {
 		resp.Diagnostics.AddError(
 			"Missing plugin repository URL",
 			"The repository_url attribute must be set when installing a plugin so the provider can reproduce the install source.",
@@ -212,17 +213,7 @@ func (r *PluginResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
-	// State written before installed_version existed holds the installed
-	// version in version.
-	held := data.InstalledVersion.ValueString()
-	if data.InstalledVersion.IsNull() || data.InstalledVersion.IsUnknown() {
-		held = data.Version.ValueString()
-	}
-	if isPluginVersionKeyword(held) {
-		held = ""
-	}
-
-	p, found := selectInstalledPlugin(plugins, data.ID.ValueString(), data.Name.ValueString(), held)
+	p, found := selectInstalledPlugin(plugins, data.ID.ValueString(), data.Name.ValueString(), heldVersion(data))
 	if !found {
 		resp.State.RemoveResource(ctx)
 		return
@@ -234,7 +225,7 @@ func (r *PluginResource) Read(ctx context.Context, req resource.ReadRequest, res
 		data.Version = types.StringValue(p.Version)
 	}
 
-	if data.RepositoryURL.IsNull() || data.RepositoryURL.ValueString() == "" {
+	if data.RepositoryURL.ValueString() == "" {
 		repoURL := r.resolveRepositoryURL(ctx, data.Name.ValueString(), p.Version)
 		if repoURL != "" {
 			data.RepositoryURL = types.StringValue(repoURL)
@@ -256,11 +247,7 @@ func (r *PluginResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	if resp.Diagnostics.HasError() || plan.Version.Equal(state.Version) {
 		return
 	}
-	installed := state.InstalledVersion.ValueString()
-	if state.InstalledVersion.IsNull() && !isPluginVersionKeyword(state.Version.ValueString()) {
-		installed = state.Version.ValueString()
-	}
-	keeps, err := r.versionNamesInstalled(ctx, plan.Name.ValueString(), plan.Version, installed)
+	keeps, err := r.versionNamesInstalled(ctx, plan.Name.ValueString(), plan.Version, heldVersion(state))
 	if err != nil {
 		resp.Diagnostics.AddAttributeError(path.Root("version"), "Failed to resolve plugin version", err.Error())
 		return
@@ -268,6 +255,19 @@ func (r *PluginResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	if !keeps {
 		resp.RequiresReplace = append(resp.RequiresReplace, path.Root("version"))
 	}
+}
+
+// heldVersion returns "" when state records none. State written before
+// installed_version existed holds the installed version in version.
+func heldVersion(state PluginResourceModel) string {
+	held := state.InstalledVersion.ValueString()
+	if state.InstalledVersion.IsNull() || state.InstalledVersion.IsUnknown() {
+		held = state.Version.ValueString()
+	}
+	if isPluginVersionKeyword(held) {
+		return ""
+	}
+	return held
 }
 
 // versionNamesInstalled reports whether version, planned to replace another value, names the
@@ -349,7 +349,7 @@ func (r *PluginResource) uninstall(ctx context.Context, id string) ([]client.Ins
 			continue
 		}
 		if r.createdThisRun(p) {
-			tflog.Debug(ctx, "Leaving the plugin version another jellyfin_plugin created in this run", map[string]interface{}{"plugin": p.Name, "version": p.Version})
+			tflog.Debug(ctx, "Leaving the plugin version another jellyfin_plugin created in this run", map[string]any{"plugin": p.Name, "version": p.Version})
 			continue
 		}
 		if err := r.client.UninstallPluginVersion(ctx, p.ID, p.Version); err != nil {
@@ -477,7 +477,7 @@ func (r *PluginResource) waitForPlugin(ctx context.Context, name, version string
 			}
 			seen = p.Version
 		}
-		tflog.Debug(ctx, "Waiting for plugin to appear", map[string]interface{}{"plugin": name, "version": version, "seen": seen})
+		tflog.Debug(ctx, "Waiting for plugin to appear", map[string]any{"plugin": name, "version": version, "seen": seen})
 		if err := pause(ctx, min(pluginPollInterval, time.Until(deadline))); err != nil {
 			return nil, err
 		}
@@ -545,7 +545,7 @@ func (omittedVersionPlanModifier) PlanModifyString(ctx context.Context, req plan
 	}
 	var installed types.String
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("installed_version"), &installed)...)
-	if installed.IsNull() || installed.IsUnknown() || installed.ValueString() == "" {
+	if installed.ValueString() == "" {
 		return
 	}
 	resp.PlanValue = installed
@@ -569,7 +569,7 @@ func samePluginVersion(got, want string) bool {
 func (r *PluginResource) resolveRepositoryURL(ctx context.Context, name, version string) string {
 	pkgs, err := r.client.GetAvailablePackages(ctx)
 	if err != nil {
-		tflog.Debug(ctx, "Could not resolve repository URL for plugin (packages unavailable)", map[string]interface{}{
+		tflog.Debug(ctx, "Could not resolve repository URL for plugin (packages unavailable)", map[string]any{
 			"plugin": name,
 			"error":  err.Error(),
 		})
@@ -577,7 +577,7 @@ func (r *PluginResource) resolveRepositoryURL(ctx context.Context, name, version
 	}
 	repositoryURL := PluginRepositoryURL(pkgs, name, version)
 	if repositoryURL == "" {
-		tflog.Debug(ctx, "Could not resolve repository URL for plugin (exact version unavailable)", map[string]interface{}{
+		tflog.Debug(ctx, "Could not resolve repository URL for plugin (exact version unavailable)", map[string]any{
 			"plugin":  name,
 			"version": version,
 		})
@@ -609,7 +609,7 @@ func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, 
 	supported := supportedVersionForPlugin(name)
 
 	switch {
-	case version.IsNull() || version.IsUnknown() || version.ValueString() == "":
+	case version.ValueString() == "":
 		if supported != "" {
 			return r.resolveSupportedBuild(ctx, name, supported)
 		}
@@ -626,15 +626,13 @@ func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, 
 		if err != nil {
 			return "", err
 		}
-		if supported != "" && latest != "" {
-			if c := release.Compare(pluginRelease(latest), pluginRelease(supported)); c > 0 {
-				tflog.Warn(ctx, "Plugin version newer than supported", map[string]interface{}{
-					"plugin":    name,
-					"latest":    latest,
-					"supported": supported,
-					"warning":   fmt.Sprintf("Installing %s v%s which is newer than the tested/supported v%s. The typed Terraform resource may not cover all properties in this version.", name, latest, supported),
-				})
-			}
+		if supported != "" && latest != "" && release.Compare(pluginRelease(latest), pluginRelease(supported)) > 0 {
+			tflog.Warn(ctx, "Plugin version newer than supported", map[string]any{
+				"plugin":    name,
+				"latest":    latest,
+				"supported": supported,
+				"warning":   fmt.Sprintf("Installing %s v%s which is newer than the tested/supported v%s. The typed Terraform resource may not cover all properties in this version.", name, latest, supported),
+			})
 		}
 		return latest, nil
 
@@ -643,40 +641,40 @@ func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, 
 	}
 }
 
-// resolveLatestVersion fetches the latest version for a plugin from the
-// configured repository manifests via the /Packages endpoint.
-func (r *PluginResource) resolveLatestVersion(ctx context.Context, name string) (string, error) {
+// availablePackage returns the package named name, or nil if none is offered.
+func (r *PluginResource) availablePackage(ctx context.Context, name string) (*client.PackageInfo, error) {
 	pkgs, err := r.client.GetAvailablePackages(ctx)
 	if err != nil {
-		return "", fmt.Errorf("listing available packages: %w", err)
+		return nil, fmt.Errorf("listing available packages: %w", err)
 	}
-
-	for _, pkg := range pkgs {
-		if pkg.Name == name {
-			if len(pkg.Versions) == 0 {
-				return "", fmt.Errorf("plugin %q has no available versions", name)
-			}
-			// Manifests list newest version first.
-			return pkg.Versions[0].Version, nil
-		}
+	i := slices.IndexFunc(pkgs, func(pkg client.PackageInfo) bool { return pkg.Name == name })
+	if i < 0 {
+		return nil, nil
 	}
+	return &pkgs[i], nil
+}
 
-	return "", nil
+// resolveLatestVersion returns "" if the repositories do not offer the plugin.
+func (r *PluginResource) resolveLatestVersion(ctx context.Context, name string) (string, error) {
+	pkg, err := r.availablePackage(ctx, name)
+	switch {
+	case err != nil || pkg == nil:
+		return "", err
+	case len(pkg.Versions) == 0:
+		return "", fmt.Errorf("plugin %q has no available versions", name)
+	}
+	// Manifests list newest version first.
+	return pkg.Versions[0].Version, nil
 }
 
 // resolveSupportedBuild returns the build of the supported release that this
 // server is offered, or "" if the repositories do not offer the plugin.
 func (r *PluginResource) resolveSupportedBuild(ctx context.Context, name, supported string) (string, error) {
-	pkgs, err := r.client.GetAvailablePackages(ctx)
-	if err != nil {
-		return "", fmt.Errorf("listing available packages: %w", err)
+	pkg, err := r.availablePackage(ctx, name)
+	if err != nil || pkg == nil {
+		return "", err
 	}
-	for _, pkg := range pkgs {
-		if pkg.Name == name {
-			return pickReleaseBuild(pkg.Versions, supported), nil
-		}
-	}
-	return "", nil
+	return pickReleaseBuild(pkg.Versions, supported), nil
 }
 
 // pickReleaseBuild returns want when it is offered, otherwise the highest

@@ -4,10 +4,8 @@
 package provider
 
 import (
-	"context"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-framework/resource"
 	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
@@ -16,12 +14,10 @@ import (
 func TestAPIKeyResourceIDIsSensitive(t *testing.T) {
 	t.Parallel()
 
-	var resp resource.SchemaResponse
-	(&APIKeyResource{}).Schema(context.Background(), resource.SchemaRequest{}, &resp)
-
-	attr, ok := resp.Schema.Attributes["id"].(rschema.StringAttribute)
+	s := schemaOf(&APIKeyResource{})
+	attr, ok := s.Attributes["id"].(rschema.StringAttribute)
 	if !ok {
-		t.Fatalf("id attribute type = %T, want schema.StringAttribute", resp.Schema.Attributes["id"])
+		t.Fatalf("id attribute type = %T, want schema.StringAttribute", s.Attributes["id"])
 	}
 	if !attr.Sensitive {
 		t.Fatal("id attribute must be sensitive because it mirrors access_token")

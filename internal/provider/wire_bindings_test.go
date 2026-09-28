@@ -8,11 +8,10 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
@@ -37,9 +36,7 @@ func TestUnitWireBindings(t *testing.T) {
 	var lines []string
 	for _, newResource := range New("test")().Resources(ctx) {
 		r := newResource()
-		var meta resource.MetadataResponse
-		r.Metadata(ctx, resource.MetadataRequest{ProviderTypeName: "jellyfin"}, &meta)
-		name := meta.TypeName
+		name := resourceTypeName(ctx, r)
 		seen[name] = true
 
 		bound, isBound := r.(wireBound)
@@ -72,7 +69,7 @@ func TestUnitWireBindings(t *testing.T) {
 			t.Errorf("%s is listed but the provider has no such resource", name)
 		}
 	}
-	sort.Strings(lines)
+	slices.Sort(lines)
 	checkWireBindingsGolden(t, lines)
 }
 
@@ -92,22 +89,13 @@ func checkWireBindingsGolden(t *testing.T, lines []string) {
 	if string(want) == got {
 		return
 	}
-	wantSet := map[string]bool{}
-	for _, l := range strings.Split(strings.TrimSpace(string(want)), "\n") {
-		wantSet[l] = true
-	}
-	gotSet := map[string]bool{}
+	wantLines := strings.Split(strings.TrimSpace(string(want)), "\n")
 	var msg strings.Builder
-	for _, l := range lines {
-		gotSet[l] = true
-		if !wantSet[l] {
-			msg.WriteString("  + " + l + "\n")
-		}
+	for _, l := range linesNotIn(lines, wantLines) {
+		msg.WriteString("  + " + l + "\n")
 	}
-	for _, l := range strings.Split(strings.TrimSpace(string(want)), "\n") {
-		if !gotSet[l] {
-			msg.WriteString("  - " + l + "\n")
-		}
+	for _, l := range linesNotIn(wantLines, lines) {
+		msg.WriteString("  - " + l + "\n")
 	}
 	t.Fatalf(`the bindings differ from %s:
 
@@ -116,6 +104,30 @@ Each line is an attribute and the Jellyfin key it reads and writes, or an
 object's keys that no attribute claims. A change here changes what the
 provider sends: review it, then run the test with SCHEMA_GUARD_UPDATE=1 to
 record it.`, wireBindingsGolden, msg.String())
+}
+
+func mustWire(t *testing.T, bind func() (*wire.Binding, error)) *wire.Binding {
+	t.Helper()
+	b, err := bind()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func checkRoundTrip[T any](t *testing.T, b *wire.Binding, fixture string) {
+	t.Helper()
+	data := readWire[T](t, b, fixture)
+	checkSameJSON(t, writeWire(t, b, &data), fixture)
+}
+
+func writeWire(t *testing.T, b *wire.Binding, model any) map[string]json.RawMessage {
+	t.Helper()
+	doc := map[string]json.RawMessage{}
+	if d := b.OverlayModel(context.Background(), doc, model); d.HasError() {
+		t.Fatalf("write: %v", d)
+	}
+	return doc
 }
 
 // readWire reads raw through b into a new model, from a prior whose every
@@ -127,6 +139,16 @@ func readWire[T any](t *testing.T, b *wire.Binding, raw string) T {
 
 func readWireIn[T any](ctx context.Context, t *testing.T, b *wire.Binding, raw string) T {
 	t.Helper()
+	obj := flattenFromNull(ctx, t, b, raw)
+	var m T
+	if d := obj.As(ctx, &m, basetypes.ObjectAsOptions{}); d.HasError() {
+		t.Fatalf("read into %T: %v", m, d)
+	}
+	return m
+}
+
+func flattenFromNull(ctx context.Context, t *testing.T, b *wire.Binding, raw string) types.Object {
+	t.Helper()
 	var doc map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
 		t.Fatalf("parsing %s: %v", raw, err)
@@ -135,11 +157,7 @@ func readWireIn[T any](ctx context.Context, t *testing.T, b *wire.Binding, raw s
 	if d.HasError() {
 		t.Fatalf("read: %v", d)
 	}
-	var m T
-	if d := obj.As(ctx, &m, basetypes.ObjectAsOptions{}); d.HasError() {
-		t.Fatalf("read into %T: %v", m, d)
-	}
-	return m
+	return obj
 }
 
 // checkSameJSON fails t unless got marshals to the JSON want holds, in any

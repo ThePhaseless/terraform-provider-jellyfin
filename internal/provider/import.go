@@ -24,12 +24,15 @@ type offersProviders interface {
 	offered(c *client.Client) wire.AvailableFunc
 }
 
+func resourceTypeName(ctx context.Context, r resource.Resource) string {
+	var meta resource.MetadataResponse
+	r.Metadata(ctx, resource.MetadataRequest{ProviderTypeName: "jellyfin"}, &meta)
+	return meta.TypeName
+}
+
 func resourceNamed(ctx context.Context, resourceType string) (resource.Resource, error) {
 	for _, newResource := range New("import")().Resources(ctx) {
-		r := newResource()
-		var meta resource.MetadataResponse
-		r.Metadata(ctx, resource.MetadataRequest{ProviderTypeName: "jellyfin"}, &meta)
-		if meta.TypeName == resourceType {
+		if r := newResource(); resourceTypeName(ctx, r) == resourceType {
 			return r, nil
 		}
 	}
@@ -109,17 +112,6 @@ func asksOfferedNames(b *wire.Binding) bool {
 // attribute.
 func SharedKeys(ctx context.Context) (map[string]map[string]string, error) {
 	out := map[string]map[string]string{}
-	var walk func(shared map[string]string, b *wire.Binding)
-	walk = func(shared map[string]string, b *wire.Binding) {
-		for _, f := range b.Fields {
-			for _, s := range f.Shares {
-				shared[s.Path] = f.Name
-			}
-			if f.Elem != nil {
-				walk(shared, f.Elem)
-			}
-		}
-	}
 	for _, newResource := range New("import")().Resources(ctx) {
 		r := newResource()
 		bound, ok := r.(wireBound)
@@ -130,13 +122,22 @@ func SharedKeys(ctx context.Context) (map[string]map[string]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		var meta resource.MetadataResponse
-		r.Metadata(ctx, resource.MetadataRequest{ProviderTypeName: "jellyfin"}, &meta)
 		shared := map[string]string{}
-		walk(shared, b)
+		addSharedKeys(shared, b)
 		if len(shared) > 0 {
-			out[meta.TypeName] = shared
+			out[resourceTypeName(ctx, r)] = shared
 		}
 	}
 	return out, nil
+}
+
+func addSharedKeys(shared map[string]string, b *wire.Binding) {
+	for _, f := range b.Fields {
+		for _, s := range f.Shares {
+			shared[s.Path] = f.Name
+		}
+		if f.Elem != nil {
+			addSharedKeys(shared, f.Elem)
+		}
+	}
 }

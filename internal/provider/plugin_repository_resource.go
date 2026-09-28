@@ -6,9 +6,11 @@ package provider
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -111,28 +113,22 @@ func (r *PluginRepositoryResource) Create(ctx context.Context, req resource.Crea
 		return
 	}
 
-	if repositoryNameExists(repos, data.Name.ValueString()) {
-		resp.Diagnostics.AddError(
-			"Plugin repository already exists",
-			fmt.Sprintf("A plugin repository named %q already exists. Repository names must be unique for this resource to manage them safely.", data.Name.ValueString()),
-		)
+	if repositoryNameTaken(repos, data.Name.ValueString(), &resp.Diagnostics) {
 		return
 	}
 
-	newRepo := client.PluginRepository{
+	repos = append(repos, client.PluginRepository{
 		Name:    data.Name.ValueString(),
 		URL:     data.URL.ValueString(),
 		Enabled: data.Enabled.ValueBool(),
-	}
-
-	repos = append(repos, newRepo)
+	})
 
 	if err := r.client.SetPluginRepositories(ctx, repos); err != nil {
 		resp.Diagnostics.AddError("Failed to set plugin repositories", err.Error())
 		return
 	}
 
-	data.ID = types.StringValue(data.Name.ValueString())
+	data.ID = data.Name
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -149,26 +145,17 @@ func (r *PluginRepositoryResource) Read(ctx context.Context, req resource.ReadRe
 		return
 	}
 
-	found := false
 	index, err := findPluginRepositoryIndex(repos, data.Name.ValueString(), data.URL.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Plugin repository is ambiguous", err.Error())
 		return
 	}
-	if index >= 0 {
-		repo := repos[index]
-		data.ID = types.StringValue(repo.Name)
-		data.Name = types.StringValue(repo.Name)
-		data.URL = types.StringValue(repo.URL)
-		data.Enabled = types.BoolValue(repo.Enabled)
-		found = true
-	}
-
-	if !found {
+	if index < 0 {
 		resp.State.RemoveResource(ctx)
 		return
 	}
 
+	data = pluginRepositoryModel(repos[index])
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -194,7 +181,6 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 		return
 	}
 
-	updated := make([]client.PluginRepository, 0, len(repos))
 	index, err := findPluginRepositoryIndex(repos, state.Name.ValueString(), state.URL.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Plugin repository is ambiguous", err.Error())
@@ -208,24 +194,15 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 		return
 	}
 
-	if state.Name.ValueString() != data.Name.ValueString() && repositoryNameExists(repos, data.Name.ValueString()) {
-		resp.Diagnostics.AddError(
-			"Plugin repository already exists",
-			fmt.Sprintf("A plugin repository named %q already exists. Repository names must be unique for this resource to manage them safely.", data.Name.ValueString()),
-		)
+	if state.Name.ValueString() != data.Name.ValueString() && repositoryNameTaken(repos, data.Name.ValueString(), &resp.Diagnostics) {
 		return
 	}
 
-	for i := range repos {
-		if i == index {
-			repos[i].Name = data.Name.ValueString()
-			repos[i].URL = data.URL.ValueString()
-			repos[i].Enabled = data.Enabled.ValueBool()
-		}
-		updated = append(updated, repos[i])
-	}
+	repos[index].Name = data.Name.ValueString()
+	repos[index].URL = data.URL.ValueString()
+	repos[index].Enabled = data.Enabled.ValueBool()
 
-	if err := r.client.SetPluginRepositories(ctx, updated); err != nil {
+	if err := r.client.SetPluginRepositories(ctx, repos); err != nil {
 		resp.Diagnostics.AddError("Failed to set plugin repositories", err.Error())
 		return
 	}
@@ -246,12 +223,7 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 		resp.Diagnostics.AddError("Plugin repository not found", fmt.Sprintf("Plugin repository %q was not found after update.", state.Name.ValueString()))
 		return
 	}
-	repo := repos[index]
-	data.ID = types.StringValue(repo.Name)
-	data.Name = types.StringValue(repo.Name)
-	data.URL = types.StringValue(repo.URL)
-	data.Enabled = types.BoolValue(repo.Enabled)
-
+	data = pluginRepositoryModel(repos[index])
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -271,7 +243,6 @@ func (r *PluginRepositoryResource) Delete(ctx context.Context, req resource.Dele
 		return
 	}
 
-	filtered := make([]client.PluginRepository, 0, len(repos))
 	index, err := findPluginRepositoryIndex(repos, data.Name.ValueString(), data.URL.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Plugin repository is ambiguous", err.Error())
@@ -281,13 +252,7 @@ func (r *PluginRepositoryResource) Delete(ctx context.Context, req resource.Dele
 		return
 	}
 
-	for i, repo := range repos {
-		if i != index {
-			filtered = append(filtered, repo)
-		}
-	}
-
-	if err := r.client.SetPluginRepositories(ctx, filtered); err != nil {
+	if err := r.client.SetPluginRepositories(ctx, slices.Delete(repos, index, index+1)); err != nil {
 		resp.Diagnostics.AddError("Failed to set plugin repositories", err.Error())
 	}
 }
@@ -323,14 +288,25 @@ func (idFollowsName) PlanModifyString(ctx context.Context, req planmodifier.Stri
 	}
 }
 
-func repositoryNameExists(repos []client.PluginRepository, name string) bool {
-	for _, repo := range repos {
-		if repo.Name == name {
-			return true
-		}
+func pluginRepositoryModel(repo client.PluginRepository) PluginRepositoryResourceModel {
+	return PluginRepositoryResourceModel{
+		ID:      types.StringValue(repo.Name),
+		Name:    types.StringValue(repo.Name),
+		URL:     types.StringValue(repo.URL),
+		Enabled: types.BoolValue(repo.Enabled),
 	}
+}
 
-	return false
+// repositoryNameTaken, when name is taken, adds the error that says so to diags.
+func repositoryNameTaken(repos []client.PluginRepository, name string, diags *diag.Diagnostics) bool {
+	if !slices.ContainsFunc(repos, func(repo client.PluginRepository) bool { return repo.Name == name }) {
+		return false
+	}
+	diags.AddError(
+		"Plugin repository already exists",
+		fmt.Sprintf("A plugin repository named %q already exists. Repository names must be unique for this resource to manage them safely.", name),
+	)
+	return true
 }
 
 // findPluginRepositoryIndex returns the matching index, -1 when none matches,

@@ -6,6 +6,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"regexp"
@@ -21,7 +22,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -141,22 +141,6 @@ type UserPolicyModel struct {
 }
 
 func userPolicyAttributes() map[string]schema.Attribute {
-	defaultedString := func(desc, def string) schema.StringAttribute {
-		a := schema.StringAttribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.String{
-				stringplanmodifier.UseStateForUnknown(),
-			},
-		}
-		if def != "" {
-			a.Default = stringdefault.StaticString(def)
-		}
-		return a
-	}
-
 	// Not computed: null is the server's "no limit", and a computed attribute
 	// would keep the prior limit when unset.
 	nullableInt := func(desc string) schema.Int64Attribute {
@@ -228,9 +212,9 @@ func userPolicyAttributes() map[string]schema.Attribute {
 		"blocked_media_folders":                guidList(optionalStringList("Media folders that are blocked, by ID as Jellyfin lists it, such as a library's `item_id`.")),
 		"blocked_channels":                     guidList(optionalStringList("Channels that are blocked, by ID as Jellyfin lists it.")),
 		"remote_client_bitrate_limit":          optionalInt("Remote client bitrate limit."),
-		"authentication_provider_id":           defaultedString("Authentication provider ID.", ""),
-		"password_reset_provider_id":           defaultedString("Password reset provider ID.", ""),
-		"sync_play_access":                     defaultedString("SyncPlay access level.", ""),
+		"authentication_provider_id":           optionalString("Authentication provider ID."),
+		"password_reset_provider_id":           optionalString("Password reset provider ID."),
+		"sync_play_access":                     optionalString("SyncPlay access level."),
 	}
 }
 
@@ -340,12 +324,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		data.Policy = &p
 	}
 
-	password := ""
-	if !data.Password.IsNull() {
-		password = data.Password.ValueString()
-	}
-
-	user, err := r.client.CreateUser(ctx, data.Name.ValueString(), password)
+	user, err := r.client.CreateUser(ctx, data.Name.ValueString(), data.Password.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to create user", err.Error())
 		return
@@ -471,11 +450,8 @@ func (r *UserResource) ImportState(ctx context.Context, req resource.ImportState
 // ModifyPlan gates each configured field on the Jellyfin version it needs, so
 // a field a later pin adds is checked without a change here.
 func (r *UserResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() {
-		return
-	}
-	if b := wireBinding(&resp.Diagnostics, userWire); b != nil {
-		resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
+	if !req.Plan.Raw.IsNull() {
+		checkServerHasFields(ctx, r.client, userWire, req.Config, &resp.Diagnostics)
 	}
 }
 
@@ -528,7 +504,7 @@ func (r *UserResource) applyPolicy(ctx context.Context, data *UserResourceModel,
 
 	if d := b.OverlayModel(ctx, baseMap, data); d.HasError() {
 		diags.Append(d...)
-		return fmt.Errorf("overlaying policy")
+		return errors.New("overlaying policy")
 	}
 
 	if wasAdministrator && !jsonTrue(baseMap[policyIsAdministrator]) && jsonTrue(baseMap[policyIsDisabled]) {

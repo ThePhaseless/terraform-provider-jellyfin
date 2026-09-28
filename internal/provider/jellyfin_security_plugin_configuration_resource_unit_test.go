@@ -4,35 +4,40 @@
 package provider
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"slices"
-	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 func TestUnitJellyfinSecurityNotificationAuthRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	b := testUnitSecurityPluginWire(t)
+	b := mustWire(t, securityPluginWire)
 	fixture := `{"NtfyToken":"tk_abc","NtfyUsername":"alice","NtfyPassword":"s3cret","WebhookHeaders":["X-Api-Key: k","Authorization: Bearer t"]}`
 
-	data := testUnitSecurityPluginRead(t, b, fixture)
+	data := readWire[JellyfinSecurityPluginConfigurationResourceModel](t, b, fixture)
 
 	if got := data.NtfyToken.ValueString(); got != "tk_abc" {
 		t.Errorf("ntfy_token = %q, want %q", got, "tk_abc")
@@ -51,10 +56,7 @@ func TestUnitJellyfinSecurityNotificationAuthRoundTrip(t *testing.T) {
 		t.Errorf("webhook_headers = %q", headers)
 	}
 
-	base := map[string]json.RawMessage{}
-	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
-		t.Fatalf("overlay: %v", d.Errors())
-	}
+	base := writeWire(t, b, &data)
 
 	for key, want := range map[string]string{
 		"NtfyToken":      `"tk_abc"`,
@@ -70,8 +72,8 @@ func TestUnitJellyfinSecurityNotificationAuthRoundTrip(t *testing.T) {
 
 func TestUnitOidcProviderRpInitiatedLogoutRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	b := testUnitSecurityPluginWire(t)
-	data := testUnitSecurityPluginRead(t, b, `{"OidcProviders":[{"Id":"idp","RpInitiatedLogoutEnabled":true,"RpInitiatedLogoutRedirectUri":"https://example.com/bye"}]}`)
+	b := mustWire(t, securityPluginWire)
+	data := readWire[JellyfinSecurityPluginConfigurationResourceModel](t, b, `{"OidcProviders":[{"Id":"idp","RpInitiatedLogoutEnabled":true,"RpInitiatedLogoutRedirectUri":"https://example.com/bye"}]}`)
 
 	var providers []OidcProviderModel
 	if d := data.OidcProviders.ElementsAs(ctx, &providers, false); d.HasError() {
@@ -84,10 +86,7 @@ func TestUnitOidcProviderRpInitiatedLogoutRoundTrip(t *testing.T) {
 		t.Errorf("rp_initiated_logout_redirect_uri = %q", got)
 	}
 
-	base := map[string]json.RawMessage{}
-	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
-		t.Fatalf("overlay: %v", d.Errors())
-	}
+	base := writeWire(t, b, &data)
 	var written []map[string]json.RawMessage
 	if err := json.Unmarshal(base["OidcProviders"], &written); err != nil {
 		t.Fatalf("OidcProviders: %v", err)
@@ -102,10 +101,10 @@ func TestUnitOidcProviderRpInitiatedLogoutRoundTrip(t *testing.T) {
 
 func TestUnitJellyfinSecurityPlugin263FieldsRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	b := testUnitSecurityPluginWire(t)
+	b := mustWire(t, securityPluginWire)
 	fixture := `{"PairDeviceOnSecondScreenApproval":true,"PublicBaseUrl":"https://jf.example.com","OidcProviders":[{"Id":"idp","LinkExistingUsersByUsername":true}]}`
 
-	data := testUnitSecurityPluginRead(t, b, fixture)
+	data := readWire[JellyfinSecurityPluginConfigurationResourceModel](t, b, fixture)
 
 	if !data.PairDeviceOnSecondScreenApproval.ValueBool() {
 		t.Errorf("pair_device_on_second_screen_approval = %v, want true", data.PairDeviceOnSecondScreenApproval)
@@ -121,10 +120,7 @@ func TestUnitJellyfinSecurityPlugin263FieldsRoundTrip(t *testing.T) {
 		t.Fatalf("oidc_providers = %+v, want one provider with link_existing_users_by_username", providers)
 	}
 
-	base := map[string]json.RawMessage{}
-	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
-		t.Fatalf("overlay: %v", d.Errors())
-	}
+	base := writeWire(t, b, &data)
 	if got := string(base["PairDeviceOnSecondScreenApproval"]); got != "true" {
 		t.Errorf("PairDeviceOnSecondScreenApproval = %s", got)
 	}
@@ -141,19 +137,15 @@ func TestUnitJellyfinSecurityPlugin263FieldsRoundTrip(t *testing.T) {
 }
 
 func TestUnitJellyfinSecurityPlugin263FieldsAbsentStayNullAndUnwritten(t *testing.T) {
-	ctx := context.Background()
-	b := testUnitSecurityPluginWire(t)
+	b := mustWire(t, securityPluginWire)
 
-	data := testUnitSecurityPluginRead(t, b, `{"Enabled":true}`)
+	data := readWire[JellyfinSecurityPluginConfigurationResourceModel](t, b, `{"Enabled":true}`)
 
 	if !data.PairDeviceOnSecondScreenApproval.IsNull() || !data.PublicBaseURL.IsNull() {
 		t.Errorf("pair_device_on_second_screen_approval = %v, public_base_url = %v, want both null", data.PairDeviceOnSecondScreenApproval, data.PublicBaseURL)
 	}
 
-	base := map[string]json.RawMessage{}
-	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
-		t.Fatalf("overlay: %v", d.Errors())
-	}
+	base := writeWire(t, b, &data)
 	for _, key := range []string{"PairDeviceOnSecondScreenApproval", "PublicBaseUrl"} {
 		if raw, ok := base[key]; ok {
 			t.Errorf("%s written as %s, want it left out", key, raw)
@@ -248,7 +240,7 @@ func TestUnitFillEmptyPayloadLists(t *testing.T) {
 
 func TestUnitJellyfinSecurityWriteKeepsTheServedShape(t *testing.T) {
 	ctx := context.Background()
-	b := testUnitSecurityPluginWire(t)
+	b := mustWire(t, securityPluginWire)
 
 	raw, err := os.ReadFile(securityPluginPayloadGolden)
 	if err != nil {
@@ -260,7 +252,7 @@ func TestUnitJellyfinSecurityWriteKeepsTheServedShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building payload from golden: %v", err)
 	}
-	data := testUnitSecurityPluginRead(t, b, payload)
+	data := readWire[JellyfinSecurityPluginConfigurationResourceModel](t, b, payload)
 
 	// Apply overlays the served configuration, as here, so a top-level key
 	// stays in the payload whether or not an attribute claims it; the
@@ -283,21 +275,11 @@ func TestUnitJellyfinSecurityWriteKeepsTheServedShape(t *testing.T) {
 		t.Fatalf("reduce: %v", err)
 	}
 
-	gotSet := map[string]bool{}
-	for _, line := range got {
-		gotSet[line] = true
+	for _, line := range linesNotIn(golden, got) {
+		t.Errorf("served %q is not written back by the resource", line)
 	}
-	goldenSet := map[string]bool{}
-	for _, line := range golden {
-		goldenSet[line] = true
-		if !gotSet[line] {
-			t.Errorf("served %q is not written back by the resource", line)
-		}
-	}
-	for _, line := range got {
-		if !goldenSet[line] {
-			t.Errorf("resource writes %q, which the plugin does not serve", line)
-		}
+	for _, line := range linesNotIn(got, golden) {
+		t.Errorf("resource writes %q, which the plugin does not serve", line)
 	}
 }
 
@@ -311,8 +293,8 @@ func reduceSecurityPluginPayload(raw string) ([]string, error) {
 
 	var out []string
 	reducePayloadObject(root, "", &out)
-	sort.Strings(out)
-	return dedupStrings(out), nil
+	slices.Sort(out)
+	return slices.Compact(out), nil
 }
 
 func reducePayloadObject(obj map[string]any, prefix string, out *[]string) {
@@ -368,7 +350,7 @@ func fillEmptyPayloadLists(raw string) (string, []string, error) {
 
 	var filled []string
 	fillEmptyObjectLists(root, "", &filled)
-	sort.Strings(filled)
+	slices.Sort(filled)
 	out, err := json.Marshal(root)
 	return string(out), filled, err
 }
@@ -472,32 +454,140 @@ func samplePayloadValue(typ string) any {
 	}
 }
 
-func testUnitSecurityPluginWire(t *testing.T) *wire.Binding {
-	t.Helper()
-	b, err := securityPluginWire()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
+// securityPluginServer does not list the JellyfinSecurity plugin when version
+// is "", and a POST replaces config with afterPost when that is set.
+type securityPluginServer struct {
+	version   string
+	postFails bool
+	afterPost string
+
+	mu       sync.Mutex
+	config   string
+	requests []string
 }
 
-// testUnitSecurityPluginRead reads raw with no prior value to compare with.
-func testUnitSecurityPluginRead(t *testing.T, b *wire.Binding, raw string) JellyfinSecurityPluginConfigurationResourceModel {
+func (f *securityPluginServer) client(t *testing.T) *client.Client {
 	t.Helper()
-	ctx := context.Background()
-	doc, err := parseJSONObject(raw)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
+	configPath := "/Plugins/" + jellyfinSecurityPluginID + "/Configuration"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.requests = append(f.requests, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Plugins":
+			plugins := []client.InstalledPlugin{}
+			if f.version != "" {
+				plugins = append(plugins, client.InstalledPlugin{ID: jellyfinSecurityPluginID, Name: "JellyfinSecurity", Version: f.version, Status: "Active"})
+			}
+			_ = json.NewEncoder(w).Encode(plugins)
+		case r.Method == http.MethodGet && r.URL.Path == configPath:
+			_, _ = io.WriteString(w, f.config)
+		case r.Method == http.MethodPost && r.URL.Path == configPath:
+			if f.postFails {
+				http.Error(w, "boom", http.StatusInternalServerError)
+				return
+			}
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+			}
+			f.config = cmp.Or(f.afterPost, string(body))
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return client.NewClient(srv.URL, "k")
+}
+
+func TestUnitSecurityPluginApplyChecksThePlugin(t *testing.T) {
+	const newer = "999.0.0.0"
+	cfg := "/Plugins/" + jellyfinSecurityPluginID + "/Configuration"
+	written := []string{"GET /Plugins", "GET " + cfg, "POST " + cfg, "GET " + cfg}
+
+	for _, test := range []struct {
+		name         string
+		version      string
+		postFails    bool
+		afterPost    string
+		wantRequests []string
+		wantErrors   []string
+		wantWarnings []string
+	}{
+		{
+			name:         "not installed",
+			wantRequests: []string{"GET /Plugins"},
+			wantErrors:   []string{"JellyfinSecurity plugin not installed"},
+		},
+		{
+			name:         "at the supported version",
+			version:      supportedSecurityPluginVersion(),
+			wantRequests: written,
+		},
+		{
+			name:         "newer than supported",
+			version:      newer,
+			wantRequests: written,
+			wantWarnings: []string{"JellyfinSecurity plugin version newer than supported"},
+		},
+		{
+			name:         "newer, and the write fails",
+			version:      newer,
+			postFails:    true,
+			wantRequests: written[:3],
+			wantErrors:   []string{"Failed to update JellyfinSecurity plugin configuration"},
+		},
+		{
+			name:         "newer, and the write reads back unparsable",
+			version:      newer,
+			afterPost:    "not json",
+			wantRequests: written,
+			wantErrors:   []string{"Failed to parse the Jellyfin JellyfinSecurity"},
+		},
+	} {
+		for _, op := range []string{"create", "update"} {
+			t.Run(test.name+"/"+op, func(t *testing.T) {
+				ctx := t.Context()
+				srv := &securityPluginServer{version: test.version, postFails: test.postFails, afterPost: test.afterPost, config: `{"Enabled":true}`}
+				r := &JellyfinSecurityPluginConfigurationResource{client: srv.client(t)}
+				s := schemaOf(r)
+				data := readWire[JellyfinSecurityPluginConfigurationResourceModel](t, mustWire(t, securityPluginWire), srv.config)
+				data.PluginID = types.StringValue(jellyfinSecurityPluginID)
+				plan := tfsdk.Plan{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nil)}
+				if d := plan.Set(ctx, &data); d.HasError() {
+					t.Fatal(d)
+				}
+
+				var diags diag.Diagnostics
+				if op == "create" {
+					resp := resource.CreateResponse{State: tfsdk.State(plan)}
+					r.Create(ctx, resource.CreateRequest{Plan: plan}, &resp)
+					diags = resp.Diagnostics
+				} else {
+					resp := resource.UpdateResponse{State: tfsdk.State(plan)}
+					r.Update(ctx, resource.UpdateRequest{Plan: plan, State: tfsdk.State(plan)}, &resp)
+					diags = resp.Diagnostics
+				}
+
+				var errs, warnings []string
+				for _, d := range diags {
+					if d.Severity() == diag.SeverityError {
+						errs = append(errs, d.Summary())
+					} else {
+						warnings = append(warnings, d.Summary())
+					}
+				}
+				if !slices.Equal(errs, test.wantErrors) || !slices.Equal(warnings, test.wantWarnings) {
+					t.Errorf("errors %q and warnings %q, want %q and %q", errs, warnings, test.wantErrors, test.wantWarnings)
+				}
+				if !slices.Equal(srv.requests, test.wantRequests) {
+					t.Errorf("requests %q, want %q", srv.requests, test.wantRequests)
+				}
+			})
+		}
 	}
-	obj, d := b.Flatten(ctx, doc, types.ObjectNull(b.AttrTypes))
-	if d.HasError() {
-		t.Fatalf("read: %v", d.Errors())
-	}
-	var data JellyfinSecurityPluginConfigurationResourceModel
-	if d := obj.As(ctx, &data, basetypes.ObjectAsOptions{}); d.HasError() {
-		t.Fatalf("model: %v", d.Errors())
-	}
-	return data
 }
 
 // Removing an OIDC provider must not plan the next one with the removed
@@ -636,8 +726,8 @@ func hasPlanModifiers(a rschema.Attribute) bool {
 // empty string as none and leaves the key out, which reads back as empty.
 func TestUnitSecurityPluginEnrollmentDeadlineClears(t *testing.T) {
 	ctx := context.Background()
-	b := testUnitSecurityPluginWire(t)
-	data := testUnitSecurityPluginRead(t, b, `{"EnrollmentDeadline":"2030-01-01T00:00:00Z"}`)
+	b := mustWire(t, securityPluginWire)
+	data := readWire[JellyfinSecurityPluginConfigurationResourceModel](t, b, `{"EnrollmentDeadline":"2030-01-01T00:00:00Z"}`)
 	data.EnrollmentDeadline = types.StringValue("")
 	doc := map[string]json.RawMessage{"EnrollmentDeadline": json.RawMessage(`"2030-01-01T00:00:00Z"`)}
 	if d := b.OverlayModel(ctx, doc, &data); d.HasError() {
@@ -646,7 +736,7 @@ func TestUnitSecurityPluginEnrollmentDeadlineClears(t *testing.T) {
 	if got := string(doc["EnrollmentDeadline"]); got != `""` {
 		t.Errorf("wrote EnrollmentDeadline %s, want the empty string that clears it", got)
 	}
-	if got := testUnitSecurityPluginRead(t, b, `{}`).EnrollmentDeadline; !got.Equal(types.StringValue("")) {
+	if got := readWire[JellyfinSecurityPluginConfigurationResourceModel](t, b, `{}`).EnrollmentDeadline; !got.Equal(types.StringValue("")) {
 		t.Errorf("no deadline reads as %s, want the empty string", got)
 	}
 

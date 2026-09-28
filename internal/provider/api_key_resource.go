@@ -5,6 +5,7 @@ package provider
 
 import (
 	"context"
+	"slices"
 	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -170,20 +171,13 @@ func (r *APIKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
-	found := false
-	for _, key := range keys {
-		if key.AccessToken == data.AccessToken.ValueString() {
-			data.AppName = types.StringValue(key.AppName)
-			data.ID = types.StringValue(key.AccessToken)
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	i := slices.IndexFunc(keys, func(k client.APIKey) bool { return k.AccessToken == data.AccessToken.ValueString() })
+	if i < 0 {
 		resp.State.RemoveResource(ctx)
 		return
 	}
+	data.AppName = types.StringValue(keys[i].AppName)
+	data.ID = types.StringValue(keys[i].AccessToken)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -200,10 +194,7 @@ func (r *APIKeyResource) Delete(ctx context.Context, req resource.DeleteRequest,
 		return
 	}
 
-	if err := r.client.DeleteAPIKey(ctx, data.AccessToken.ValueString()); err != nil {
-		if client.IsNotFound(err) {
-			return
-		}
+	if err := r.client.DeleteAPIKey(ctx, data.AccessToken.ValueString()); err != nil && !client.IsNotFound(err) {
 		resp.Diagnostics.AddError("Failed to delete API key", err.Error())
 	}
 }

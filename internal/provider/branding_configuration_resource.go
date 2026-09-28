@@ -7,14 +7,10 @@ import (
 	"context"
 	"sync"
 
-	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
@@ -75,16 +71,19 @@ func (r *BrandingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 			"login_disclaimer":      optionalString("The login disclaimer text."),
 			"custom_css":            optionalString("Custom CSS content."),
 			"splashscreen_enabled":  optionalBool("Whether the splash screen is enabled."),
-			"splashscreen_location": schema.StringAttribute{Description: "The splash screen location. " + splashscreenLocationUnsupportedMessage, MarkdownDescription: "The splash screen location. " + splashscreenLocationUnsupportedMessage, Optional: true, DeprecationMessage: splashscreenLocationUnsupportedMessage, Validators: []validator.String{splashscreenLocationValidator}},
+			"splashscreen_location": unsupportedSplashscreenLocation.stringAttribute("The splash screen location."),
 		},
 	}
 }
 
 const splashscreenLocationUnsupportedMessage = "Jellyfin ignores a splash screen location in the branding configuration, so setting it is an error. The attribute will be removed in a future release."
 
-var splashscreenLocationValidator = unsetValidator{
-	summary: "Unsupported branding option",
-	reason:  "Jellyfin ignores a splash screen location in the branding configuration, so the server would drop this value",
+var unsupportedSplashscreenLocation = unsupported{
+	message: splashscreenLocationUnsupportedMessage,
+	reject: unsetValidator{
+		summary: "Unsupported branding option",
+		reason:  "Jellyfin ignores a splash screen location in the branding configuration, so the server would drop this value",
+	},
 }
 
 func (r *BrandingConfigurationResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -92,33 +91,15 @@ func (r *BrandingConfigurationResource) Configure(_ context.Context, req resourc
 }
 
 func (r *BrandingConfigurationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data BrandingConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *BrandingConfigurationResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var data BrandingConfigurationResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.read(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().read(ctx, req.State, &resp.State, &resp.Diagnostics)
 }
 
 func (r *BrandingConfigurationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data BrandingConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *BrandingConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
@@ -126,38 +107,21 @@ func (r *BrandingConfigurationResource) Delete(_ context.Context, _ resource.Del
 }
 
 func (r *BrandingConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("branding"))...)
+	r.singleton().setID(ctx, &resp.State, &resp.Diagnostics)
 }
 
 // ModifyPlan gates each configured field on the Jellyfin version it needs, so
 // a field a later pin adds is checked without a change here.
 func (r *BrandingConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() {
-		return
-	}
-	if b := wireBinding(&resp.Diagnostics, brandingWire); b != nil {
-		resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
+	if !req.Plan.Raw.IsNull() {
+		checkServerHasFields(ctx, r.client, brandingWire, req.Config, &resp.Diagnostics)
 	}
 }
 
-func (r *BrandingConfigurationResource) apply(ctx context.Context, data *BrandingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
-	b := wireBinding(diags, brandingWire)
-	if b == nil || !r.document().write(ctx, b, data, diags) {
-		return
+func (r *BrandingConfigurationResource) singleton() singleton[BrandingConfigurationResourceModel] {
+	return singleton[BrandingConfigurationResourceModel]{
+		id:   "branding",
+		bind: brandingWire,
+		doc:  document{what: "branding configuration", get: r.client.GetBrandingConfiguration, put: r.client.UpdateBrandingConfiguration},
 	}
-	data.ID = types.StringValue("branding")
-	diags.Append(state.Set(ctx, data)...)
-}
-
-func (r *BrandingConfigurationResource) read(ctx context.Context, data *BrandingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
-	b := wireBinding(diags, brandingWire)
-	if b == nil || !r.document().read(ctx, b, data, diags) {
-		return
-	}
-	data.ID = types.StringValue("branding")
-	diags.Append(state.Set(ctx, data)...)
-}
-
-func (r *BrandingConfigurationResource) document() document {
-	return document{what: "branding configuration", get: r.client.GetBrandingConfiguration, put: r.client.UpdateBrandingConfiguration}
 }

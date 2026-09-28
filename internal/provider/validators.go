@@ -55,11 +55,6 @@ type unsetValidator struct {
 	summary, reason string
 }
 
-var unsupportedLibraryOptionValidator = unsetValidator{
-	summary: "Unsupported library option",
-	reason:  "Jellyfin has no such library option, so the server would ignore this value",
-}
-
 func (v unsetValidator) Description(context.Context) string {
 	return "must not be set: " + v.reason
 }

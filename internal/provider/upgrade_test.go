@@ -95,7 +95,7 @@ func testAccPutBackServerConfiguration(t *testing.T, taskID string) {
 
 func TestAccUpgradeFromV038(t *testing.T) {
 	testAccPreCheck(t)
-	jellyfin12 := testAccJellyfinVersionAtLeast(t, "12")
+	jellyfin12 := testAccJellyfin12OrLater(t)
 	const taskID = "7738148ffcd07979c7ceb148e06b3aed"
 	testAccPutBackServerConfiguration(t, taskID)
 

@@ -116,3 +116,49 @@ func elementStringList(desc string) schema.ListAttribute {
 	a.PlanModifiers = nil
 	return a
 }
+
+type unsupported struct {
+	message string
+	reject  unsetValidator
+}
+
+func (u unsupported) boolAttribute(desc string) schema.BoolAttribute {
+	return schema.BoolAttribute{
+		Description:         desc + " " + u.message,
+		MarkdownDescription: desc + " " + u.message,
+		Optional:            true,
+		DeprecationMessage:  u.message,
+		Validators:          []validator.Bool{u.reject},
+	}
+}
+
+func (u unsupported) intAttribute(desc string) schema.Int64Attribute {
+	return schema.Int64Attribute{
+		Description:         desc + " " + u.message,
+		MarkdownDescription: desc + " " + u.message,
+		Optional:            true,
+		DeprecationMessage:  u.message,
+		Validators:          []validator.Int64{u.reject},
+	}
+}
+
+func (u unsupported) stringAttribute(desc string) schema.StringAttribute {
+	return schema.StringAttribute{
+		Description:         desc + " " + u.message,
+		MarkdownDescription: desc + " " + u.message,
+		Optional:            true,
+		DeprecationMessage:  u.message,
+		Validators:          []validator.String{u.reject},
+	}
+}
+
+func (u unsupported) stringListAttribute(desc string) schema.ListAttribute {
+	return schema.ListAttribute{
+		ElementType:         types.StringType,
+		Description:         desc + " " + u.message,
+		MarkdownDescription: desc + " " + u.message,
+		Optional:            true,
+		DeprecationMessage:  u.message,
+		Validators:          []validator.List{u.reject},
+	}
+}

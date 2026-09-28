@@ -5,6 +5,7 @@ package provider
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -48,16 +49,8 @@ func TestConfigOverlayParseJSONObject(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("parseJSONObject() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if err != nil {
-				return
-			}
-			if len(got) != len(tt.want) {
-				t.Fatalf("parseJSONObject() len = %d, want %d", len(got), len(tt.want))
-			}
-			for k, v := range tt.want {
-				if string(got[k]) != string(v) {
-					t.Errorf("parseJSONObject()[%q] = %s, want %s", k, got[k], v)
-				}
+			if err == nil && !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("parseJSONObject() = %s, want %s", got, tt.want)
 			}
 		})
 	}

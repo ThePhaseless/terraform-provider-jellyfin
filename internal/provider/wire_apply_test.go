@@ -87,19 +87,7 @@ func planRead(t *testing.T, r resource.Resource, doc string, set ...planValue) t
 	if !ok {
 		t.Fatalf("%T binds no Jellyfin document", r)
 	}
-	b, err := bound.Wire()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(doc), &m); err != nil {
-		t.Fatalf("parsing %s: %v", doc, err)
-	}
-	obj, d := b.Flatten(ctx, m, types.ObjectNull(b.AttrTypes))
-	if d.HasError() {
-		t.Fatalf("read: %v", d)
-	}
-	raw, err := obj.ToTerraformValue(ctx)
+	raw, err := flattenFromNull(ctx, t, mustWire(t, bound.Wire), doc).ToTerraformValue(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

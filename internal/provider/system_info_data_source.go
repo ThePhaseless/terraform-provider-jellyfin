@@ -40,38 +40,26 @@ func (d *SystemInfoDataSource) Metadata(_ context.Context, req datasource.Metada
 }
 
 func (d *SystemInfoDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	computedString := func(desc string) schema.StringAttribute {
+		return schema.StringAttribute{
+			Description:         desc,
+			MarkdownDescription: desc,
+			Computed:            true,
+		}
+	}
+	const pendingRestart = "Whether the Jellyfin server has a pending restart (e.g. after a plugin install). True until the server is restarted."
 	resp.Schema = schema.Schema{
 		Description:         "Retrieves system information from the Jellyfin server.",
 		MarkdownDescription: "Retrieves system information from the Jellyfin server.",
 		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{
-				Description:         "The unique server identifier.",
-				MarkdownDescription: "The unique server identifier.",
-				Computed:            true,
-			},
-			"server_name": schema.StringAttribute{
-				Description:         "The server name.",
-				MarkdownDescription: "The server name.",
-				Computed:            true,
-			},
-			"version": schema.StringAttribute{
-				Description:         "The Jellyfin server version.",
-				MarkdownDescription: "The Jellyfin server version.",
-				Computed:            true,
-			},
-			"operating_system": schema.StringAttribute{
-				Description:         "The server operating system.",
-				MarkdownDescription: "The server operating system.",
-				Computed:            true,
-			},
-			"local_address": schema.StringAttribute{
-				Description:         "The local network address of the server.",
-				MarkdownDescription: "The local network address of the server.",
-				Computed:            true,
-			},
+			"id":               computedString("The unique server identifier."),
+			"server_name":      computedString("The server name."),
+			"version":          computedString("The Jellyfin server version."),
+			"operating_system": computedString("The server operating system."),
+			"local_address":    computedString("The local network address of the server."),
 			"pending_restart": schema.BoolAttribute{
-				Description:         "Whether the Jellyfin server has a pending restart (e.g. after a plugin install). True until the server is restarted.",
-				MarkdownDescription: "Whether the Jellyfin server has a pending restart (e.g. after a plugin install). True until the server is restarted.",
+				Description:         pendingRestart,
+				MarkdownDescription: pendingRestart,
 				Computed:            true,
 			},
 		},

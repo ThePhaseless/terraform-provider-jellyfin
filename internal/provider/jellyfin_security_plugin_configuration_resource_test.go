@@ -270,7 +270,7 @@ func testAccInstallSecurityPlugin(t *testing.T) *client.Client {
 	if err := c.RestartServer(ctx); err != nil {
 		t.Fatalf("restarting Jellyfin: %v", err)
 	}
-	if err := waitForServerReady(ctx, c, 2*time.Minute); err != nil {
+	if err := awaitRestart(ctx, c, 2*time.Minute, startupStatusDelay); err != nil {
 		t.Fatalf("waiting for Jellyfin to restart: %v", err)
 	}
 
