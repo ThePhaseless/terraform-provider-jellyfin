@@ -766,8 +766,9 @@ func TestFullGenerate(t *testing.T) {
 	if err := g.Generate(); err != nil {
 		t.Fatalf("Generate() error: %v", err)
 	}
-	if warnings.Len() > 0 {
-		t.Errorf("expected no warnings for an empty output directory, got %q", warnings.String())
+	// The server has an API key, whose token is its import ID.
+	if got := warnings.String(); strings.Count(got, "Warning:") != 1 || !strings.Contains(got, "access token of each API key") {
+		t.Errorf("expected only the API key token warning for an empty output directory, got %q", got)
 	}
 
 	// Check that files were created

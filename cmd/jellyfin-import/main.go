@@ -198,6 +198,9 @@ func (g *generator) Generate() error {
 		if err := g.writeFile("imports.tf", strings.Join(imports, "\n")); err != nil {
 			return fmt.Errorf("writing imports.tf: %w", err)
 		}
+		if len(keyImports) > 0 {
+			g.warnf("imports.tf holds the access token of each API key as its import ID; keep it out of version control, and remove those import blocks once terraform apply has imported the keys")
+		}
 	}
 
 	// Write resources.tf
