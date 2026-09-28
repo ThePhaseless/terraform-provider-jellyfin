@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -616,71 +615,4 @@ func (r *SystemConfigurationResource) read(ctx context.Context, data *SystemConf
 	diags.Append(b.FlattenInto(ctx, current.RawJSON, data)...)
 	data.ID = types.StringValue("system")
 	diags.Append(state.Set(ctx, data)...)
-}
-
-// normalizeJSON re-encodes JSON to remove insignificant formatting and sort object keys.
-// Kept for plugin_configuration_resource.go compatibility.
-func normalizeJSON(raw string) (string, error) {
-	normalized, err := normalizeJSONRecursive(json.RawMessage(raw), 0)
-	if err != nil {
-		return "", fmt.Errorf("parsing JSON for normalization: %w", err)
-	}
-	return string(normalized), nil
-}
-
-const maxJSONNormalizeDepth = 100
-
-func normalizeJSONRecursive(raw json.RawMessage, depth int) (json.RawMessage, error) {
-	if depth > maxJSONNormalizeDepth {
-		return nil, fmt.Errorf("JSON nesting exceeds maximum depth of %d", maxJSONNormalizeDepth)
-	}
-
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, raw); err != nil {
-		return nil, err
-	}
-
-	trimmed := bytes.TrimSpace(compact.Bytes())
-	if len(trimmed) == 0 {
-		return nil, fmt.Errorf("empty JSON value")
-	}
-
-	switch trimmed[0] {
-	case '{':
-		var object map[string]json.RawMessage
-		if err := json.Unmarshal(trimmed, &object); err != nil {
-			return nil, err
-		}
-		for key, value := range object {
-			normalized, err := normalizeJSONRecursive(value, depth+1)
-			if err != nil {
-				return nil, err
-			}
-			object[key] = normalized
-		}
-		return json.Marshal(object)
-	case '[':
-		var list []json.RawMessage
-		if err := json.Unmarshal(trimmed, &list); err != nil {
-			return nil, err
-		}
-		for i, value := range list {
-			normalized, err := normalizeJSONRecursive(value, depth+1)
-			if err != nil {
-				return nil, err
-			}
-			list[i] = normalized
-		}
-		return json.Marshal(list)
-	}
-
-	var rawValue json.RawMessage
-	if err := json.Unmarshal(trimmed, &rawValue); err != nil {
-		return nil, err
-	}
-	result, err := json.Marshal(rawValue)
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
 }
