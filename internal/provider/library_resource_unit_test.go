@@ -6,8 +6,14 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"maps"
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -20,10 +26,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
-func TestUnitLibraryOptionsOverlay(t *testing.T) {
-	ctx := context.Background()
+func TestUnitLibraryOptionsRoundTrip(t *testing.T) {
+	b := mustWire(t, libraryOptionsWire)
 	fixture := `{
 		"Enabled": false,
 		"EnablePhotos": true,
@@ -55,40 +64,17 @@ func TestUnitLibraryOptionsOverlay(t *testing.T) {
 		]
 	}`
 
-	var diags diag.Diagnostics
-	data := flattenLibraryOptions(ctx, fixture, &diags)
-	if diags.HasError() {
-		t.Fatalf("flatten: %v", diags)
+	data := testUnitLibraryRead(t, b, fixture)
+	if !data.LibraryOptions.Disabled.ValueBool() {
+		t.Errorf("disabled = %v, want true for Enabled false", data.LibraryOptions.Disabled)
 	}
 
-	base := map[string]json.RawMessage{}
-	if d := overlayLibraryOptions(ctx, base, data); d.HasError() {
-		t.Fatalf("overlay: %v", d)
-	}
-
-	result, err := json.Marshal(base)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	var got map[string]interface{}
-	if err := json.Unmarshal(result, &got); err != nil {
-		t.Fatalf("unmarshal result: %v", err)
-	}
-	var want map[string]interface{}
-	if err := json.Unmarshal([]byte(fixture), &want); err != nil {
-		t.Fatalf("unmarshal fixture: %v", err)
-	}
-
-	gotJSON, _ := json.Marshal(got)
-	wantJSON, _ := json.Marshal(want)
-	if string(gotJSON) != string(wantJSON) {
-		t.Fatalf("round-trip mismatch\n got: %s\nwant: %s", gotJSON, wantJSON)
-	}
+	checkSameJSON(t, writeWire(t, b, &data), fixture)
 }
 
-func TestUnitTypeOptionsOverlayKeepsUnsetServerValues(t *testing.T) {
-	ctx := context.Background()
+func TestUnitTypeOptionsWriteKeepsUnsetServerValues(t *testing.T) {
+	ctx := testUnitOfferingNoSubtitleFetchers(t.Context())
+	b := mustWire(t, libraryOptionsWire)
 	base := map[string]json.RawMessage{
 		"TypeOptions": json.RawMessage(`[
 			{
@@ -108,13 +94,13 @@ func TestUnitTypeOptionsOverlayKeepsUnsetServerValues(t *testing.T) {
 		]`),
 	}
 
-	movie := testUnitTypeOptions("movie")
-	movie.MetadataFetchers = testUnitStringList(t, "TheMovieDb")
-	backdrop := ImageOptionsModel{Type: types.StringValue("Backdrop"), Limit: types.Int64Value(2), MinWidth: types.Int64Null()}
-	movie.ImageOptions = testUnitList(t, imageOptionsObjectType(), []ImageOptionsModel{backdrop})
-
-	if d := overlayTypeOptions(ctx, base, testUnitList(t, typeOptionsObjectType(), []TypeOptionsModel{movie})); d.HasError() {
-		t.Fatalf("overlay: %v", d)
+	data := testUnitLibraryRead(t, b, `{"TypeOptions": [{
+		"Type": "movie",
+		"MetadataFetchers": ["TheMovieDb"],
+		"ImageOptions": [{"Type": "Backdrop", "Limit": 2}]
+	}]}`)
+	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
+		t.Fatalf("write: %v", d)
 	}
 
 	want := `[{
@@ -127,18 +113,14 @@ func TestUnitTypeOptionsOverlayKeepsUnsetServerValues(t *testing.T) {
 		"SimilarItemProviders": ["Local Genre/Tag"],
 		"SimilarItemProviderOrder": ["Local Genre/Tag", "TheMovieDb"]
 	}]`
-	testUnitAssertJSONEqual(t, base["TypeOptions"], want)
+	checkSameJSON(t, base["TypeOptions"], want)
 }
 
-func TestUnitFlattenTypeOptionsWithoutSimilarItemKeysIsNull(t *testing.T) {
-	var diags diag.Diagnostics
-	opts := flattenLibraryOptions(context.Background(), `{"TypeOptions": [{"Type": "Movie", "MetadataFetchers": ["TheMovieDb"]}]}`, &diags)
-	if diags.HasError() {
-		t.Fatalf("flatten: %v", diags)
-	}
+func TestUnitTypeOptionsWithoutSimilarItemKeysReadAsNull(t *testing.T) {
+	data := testUnitLibraryRead(t, mustWire(t, libraryOptionsWire), `{"TypeOptions": [{"Type": "Movie", "MetadataFetchers": ["TheMovieDb"]}]}`)
 
 	var entries []TypeOptionsModel
-	if d := opts.TypeOptions.ElementsAs(context.Background(), &entries, false); d.HasError() {
+	if d := data.LibraryOptions.TypeOptions.ElementsAs(t.Context(), &entries, false); d.HasError() {
 		t.Fatalf("elements: %v", d)
 	}
 	for name, v := range map[string]types.List{
@@ -152,7 +134,7 @@ func TestUnitFlattenTypeOptionsWithoutSimilarItemKeysIsNull(t *testing.T) {
 }
 
 func TestUnitPlanTypeOptionsByTypeUsesPriorEntryOfSameType(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	priorMovie := testUnitTypeOptions("Movie")
 	priorMovie.MetadataFetchers = testUnitStringList(t, "The Open Movie Database")
@@ -213,21 +195,251 @@ func TestUnitPlanTypeOptionsByTypeUsesPriorEntryOfSameType(t *testing.T) {
 	}
 }
 
-func TestUnitKeepPlannedNullsCoversTypeOptionsLists(t *testing.T) {
-	ctx := context.Background()
-	planned := testUnitTypeOptions("Movie")
-	got := testUnitTypeOptions("Movie")
-	got.MetadataFetcherOrder = testUnitStringList(t)
-	got.SimilarItemProviders = testUnitStringList(t)
-	got.SimilarItemProviderOrder = testUnitStringList(t, "TheMovieDb")
+func TestUnitPlanTypeOptionsByTypePlansTheOrderOfAChangedListUnknown(t *testing.T) {
+	ctx := t.Context()
 
-	out := keepPlannedNulls(ctx,
-		&LibraryOptionsModel{TypeOptions: testUnitList(t, typeOptionsObjectType(), []TypeOptionsModel{planned}), PathInfos: types.ListNull(pathInfoObjectType())},
-		&LibraryOptionsModel{TypeOptions: testUnitList(t, typeOptionsObjectType(), []TypeOptionsModel{got}), PathInfos: types.ListNull(pathInfoObjectType())},
+	prior := testUnitTypeOptions("Movie")
+	prior.MetadataFetchers = testUnitStringList(t, "TheMovieDb")
+	prior.MetadataFetcherOrder = testUnitStringList(t, "TheMovieDb", "The Open Movie Database")
+	prior.ImageFetchers = testUnitStringList(t, "TheMovieDb")
+	prior.ImageFetcherOrder = testUnitStringList(t, "TheMovieDb", "Screen Grabber")
+	prior.SimilarItemProviders = testUnitStringList(t, "Local Genre/Tag")
+	prior.SimilarItemProviderOrder = testUnitStringList(t, "Local Genre/Tag")
+	state := testUnitList(t, typeOptionsObjectType(), []TypeOptionsModel{prior})
+
+	configured := testUnitTypeOptions("Movie")
+	configured.MetadataFetchers = testUnitStringList(t, "The Open Movie Database", "TheMovieDb")
+	configured.ImageFetchers = testUnitStringList(t, "TheMovieDb")
+	configured.SimilarItemProviders = testUnitStringList(t, "TheMovieDb")
+	configured.SimilarItemProviderOrder = testUnitStringList(t, "TheMovieDb", "Local Genre/Tag")
+	config := testUnitList(t, typeOptionsObjectType(), []TypeOptionsModel{configured})
+
+	planned := configured
+	planned.MetadataFetcherOrder = prior.MetadataFetcherOrder
+	planned.ImageFetcherOrder = prior.ImageFetcherOrder
+	planned.ImageOptions = types.ListUnknown(imageOptionsObjectType())
+	plan := testUnitList(t, typeOptionsObjectType(), []TypeOptionsModel{planned})
+
+	got, diags := planTypeOptionsByType(ctx, config, plan, state)
+	if diags.HasError() {
+		t.Fatalf("plan: %v", diags)
+	}
+	var entries []TypeOptionsModel
+	if d := got.ElementsAs(ctx, &entries, false); d.HasError() {
+		t.Fatalf("elements: %v", d)
+	}
+	if !entries[0].MetadataFetcherOrder.IsUnknown() {
+		t.Errorf("metadata_fetcher_order = %v, want unknown while metadata_fetchers changes", entries[0].MetadataFetcherOrder)
+	}
+	if !entries[0].ImageFetcherOrder.Equal(prior.ImageFetcherOrder) {
+		t.Errorf("image_fetcher_order = %v, want the prior order while image_fetchers stays", entries[0].ImageFetcherOrder)
+	}
+	if !entries[0].SimilarItemProviderOrder.Equal(configured.SimilarItemProviderOrder) {
+		t.Errorf("similar_item_provider_order = %v, want the configured order", entries[0].SimilarItemProviderOrder)
+	}
+}
+
+func TestUnitUnknownWhileSharedKeysChange(t *testing.T) {
+	ctx := t.Context()
+	listType := types.ListType{ElemType: types.StringType}.TerraformType(ctx)
+	s := schema.Schema{Attributes: map[string]schema.Attribute{
+		"entries": schema.ListNestedAttribute{Optional: true, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
+			"enabled": schema.ListAttribute{ElementType: types.StringType, Optional: true, Computed: true},
+			"order":   schema.ListAttribute{ElementType: types.StringType, Optional: true, Computed: true},
+		}}},
+	}}
+	entryType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{"enabled": listType, "order": listType}}
+	entries := func(orders ...[]string) tftypes.Value {
+		elems := make([]tftypes.Value, len(orders))
+		for i, o := range orders {
+			elems[i] = tftypes.NewValue(entryType, map[string]tftypes.Value{"enabled": testUnitTFStringList(), "order": testUnitTFStringList(o...)})
+		}
+		return tftypes.NewValue(s.Type().TerraformType(ctx), map[string]tftypes.Value{"entries": tftypes.NewValue(tftypes.List{ElementType: entryType}, elems)})
+	}
+	modify := func(config, state tftypes.Value, index int, configured types.List) types.List {
+		t.Helper()
+		req := planmodifier.ListRequest{
+			Path:        path.Root("entries").AtListIndex(index).AtName("enabled"),
+			Config:      tfsdk.Config{Schema: s, Raw: config},
+			State:       tfsdk.State{Schema: s, Raw: state},
+			ConfigValue: configured,
+			PlanValue:   testUnitStringList(t, "A"),
+		}
+		if !configured.IsNull() {
+			req.PlanValue = configured
+		}
+		resp := planmodifier.ListResponse{PlanValue: req.PlanValue}
+		unknownWhileSharedKeysChange{siblings: []string{"order"}}.PlanModifyList(ctx, req, &resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatal(resp.Diagnostics)
+		}
+		return resp.PlanValue
+	}
+
+	unset := types.ListNull(types.StringType)
+	for name, c := range map[string]struct {
+		config, state tftypes.Value
+		index         int
+		unknown       bool
+	}{
+		"the order changes":          {config: entries([]string{"B"}), state: entries([]string{"A"}), unknown: true},
+		"the order stays":            {config: entries([]string{"A"}), state: entries([]string{"A"})},
+		"the order is unset":         {config: entries(nil), state: entries([]string{"A"})},
+		"a new entry sets the order": {config: entries([]string{"A"}, []string{"B"}), state: entries([]string{"A"}), index: 1, unknown: true},
+		"the resource is new":        {config: entries([]string{"B"}), state: tftypes.NewValue(s.Type().TerraformType(ctx), nil)},
+	} {
+		if got := modify(c.config, c.state, c.index, unset); got.IsUnknown() != c.unknown {
+			t.Errorf("%s: planned %v, want unknown: %t", name, got, c.unknown)
+		}
+	}
+	configured := testUnitStringList(t, "C")
+	if got := modify(entries([]string{"B"}), entries([]string{"A"}), 0, configured); !got.Equal(configured) {
+		t.Errorf("a configured value is planned %v", got)
+	}
+}
+
+// A combined list stands for two attributes, and a change to either one
+// makes it unknown.
+func TestUnitUnknownWhileSharedKeysChangeFollowsEverySibling(t *testing.T) {
+	ctx := t.Context()
+	s := schema.Schema{Attributes: map[string]schema.Attribute{
+		"enabled":  schema.ListAttribute{ElementType: types.StringType, Optional: true, Computed: true},
+		"disabled": schema.ListAttribute{ElementType: types.StringType, Optional: true, Computed: true},
+		"order":    schema.ListAttribute{ElementType: types.StringType, Optional: true, Computed: true},
+	}}
+	list := testUnitTFStringList
+	object := func(disabled, order tftypes.Value) tftypes.Value {
+		return tftypes.NewValue(s.Type().TerraformType(ctx), map[string]tftypes.Value{"enabled": list(), "disabled": disabled, "order": order})
+	}
+	for name, c := range map[string]struct {
+		config tftypes.Value
+		want   bool
+	}{
+		"the first sibling changes":  {object(list("X"), list()), true},
+		"the second sibling changes": {object(list(), list("B")), true},
+		"neither changes":            {object(list("C"), list("A")), false},
+	} {
+		req := planmodifier.ListRequest{
+			Path:        path.Root("enabled"),
+			Config:      tfsdk.Config{Schema: s, Raw: c.config},
+			State:       tfsdk.State{Schema: s, Raw: object(list("C"), list("A"))},
+			ConfigValue: types.ListNull(types.StringType),
+			PlanValue:   testUnitStringList(t, "A"),
+		}
+		resp := planmodifier.ListResponse{PlanValue: req.PlanValue}
+		unknownWhileSharedKeysChange{siblings: []string{"disabled", "order"}}.PlanModifyList(ctx, req, &resp)
+		if resp.Diagnostics.HasError() || resp.PlanValue.IsUnknown() != c.want {
+			t.Errorf("%s: planned %v (%v), want unknown: %t", name, resp.PlanValue, resp.Diagnostics, c.want)
+		}
+	}
+}
+
+func TestUnitLibraryUpdateWritesTheKeysItsListsShare(t *testing.T) {
+	ctx := t.Context()
+	const served = `{"Name": "Movies", "ItemId": "item", "CollectionType": "movies", "Locations": ["/media"],
+		"LibraryOptions": {"TypeOptions": [{"Type": "Movie", "MetadataFetchers": ["A"], "MetadataFetcherOrder": ["B", "A"]}]}}`
+	var mu sync.Mutex
+	var posted json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Library/VirtualFolders":
+			folder := map[string]json.RawMessage{}
+			if err := json.Unmarshal([]byte(served), &folder); err != nil {
+				t.Error(err)
+			}
+			if posted != nil {
+				folder["LibraryOptions"] = posted
+			}
+			_ = json.NewEncoder(w).Encode([]any{folder})
+		case r.Method == http.MethodPost && r.URL.Path == "/Library/VirtualFolders/LibraryOptions":
+			var body struct{ LibraryOptions json.RawMessage }
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			posted = body.LibraryOptions
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/Libraries/AvailableOptions" && r.URL.Query().Get("libraryContentType") == "movies":
+			_, _ = io.WriteString(w, `{"SubtitleFetchers": [{"Name": "A"}, {"Name": "B"}, {"Name": "C"}],
+				"TypeOptions": [{"Type": "Movie", "MetadataFetchers": [{"Name": "A"}, {"Name": "B"}, {"Name": "C"}]}]}`)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	r := NewLibraryResource()
+	configure(t, r, client.NewClient(srv.URL, "k"))
+	options := path.Root("library_options")
+	movie := options.AtName("type_options").AtListIndex(0)
+	state := planRead(t, r, served)
+	plan := planRead(t, r, served,
+		planValue{options.AtName("subtitle_fetchers"), testUnitStringList(t, "B", "A")},
+		planValue{options.AtName("disabled_subtitle_fetchers"), types.ListUnknown(types.StringType)},
+		planValue{options.AtName("subtitle_fetcher_order"), types.ListUnknown(types.StringType)},
+		planValue{movie.AtName("metadata_fetchers"), testUnitStringList(t, "c")},
+		planValue{movie.AtName("metadata_fetcher_order"), types.ListUnknown(types.StringType)},
 	)
+	resp := resource.UpdateResponse{State: tfsdk.State(state)}
+	r.Update(ctx, resource.UpdateRequest{Plan: plan, State: tfsdk.State(state)}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("apply: %v", resp.Diagnostics)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	checkSameJSON(t, jsonAt(t, posted, "SubtitleFetcherOrder"), `["B","A","C"]`)
+	checkSameJSON(t, jsonAt(t, posted, "DisabledSubtitleFetchers"), `["C"]`)
+	checkSameJSON(t, jsonAt(t, posted, "TypeOptions", 0, "MetadataFetchers"), `["c"]`)
+	// Jellyfin enables c, but ranks only the name it offers, C.
+	checkSameJSON(t, jsonAt(t, posted, "TypeOptions", 0, "MetadataFetcherOrder"), `["c","C","B","A"]`)
+
+	for at, want := range map[string]types.List{
+		"subtitle_fetchers":          testUnitStringList(t, "B", "A"),
+		"disabled_subtitle_fetchers": testUnitStringList(t, "C"),
+	} {
+		var got types.List
+		if d := resp.State.GetAttribute(ctx, options.AtName(at), &got); d.HasError() || !got.Equal(want) {
+			t.Errorf("%s = %v after apply (%v), want %v", at, got, d, want)
+		}
+	}
+	var order types.List
+	if d := resp.State.GetAttribute(ctx, movie.AtName("metadata_fetcher_order"), &order); d.HasError() || !order.Equal(testUnitStringList(t, "c", "C", "B", "A")) {
+		t.Errorf("metadata_fetcher_order = %v after apply (%v), want the written order", order, d)
+	}
+}
+
+func TestUnitReplacedLibraryListsNameTheirReplacement(t *testing.T) {
+	for _, c := range []struct {
+		attrs       map[string]schema.Attribute
+		name, names string
+	}{
+		{libraryOptionsAttributes(), "disabled_subtitle_fetchers", "`subtitle_fetchers`"},
+		{libraryOptionsAttributes(), "subtitle_fetcher_order", "`subtitle_fetchers`"},
+		{typeOptionsAttributes(), "metadata_fetcher_order", "`metadata_fetchers`"},
+		{typeOptionsAttributes(), "image_fetcher_order", "`image_fetchers`"},
+		{typeOptionsAttributes(), "similar_item_provider_order", "`similar_item_providers`"},
+	} {
+		if msg := c.attrs[c.name].GetDeprecationMessage(); !strings.Contains(msg, c.names) {
+			t.Errorf("%s is deprecated with %q, which does not name %s", c.name, msg, c.names)
+		}
+	}
+}
+
+func TestUnitLibraryReadAfterApplyKeepsPlannedNullTypeOptionsLists(t *testing.T) {
+	ctx := t.Context()
+	b := mustWire(t, libraryOptionsWire)
+	data := testUnitLibraryRead(t, b, `{"TypeOptions": [{"Type": "Movie"}]}`)
+
+	served := `{"TypeOptions": [{"Type": "Movie", "MetadataFetcherOrder": [], "SimilarItemProviders": [], "SimilarItemProviderOrder": ["TheMovieDb"]}]}`
+	if d := b.FlattenAfterApply(ctx, served, &data); d.HasError() {
+		t.Fatalf("read after apply: %v", d)
+	}
 
 	var entries []TypeOptionsModel
-	if d := out.TypeOptions.ElementsAs(ctx, &entries, false); d.HasError() {
+	if d := data.LibraryOptions.TypeOptions.ElementsAs(ctx, &entries, false); d.HasError() {
 		t.Fatalf("elements: %v", d)
 	}
 	if !entries[0].MetadataFetcherOrder.IsNull() || !entries[0].SimilarItemProviders.IsNull() {
@@ -238,31 +450,30 @@ func TestUnitKeepPlannedNullsCoversTypeOptionsLists(t *testing.T) {
 	}
 }
 
-func TestUnitCheckSimilarItemSettingsKeptReportsDroppedSettings(t *testing.T) {
-	ctx := context.Background()
-	planned := testUnitTypeOptions("Movie")
-	planned.SimilarItemProviders = testUnitStringList(t, "Local Genre/Tag")
-	planned.SimilarItemProviderOrder = testUnitStringList(t, "Local Genre/Tag")
-	kept := planned
-	dropped := testUnitTypeOptions("Movie")
-	options := func(entry TypeOptionsModel) *LibraryOptionsModel {
-		return &LibraryOptionsModel{TypeOptions: testUnitList(t, typeOptionsObjectType(), []TypeOptionsModel{entry})}
+func TestUnitLibraryReadAfterApplyReportsDroppedSimilarItemSettings(t *testing.T) {
+	ctx := t.Context()
+	b := mustWire(t, libraryOptionsWire)
+	planned := `{"TypeOptions": [{"Type": "Movie", "SimilarItemProviders": ["Local Genre/Tag"], "SimilarItemProviderOrder": ["Local Genre/Tag"]}]}`
+
+	kept := testUnitLibraryRead(t, b, planned)
+	if d := b.FlattenAfterApply(ctx, planned, &kept); d.HasError() {
+		t.Fatalf("settings the server kept: %v", d)
 	}
 
-	var diags diag.Diagnostics
-	checkSimilarItemSettingsKept(ctx, options(planned), options(kept), &diags)
-	if diags.HasError() {
-		t.Fatalf("settings the server kept: %v", diags)
-	}
-
-	checkSimilarItemSettingsKept(ctx, options(planned), options(dropped), &diags)
-	if !diags.HasError() {
-		t.Fatal("settings the server dropped: no error")
-	}
-	for _, name := range []string{"type_options[0].similar_item_providers", "type_options[0].similar_item_provider_order"} {
-		if !strings.Contains(diags[0].Detail(), name) {
-			t.Errorf("error detail %q does not name %s", diags[0].Detail(), name)
+	dropped := testUnitLibraryRead(t, b, planned)
+	d := b.FlattenAfterApply(ctx, `{"TypeOptions": [{"Type": "Movie"}]}`, &dropped)
+	var paths []string
+	for _, e := range d.Errors() {
+		if withPath, ok := e.(diag.DiagnosticWithPath); ok {
+			paths = append(paths, withPath.Path().String())
 		}
+	}
+	want := []string{
+		"library_options.type_options[0].similar_item_provider_order",
+		"library_options.type_options[0].similar_item_providers",
+	}
+	if !slices.Equal(paths, want) {
+		t.Errorf("settings the server dropped: errors at %v, want %v", paths, want)
 	}
 }
 
@@ -281,9 +492,7 @@ func TestUnitImageOptionTypeAcceptsOnlyJellyfinSpelling(t *testing.T) {
 }
 
 func TestUnitCollectionTypeAcceptsOnlyJellyfinSpelling(t *testing.T) {
-	resp := resource.SchemaResponse{}
-	NewLibraryResource().Schema(context.Background(), resource.SchemaRequest{}, &resp)
-	collectionType, ok := resp.Schema.Attributes["collection_type"].(schema.StringAttribute)
+	collectionType, ok := schemaOf(NewLibraryResource()).Attributes["collection_type"].(schema.StringAttribute)
 	if !ok {
 		t.Fatal("collection_type is not a string attribute")
 	}
@@ -302,7 +511,7 @@ func testUnitAssertStringValidation(t *testing.T, a schema.StringAttribute, expe
 	for value, want := range expectError {
 		resp := validator.StringResponse{}
 		for _, v := range a.Validators {
-			v.ValidateString(context.Background(), validator.StringRequest{
+			v.ValidateString(t.Context(), validator.StringRequest{
 				Path:        path.Root("value"),
 				ConfigValue: types.StringValue(value),
 			}, &resp)
@@ -360,7 +569,7 @@ func TestUnitNetworkPathPlansPriorValueWhenUnset(t *testing.T) {
 	for name, test := range tests {
 		resp := planmodifier.StringResponse{PlanValue: test.plan}
 		for _, m := range a.PlanModifiers {
-			m.PlanModifyString(context.Background(), planmodifier.StringRequest{
+			m.PlanModifyString(t.Context(), planmodifier.StringRequest{
 				ConfigValue: test.config,
 				PlanValue:   resp.PlanValue,
 				StateValue:  test.state,
@@ -385,9 +594,7 @@ func TestUnitFlattenCollectionTypeReadsMissingTypeAsMixed(t *testing.T) {
 }
 
 func TestUnitCollectionTypeChangeRequiresReplaceExceptEmptyToMixed(t *testing.T) {
-	schemaResp := resource.SchemaResponse{}
-	NewLibraryResource().Schema(context.Background(), resource.SchemaRequest{}, &schemaResp)
-	collectionType, ok := schemaResp.Schema.Attributes["collection_type"].(schema.StringAttribute)
+	collectionType, ok := schemaOf(NewLibraryResource()).Attributes["collection_type"].(schema.StringAttribute)
 	if !ok {
 		t.Fatal("collection_type is not a string attribute")
 	}
@@ -404,7 +611,7 @@ func TestUnitCollectionTypeChangeRequiresReplaceExceptEmptyToMixed(t *testing.T)
 	} {
 		resp := planmodifier.StringResponse{PlanValue: types.StringValue(test.plan)}
 		for _, m := range collectionType.PlanModifiers {
-			m.PlanModifyString(context.Background(), planmodifier.StringRequest{
+			m.PlanModifyString(t.Context(), planmodifier.StringRequest{
 				State:       tfsdk.State{Raw: existing},
 				Plan:        tfsdk.Plan{Raw: existing},
 				ConfigValue: types.StringValue(test.plan),
@@ -418,9 +625,106 @@ func TestUnitCollectionTypeChangeRequiresReplaceExceptEmptyToMixed(t *testing.T)
 	}
 }
 
-func TestUnitVersionedAttributeErrorsFollowServerVersion(t *testing.T) {
+func TestUnitLibraryPathsReplaceOnlyForOtherPaths(t *testing.T) {
+	paths, ok := schemaOf(NewLibraryResource()).Attributes["paths"].(schema.ListAttribute)
+	if !ok {
+		t.Fatal("paths is not a list attribute")
+	}
+	existing := tftypes.NewValue(tftypes.Object{}, map[string]tftypes.Value{})
+
+	for _, test := range []struct {
+		state, plan []string
+		want        bool
+	}{
+		{state: []string{"/a", "/b"}, plan: []string{"/b", "/a"}, want: false},
+		{state: []string{"/a", "/b"}, plan: []string{"/a"}, want: true},
+		{state: []string{"/a"}, plan: []string{"/b"}, want: true},
+	} {
+		plan := testUnitStringList(t, test.plan...)
+		resp := planmodifier.ListResponse{PlanValue: plan}
+		for _, m := range paths.PlanModifiers {
+			m.PlanModifyList(t.Context(), planmodifier.ListRequest{
+				State:       tfsdk.State{Raw: existing},
+				Plan:        tfsdk.Plan{Raw: existing},
+				ConfigValue: plan,
+				PlanValue:   plan,
+				StateValue:  testUnitStringList(t, test.state...),
+			}, &resp)
+		}
+		if resp.RequiresReplace != test.want {
+			t.Errorf("%q -> %q: requires replace %t, want %t", test.state, test.plan, resp.RequiresReplace, test.want)
+		}
+	}
+}
+
+// Jellyfin lists a library's locations sorted, which must not read as a
+// change to paths listed in another order.
+func TestUnitLibraryPathsKeepTheirOrder(t *testing.T) {
+	ctx := t.Context()
+	for _, test := range []struct {
+		name        string
+		want        types.List
+		served      []string
+		wantOrdered []string
+	}{
+		{"same paths", testUnitStringList(t, "/mnt/tv", "/mnt/anime"), []string{"/mnt/anime", "/mnt/tv"}, []string{"/mnt/tv", "/mnt/anime"}},
+		{"other paths", testUnitStringList(t, "/mnt/tv"), []string{"/mnt/anime", "/mnt/tv"}, []string{"/mnt/anime", "/mnt/tv"}},
+		{"no prior paths", types.ListNull(types.StringType), []string{"/b", "/a"}, []string{"/b", "/a"}},
+	} {
+		got, d := pathsInOrder(ctx, test.want, test.served)
+		if d.HasError() {
+			t.Fatal(d)
+		}
+		if want := testUnitStringList(t, test.wantOrdered...); !got.Equal(want) {
+			t.Errorf("%s: paths = %s, want %s", test.name, got, want)
+		}
+	}
+}
+
+// State written by a release without subtitle_fetchers holds it as null, and
+// a plan that skips the refresh leaves it unknown; with the options otherwise
+// unchanged, Update writes nothing, as writing them would read back options
+// the older state does not hold.
+func TestUnitLibraryUpdateWritesNoOptionsOverOlderState(t *testing.T) {
+	ctx := t.Context()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s %s", r.Method, r.URL)
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	r := NewLibraryResource()
+	configure(t, r, client.NewClient(srv.URL, "k"))
+
+	const served = `{"Name": "Lib", "Locations": ["/m"], "ItemId": "i", "LibraryOptions": {"EnableRealtimeMonitor": true}}`
+	options := path.Root("library_options")
+	olderState := []planValue{
+		{options.AtName("disabled"), types.BoolNull()},
+		{options.AtName("extract_chapters_during_library_scan"), types.BoolNull()},
+	}
+	state := planRead(t, r, served, append(olderState, planValue{path.Root("collection_type"), types.StringValue("")})...)
+	plan := planRead(t, r, served, append(olderState,
+		planValue{path.Root("collection_type"), types.StringValue("mixed")},
+		planValue{options.AtName("subtitle_fetchers"), types.ListUnknown(types.StringType)})...)
+
+	resp := resource.UpdateResponse{State: tfsdk.State(state)}
+	r.Update(ctx, resource.UpdateRequest{Plan: plan, State: tfsdk.State(state)}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("update: %v", resp.Diagnostics)
+	}
+	var collectionType types.String
+	var subtitleFetchers types.List
+	resp.Diagnostics.Append(resp.State.GetAttribute(ctx, path.Root("collection_type"), &collectionType)...)
+	resp.Diagnostics.Append(resp.State.GetAttribute(ctx, options.AtName("subtitle_fetchers"), &subtitleFetchers)...)
+	if collectionType.ValueString() != "mixed" || !subtitleFetchers.IsNull() {
+		t.Errorf("state after update: collection_type %s, subtitle_fetchers %s; want mixed and the prior null (%v)", collectionType, subtitleFetchers, resp.Diagnostics)
+	}
+}
+
+func TestUnitLibraryVersionErrorsFollowServerVersion(t *testing.T) {
+	ctx := t.Context()
 	similarItems := path.Root("library_options").AtName("type_options").AtListIndex(0).AtName("similar_item_providers")
 	networkPath := path.Root("library_options").AtName("path_infos").AtListIndex(0).AtName("network_path")
+	root, config := testUnitLibraryGatedConfig(t)
 
 	tests := map[string]struct {
 		version      string
@@ -434,7 +738,7 @@ func TestUnitVersionedAttributeErrorsFollowServerVersion(t *testing.T) {
 		"unparseable": {version: "unknown"},
 	}
 	for name, test := range tests {
-		diags := versionedAttributeErrors(test.version, []path.Path{similarItems}, []path.Path{networkPath})
+		diags := root.VersionErrors(ctx, config, func() (string, error) { return test.version, nil })
 		gotSimilar, gotNetwork := false, false
 		for _, d := range diags {
 			withPath, ok := d.(diag.DiagnosticWithPath)
@@ -449,6 +753,49 @@ func TestUnitVersionedAttributeErrorsFollowServerVersion(t *testing.T) {
 			t.Errorf("%s: similar item error %t, network path error %t; want %t, %t", name, gotSimilar, gotNetwork, test.similarError, test.networkError)
 		}
 	}
+}
+
+// CI runs the acceptance tests on Jellyfin 12, which never reports the similar
+// item error, so no other test there sees its wording.
+func TestUnitLibraryVersionErrorWording(t *testing.T) {
+	root, config := testUnitLibraryGatedConfig(t)
+
+	diags := root.VersionErrors(t.Context(), config, func() (string, error) { return "10.11.11", nil })
+	var got []string
+	for _, d := range diags {
+		withPath, ok := d.(diag.DiagnosticWithPath)
+		if !ok {
+			t.Fatalf("diagnostic without a path: %v", d)
+		}
+		got = append(got, withPath.Path().String()+" | "+d.Summary()+" | "+d.Detail())
+	}
+	slices.Sort(got)
+	want := []string{
+		"library_options.path_infos[0].network_path | Network paths not supported | The server runs Jellyfin 10.11.11, and Jellyfin 10.10 removed network paths, so the server would drop the value. Remove library_options.path_infos[0].network_path from the configuration.",
+		"library_options.type_options[0].similar_item_providers | Similar item settings not supported | The server runs Jellyfin 10.11.11, and similar item providers need Jellyfin 12 or later. Remove library_options.type_options[0].similar_item_providers for this server.",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("version errors:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// testUnitLibraryGatedConfig configures a similar item provider and a network
+// path, which some Jellyfin versions lack.
+func testUnitLibraryGatedConfig(t *testing.T) (*wire.Binding, tfsdk.Config) {
+	t.Helper()
+	ctx := t.Context()
+	root := mustWire(t, libraryWire)
+	data := testUnitLibraryRead(t, mustWire(t, libraryOptionsWire),
+		`{"TypeOptions": [{"Type": "Movie", "SimilarItemProviders": ["Local Genre/Tag"]}], "PathInfos": [{"Path": "/media", "NetworkPath": "//nas/media"}]}`)
+	obj, d := types.ObjectValueFrom(ctx, root.AttrTypes, &data)
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	raw, err := obj.ToTerraformValue(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root, tfsdk.Config{Schema: schemaOf(NewLibraryResource()), Raw: raw}
 }
 
 func testUnitTypeOptions(typ string) TypeOptionsModel {
@@ -473,27 +820,66 @@ func testUnitStringList(t *testing.T, values ...string) types.List {
 	return testUnitList(t, types.StringType, values)
 }
 
+// testUnitTFStringList is null for no values.
+func testUnitTFStringList(values ...string) tftypes.Value {
+	listType := tftypes.List{ElementType: tftypes.String}
+	if values == nil {
+		return tftypes.NewValue(listType, nil)
+	}
+	elems := make([]tftypes.Value, len(values))
+	for i, v := range values {
+		elems[i] = tftypes.NewValue(tftypes.String, v)
+	}
+	return tftypes.NewValue(listType, elems)
+}
+
 func testUnitList(t *testing.T, elemType attr.Type, elements any) types.List {
 	t.Helper()
-	list, d := types.ListValueFrom(context.Background(), elemType, elements)
+	list, d := types.ListValueFrom(t.Context(), elemType, elements)
 	if d.HasError() {
 		t.Fatalf("building list: %v", d)
 	}
 	return list
 }
 
-func testUnitAssertJSONEqual(t *testing.T, got json.RawMessage, want string) {
+// testUnitLibraryRead reads options into a library whose other attributes
+// are set, as the resource's model always has them.
+func testUnitLibraryRead(t *testing.T, b *wire.Binding, options string) LibraryResourceModel {
 	t.Helper()
-	var g, w any
-	if err := json.Unmarshal(got, &g); err != nil {
-		t.Fatalf("unmarshal got: %v", err)
+	data := LibraryResourceModel{
+		ID:             types.StringValue("Movies"),
+		Name:           types.StringValue("Movies"),
+		CollectionType: types.StringValue("movies"),
+		Paths:          testUnitStringList(t, "/media"),
+		ItemID:         types.StringValue("item"),
 	}
-	if err := json.Unmarshal([]byte(want), &w); err != nil {
-		t.Fatalf("unmarshal want: %v", err)
+	if d := b.FlattenInto(testUnitOfferingNoSubtitleFetchers(t.Context()), options, &data); d.HasError() {
+		t.Fatalf("read: %v", d)
 	}
-	gotJSON, _ := json.Marshal(g)
-	wantJSON, _ := json.Marshal(w)
-	if string(gotJSON) != string(wantJSON) {
-		t.Fatalf("JSON mismatch\n got: %s\nwant: %s", gotJSON, wantJSON)
+	return data
+}
+
+// testUnitOfferingNoSubtitleFetchers lists nothing for any item type either.
+func testUnitOfferingNoSubtitleFetchers(ctx context.Context) context.Context {
+	return wire.WithAvailable(ctx, func(_ context.Context, list, scope string) ([]string, error) {
+		switch {
+		case scope != "":
+			return nil, fmt.Errorf("item type %q: %w", scope, wire.ErrNotOffered)
+		case list != "SubtitleFetchers":
+			return nil, fmt.Errorf("asked for %s of the library", list)
+		}
+		return nil, nil
+	})
+}
+
+func typeOptionsObjectType() types.ObjectType { return testUnitObjectType(typeOptionsAttributes()) }
+
+func imageOptionsObjectType() types.ObjectType { return testUnitObjectType(imageOptionsAttributes()) }
+
+func testUnitObjectType(attrs map[string]schema.Attribute) types.ObjectType {
+	t := types.ObjectType{AttrTypes: map[string]attr.Type{}}
+	for name, a := range attrs {
+		t.AttrTypes[name] = a.GetType()
 	}
+	return t
 }

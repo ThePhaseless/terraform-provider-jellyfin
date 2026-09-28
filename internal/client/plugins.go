@@ -7,15 +7,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/url"
 	"sync"
 )
 
-// pluginChangeMu serialises plugin installs and uninstalls. Jellyfin's plugin
-// manager adds and removes entries in an unsynchronised list, so overlapping
-// requests fail with ArgumentOutOfRangeException or a missing meta.json and can
-// leave that list inconsistent until the server restarts.
+// pluginChangeMu serialises plugin installs and uninstalls: overlapping
+// requests race Jellyfin's unsynchronised plugin list, failing or corrupting it
+// until restart.
 var pluginChangeMu sync.Mutex
 
 // PluginRepository represents a plugin repository.
@@ -30,37 +28,26 @@ type InstalledPlugin struct {
 	Name         string `json:"Name"`
 	Version      string `json:"Version"`
 	ID           string `json:"Id"`
-	Description  string `json:"Description"`
 	Status       string `json:"Status"`
 	CanUninstall bool   `json:"CanUninstall"`
-	HasImage     bool   `json:"HasImage"`
 }
 
 // PackageInfo represents information about an available package.
 type PackageInfo struct {
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Versions    []VersionInfo `json:"versions"`
+	Name     string        `json:"name"`
+	Versions []VersionInfo `json:"versions"`
 }
 
 // VersionInfo represents information about a specific version of a package.
 type VersionInfo struct {
-	Version        string `json:"version"`
-	VersionNumber  string `json:"VersionNumber"`
-	TargetAbi      string `json:"targetAbi"`
-	SourceURL      string `json:"sourceUrl"`
-	Checksum       string `json:"checksum"`
-	Timestamp      string `json:"timestamp"`
-	RepositoryName string `json:"repositoryName"`
-	RepositoryURL  string `json:"repositoryUrl"`
+	Version       string `json:"version"`
+	RepositoryURL string `json:"repositoryUrl"`
 }
 
 // GetPluginRepositories retrieves all configured plugin repositories.
 func (c *Client) GetPluginRepositories(ctx context.Context) ([]PluginRepository, error) {
 	var repos []PluginRepository
-	if err := c.get(ctx, "/Repositories", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&repos)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/Repositories", &repos); err != nil {
 		return nil, fmt.Errorf("getting plugin repositories: %w", err)
 	}
 	return repos, nil
@@ -81,9 +68,7 @@ func (c *Client) SetPluginRepositories(ctx context.Context, repos []PluginReposi
 // GetInstalledPlugins retrieves all installed plugins.
 func (c *Client) GetInstalledPlugins(ctx context.Context) ([]InstalledPlugin, error) {
 	var plugins []InstalledPlugin
-	if err := c.get(ctx, "/Plugins", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&plugins)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/Plugins", &plugins); err != nil {
 		return nil, fmt.Errorf("getting installed plugins: %w", err)
 	}
 	return plugins, nil
@@ -128,7 +113,7 @@ func (c *Client) GetPluginConfiguration(ctx context.Context, pluginID string) (s
 }
 
 // UpdatePluginConfiguration updates the configuration for a plugin with raw JSON.
-func (c *Client) UpdatePluginConfiguration(ctx context.Context, pluginID string, configJSON string) error {
+func (c *Client) UpdatePluginConfiguration(ctx context.Context, pluginID, configJSON string) error {
 	path := fmt.Sprintf("/Plugins/%s/Configuration", url.PathEscape(pluginID))
 	if err := c.postRaw(ctx, path, configJSON); err != nil {
 		return fmt.Errorf("updating configuration for plugin %s: %w", pluginID, err)
@@ -139,9 +124,7 @@ func (c *Client) UpdatePluginConfiguration(ctx context.Context, pluginID string,
 // GetAvailablePackages retrieves all available packages from configured repositories.
 func (c *Client) GetAvailablePackages(ctx context.Context) ([]PackageInfo, error) {
 	var packages []PackageInfo
-	if err := c.get(ctx, "/Packages", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&packages)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/Packages", &packages); err != nil {
 		return nil, fmt.Errorf("getting available packages: %w", err)
 	}
 	return packages, nil

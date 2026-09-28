@@ -1,0 +1,164 @@
+// Copyright IBM Corp. 2021, 2025
+// SPDX-License-Identifier: MPL-2.0
+
+package provider
+
+import (
+	"strings"
+
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/float64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+)
+
+// Optional attributes below are also computed: unset reads the server's
+// value, kept while unknown.
+
+func optionalString(desc string) schema.StringAttribute {
+	return schema.StringAttribute{
+		Description:         desc,
+		MarkdownDescription: desc,
+		Optional:            true,
+		Computed:            true,
+		PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+	}
+}
+
+func optionalEnum(desc string, values ...string) schema.StringAttribute {
+	a := optionalString(desc + " One of `" + strings.Join(values, "`, `") + "`.")
+	a.Validators = []validator.String{stringvalidator.OneOf(values...)}
+	return a
+}
+
+func optionalBool(desc string) schema.BoolAttribute {
+	return schema.BoolAttribute{
+		Description:         desc,
+		MarkdownDescription: desc,
+		Optional:            true,
+		Computed:            true,
+		PlanModifiers:       []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+	}
+}
+
+func optionalInt(desc string) schema.Int64Attribute {
+	return schema.Int64Attribute{
+		Description:         desc,
+		MarkdownDescription: desc,
+		Optional:            true,
+		Computed:            true,
+		PlanModifiers:       []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
+	}
+}
+
+func optionalFloat(desc string) schema.Float64Attribute {
+	return schema.Float64Attribute{
+		Description:         desc,
+		MarkdownDescription: desc,
+		Optional:            true,
+		Computed:            true,
+		PlanModifiers:       []planmodifier.Float64{float64planmodifier.UseStateForUnknown()},
+	}
+}
+
+func optionalStringList(desc string) schema.ListAttribute {
+	return schema.ListAttribute{
+		ElementType:         types.StringType,
+		Description:         desc,
+		MarkdownDescription: desc,
+		Optional:            true,
+		Computed:            true,
+		PlanModifiers:       []planmodifier.List{listplanmodifier.UseStateForUnknown()},
+	}
+}
+
+func optionalIntList(desc string) schema.ListAttribute {
+	a := optionalStringList(desc)
+	a.ElementType = types.Int64Type
+	return a
+}
+
+// Element attributes skip UseStateForUnknown, which pairs elements by index;
+// their list fills them by key.
+
+func elementString(desc string) schema.StringAttribute {
+	a := optionalString(desc)
+	a.PlanModifiers = nil
+	return a
+}
+
+func elementBool(desc string) schema.BoolAttribute {
+	a := optionalBool(desc)
+	a.PlanModifiers = nil
+	return a
+}
+
+func elementInt(desc string) schema.Int64Attribute {
+	a := optionalInt(desc)
+	a.PlanModifiers = nil
+	return a
+}
+
+func elementFloat(desc string) schema.Float64Attribute {
+	a := optionalFloat(desc)
+	a.PlanModifiers = nil
+	return a
+}
+
+func elementStringList(desc string) schema.ListAttribute {
+	a := optionalStringList(desc)
+	a.PlanModifiers = nil
+	return a
+}
+
+type unsupported struct {
+	message string
+	reject  unsetValidator
+}
+
+func (u unsupported) boolAttribute(desc string) schema.BoolAttribute {
+	return schema.BoolAttribute{
+		Description:         desc + " " + u.message,
+		MarkdownDescription: desc + " " + u.message,
+		Optional:            true,
+		DeprecationMessage:  u.message,
+		Validators:          []validator.Bool{u.reject},
+	}
+}
+
+func (u unsupported) intAttribute(desc string) schema.Int64Attribute {
+	return schema.Int64Attribute{
+		Description:         desc + " " + u.message,
+		MarkdownDescription: desc + " " + u.message,
+		Optional:            true,
+		DeprecationMessage:  u.message,
+		Validators:          []validator.Int64{u.reject},
+	}
+}
+
+func (u unsupported) stringAttribute(desc string) schema.StringAttribute {
+	return schema.StringAttribute{
+		Description:         desc + " " + u.message,
+		MarkdownDescription: desc + " " + u.message,
+		Optional:            true,
+		DeprecationMessage:  u.message,
+		Validators:          []validator.String{u.reject},
+	}
+}
+
+func (u unsupported) stringListAttribute(desc string) schema.ListAttribute {
+	return schema.ListAttribute{
+		ElementType:         types.StringType,
+		Description:         desc + " " + u.message,
+		MarkdownDescription: desc + " " + u.message,
+		Optional:            true,
+		DeprecationMessage:  u.message,
+		Validators:          []validator.List{u.reject},
+	}
+}

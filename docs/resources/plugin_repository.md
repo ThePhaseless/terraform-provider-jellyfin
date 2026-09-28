@@ -34,7 +34,7 @@ resource "jellyfin_plugin_repository" "stable" {
 
 ### Read-Only
 
-- `id` (String) The plugin repository resource identifier.
+- `id` (String) The plugin repository resource identifier, which is its name.
 
 ## Import
 
@@ -43,5 +43,5 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-terraform import jellyfin_plugin_repository.example <repository-name>
+terraform import jellyfin_plugin_repository.stable "<repository-name>"
 ```

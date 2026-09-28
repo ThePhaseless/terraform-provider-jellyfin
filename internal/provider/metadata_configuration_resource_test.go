@@ -14,7 +14,6 @@ func TestAccMetadataConfigurationResource(t *testing.T) {
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Create and Read.
 			{
 				Config: `
 resource "jellyfin_metadata_configuration" "test" {
@@ -25,14 +24,12 @@ resource "jellyfin_metadata_configuration" "test" {
 					resource.TestCheckResourceAttr("jellyfin_metadata_configuration.test", "use_file_creation_time_for_date_added", "true"),
 				),
 			},
-			// ImportState.
 			{
 				ResourceName:      "jellyfin_metadata_configuration.test",
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateId:     "metadata",
 			},
-			// Update.
 			{
 				Config: `
 resource "jellyfin_metadata_configuration" "test" {

@@ -9,6 +9,6 @@ resource "jellyfin_plugin" "example" {
 # Without triggers the task never runs, which stops automatic updates for every
 # plugin.
 resource "jellyfin_scheduled_task" "plugin_updates" {
-  task_id  = "f9b057c054e9e6daee4a88ffd146a403"
+  key      = "PluginUpdates"
   triggers = []
 }

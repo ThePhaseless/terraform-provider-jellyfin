@@ -3,6 +3,7 @@ op DELETE /Library/VirtualFolders | params=name:query:required=false,refreshLibr
 op DELETE /Plugins/{pluginId}/{version} | params=pluginId:path:required=true,version:path:required=true
 op DELETE /Users/{userId} | params=userId:path:required=true
 op GET /Auth/Keys | resp=#AuthenticationInfoQueryResult
+op GET /Libraries/AvailableOptions | params=isNewLibrary:query:required=false,libraryContentType:query:required=false | resp=#LibraryOptionsResultDto
 op GET /Library/VirtualFolders | resp=[]#VirtualFolderInfo
 op GET /Packages | resp=[]#PackageInfo
 op GET /Plugins | resp=[]#PluginInfo
@@ -10,7 +11,6 @@ op GET /Plugins/{pluginId}/Configuration | params=pluginId:path:required=true | 
 op GET /Repositories | resp=[]#RepositoryInfo
 op GET /ScheduledTasks | params=isEnabled:query:required=false,isHidden:query:required=false | resp=[]#TaskInfo
 op GET /ScheduledTasks/{taskId} | params=taskId:path:required=true | resp=#TaskInfo
-op GET /Startup/Configuration | resp=#StartupConfigurationDto
 op GET /Startup/User | resp=#StartupUserDto
 op GET /System/Configuration | resp=#ServerConfiguration
 op GET /System/Configuration/{key} | params=key:path:required=true | resp=string:binary
@@ -144,6 +144,8 @@ schema InstallationInfo.Name: string
 schema InstallationInfo.PackageInfo: #PackageInfo
 schema InstallationInfo.SourceUrl: string
 schema InstallationInfo.Version: string
+schema LibraryOptionInfoDto.DefaultEnabled: boolean
+schema LibraryOptionInfoDto.Name: string
 schema LibraryOptions.AllowEmbeddedSubtitles: #EmbeddedSubtitleOptions
 schema LibraryOptions.AutomaticRefreshIntervalDays: integer:int32
 schema LibraryOptions.AutomaticallyAddToCollection: boolean
@@ -186,6 +188,18 @@ schema LibraryOptions.SubtitleDownloadLanguages: []string
 schema LibraryOptions.SubtitleFetcherOrder: []string
 schema LibraryOptions.TypeOptions: []#TypeOptions
 schema LibraryOptions.UseCustomTagDelimiters: boolean
+schema LibraryOptionsResultDto.LyricFetchers: []#LibraryOptionInfoDto
+schema LibraryOptionsResultDto.MediaSegmentProviders: []#LibraryOptionInfoDto
+schema LibraryOptionsResultDto.MetadataReaders: []#LibraryOptionInfoDto
+schema LibraryOptionsResultDto.MetadataSavers: []#LibraryOptionInfoDto
+schema LibraryOptionsResultDto.SubtitleFetchers: []#LibraryOptionInfoDto
+schema LibraryOptionsResultDto.TypeOptions: []#LibraryTypeOptionsDto
+schema LibraryTypeOptionsDto.DefaultImageOptions: []#ImageOption
+schema LibraryTypeOptionsDto.ImageFetchers: []#LibraryOptionInfoDto
+schema LibraryTypeOptionsDto.MetadataFetchers: []#LibraryOptionInfoDto
+schema LibraryTypeOptionsDto.SimilarItemProviders: []#LibraryOptionInfoDto
+schema LibraryTypeOptionsDto.SupportedImageTypes: []#ImageType
+schema LibraryTypeOptionsDto.Type: string
 schema ListingsProviderInfo.ChannelMappings: []#NameValuePair
 schema ListingsProviderInfo.Country: string
 schema ListingsProviderInfo.EnableAllTuners: boolean

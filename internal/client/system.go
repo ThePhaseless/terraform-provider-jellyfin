@@ -5,9 +5,7 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 )
 
 // SystemInfo represents the full system information from /System/Info.
@@ -22,27 +20,14 @@ type SystemInfo struct {
 
 // PublicSystemInfo represents public system information from /System/Info/Public.
 type PublicSystemInfo struct {
-	ID                     string `json:"Id"`
-	ServerName             string `json:"ServerName"`
 	Version                string `json:"Version"`
-	LocalAddress           string `json:"LocalAddress"`
 	StartupWizardCompleted bool   `json:"StartupWizardCompleted"`
-}
-
-// SystemConfiguration represents the server configuration.
-// RawJSON stores the complete JSON to preserve all fields during round-trips.
-type SystemConfiguration struct {
-	ServerName               string `json:"-"`
-	IsStartupWizardCompleted bool   `json:"-"`
-	RawJSON                  string `json:"-"`
 }
 
 // GetSystemInfo retrieves the full system information.
 func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	var info SystemInfo
-	if err := c.get(ctx, "/System/Info", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&info)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/System/Info", &info); err != nil {
 		return nil, fmt.Errorf("getting system info: %w", err)
 	}
 	return &info, nil
@@ -51,55 +36,35 @@ func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 // GetPublicSystemInfo retrieves public system information (no auth required).
 func (c *Client) GetPublicSystemInfo(ctx context.Context) (*PublicSystemInfo, error) {
 	var info PublicSystemInfo
-	if err := c.get(ctx, "/System/Info/Public", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&info)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/System/Info/Public", &info); err != nil {
 		return nil, fmt.Errorf("getting public system info: %w", err)
 	}
 	return &info, nil
 }
 
-// GetSystemConfiguration retrieves the server configuration.
-func (c *Client) GetSystemConfiguration(ctx context.Context) (*SystemConfiguration, error) {
+// GetSystemConfiguration returns the server configuration document as the
+// server serves it.
+func (c *Client) GetSystemConfiguration(ctx context.Context) (string, error) {
 	raw, err := c.getRaw(ctx, "/System/Configuration")
 	if err != nil {
-		return nil, fmt.Errorf("getting system configuration: %w", err)
+		return "", fmt.Errorf("getting system configuration: %w", err)
 	}
-
-	var parsed map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-		return nil, fmt.Errorf("parsing system configuration: %w", err)
-	}
-
-	config := &SystemConfiguration{
-		RawJSON: raw,
-	}
-
-	if v, ok := parsed["ServerName"]; ok {
-		if err := json.Unmarshal(v, &config.ServerName); err != nil {
-			return nil, fmt.Errorf("parsing ServerName from system configuration: %w", err)
-		}
-	}
-	if v, ok := parsed["IsStartupWizardCompleted"]; ok {
-		if err := json.Unmarshal(v, &config.IsStartupWizardCompleted); err != nil {
-			return nil, fmt.Errorf("parsing IsStartupWizardCompleted from system configuration: %w", err)
-		}
-	}
-
-	return config, nil
+	return raw, nil
 }
 
-// UpdateSystemConfiguration updates the server configuration.
-func (c *Client) UpdateSystemConfiguration(ctx context.Context, config *SystemConfiguration) error {
-	if err := c.postRaw(ctx, "/System/Configuration", config.RawJSON); err != nil {
+// UpdateSystemConfiguration replaces the server configuration document with
+// raw.
+func (c *Client) UpdateSystemConfiguration(ctx context.Context, raw string) error {
+	if err := c.postRaw(ctx, "/System/Configuration", raw); err != nil {
 		return fmt.Errorf("updating system configuration: %w", err)
 	}
 	return nil
 }
 
-// RestartServer restarts the Jellyfin server. The HTTP API becomes unavailable
-// while the server restarts; callers should poll GetSystemInfo until
-// HasPendingRestart is false before issuing further requests.
+// RestartServer asks the Jellyfin server to restart and returns without
+// waiting. The server may keep answering for a while, and plugin updates can
+// set HasPendingRestart again soon after, so neither shows that the restart
+// is over; jellyfin_restart waits for several healthy answers in a row.
 func (c *Client) RestartServer(ctx context.Context) error {
 	if err := c.post(ctx, "/System/Restart", nil); err != nil {
 		return fmt.Errorf("restarting server: %w", err)
@@ -107,25 +72,19 @@ func (c *Client) RestartServer(ctx context.Context) error {
 	return nil
 }
 
-// EncodingOptions represents the encoding configuration.
-// RawJSON stores the complete JSON since the configuration is very complex.
-type EncodingOptions struct {
-	RawJSON string `json:"-"`
-}
-
-// GetEncodingOptions retrieves the encoding configuration.
-func (c *Client) GetEncodingOptions(ctx context.Context) (*EncodingOptions, error) {
+// GetEncodingOptions returns the encoding configuration document as the
+// server serves it.
+func (c *Client) GetEncodingOptions(ctx context.Context) (string, error) {
 	raw, err := c.getRaw(ctx, "/System/Configuration/encoding")
 	if err != nil {
-		return nil, fmt.Errorf("getting encoding options: %w", err)
+		return "", fmt.Errorf("getting encoding options: %w", err)
 	}
-
-	return &EncodingOptions{RawJSON: raw}, nil
+	return raw, nil
 }
 
-// UpdateEncodingOptions updates the encoding configuration.
-func (c *Client) UpdateEncodingOptions(ctx context.Context, config *EncodingOptions) error {
-	if err := c.postRaw(ctx, "/System/Configuration/encoding", config.RawJSON); err != nil {
+// UpdateEncodingOptions replaces the encoding configuration document with raw.
+func (c *Client) UpdateEncodingOptions(ctx context.Context, raw string) error {
+	if err := c.postRaw(ctx, "/System/Configuration/encoding", raw); err != nil {
 		return fmt.Errorf("updating encoding options: %w", err)
 	}
 	return nil

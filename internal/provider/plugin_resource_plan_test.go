@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"net/http"
 	"testing"
 
@@ -14,15 +13,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-go/tftypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 func pluginResourcePlan(t *testing.T, m PluginResourceModel) tfsdk.Plan {
 	t.Helper()
-	plan := tfsdk.Plan{Schema: pluginResourceSchema(t)}
-	if diags := plan.Set(context.Background(), &m); diags.HasError() {
+	plan := tfsdk.Plan{Schema: schemaOf(NewPluginResource())}
+	if diags := plan.Set(t.Context(), &m); diags.HasError() {
 		t.Fatalf("plan: %v", diags.Errors())
 	}
 	return plan
@@ -35,7 +33,7 @@ func modifyPluginPlan(t *testing.T, r *PluginResource, state, plan PluginResourc
 		State: pluginResourceState(t, state),
 	}
 	resp := &resource.ModifyPlanResponse{Plan: req.Plan}
-	r.ModifyPlan(context.Background(), req, resp)
+	r.ModifyPlan(t.Context(), req, resp)
 	return resp
 }
 
@@ -47,19 +45,26 @@ func bookshelfPackage(versions ...string) []client.PackageInfo {
 	return []client.PackageInfo{pkg}
 }
 
-func TestUnitPluginVersionChangeReplacesUnlessItNamesInstalledVersion(t *testing.T) {
-	installed := PluginResourceModel{
-		ID:               types.StringValue(bookshelfID),
+func plannedBookshelf(version string) PluginResourceModel {
+	return PluginResourceModel{
+		ID:               types.StringUnknown(),
 		Name:             types.StringValue("Bookshelf"),
-		Version:          types.StringValue("13.0.0.0"),
-		InstalledVersion: types.StringValue("13.0.0.0"),
+		Version:          types.StringValue(version),
+		InstalledVersion: types.StringUnknown(),
 		RepositoryURL:    types.StringValue(stableRepoURL),
 	}
-	withVersion := func(m PluginResourceModel, version types.String) PluginResourceModel {
-		m.Version = version
-		return m
-	}
-	fromKeyword := withVersion(installed, types.StringValue("latest"))
+}
+
+func installedBookshelf(version, installedVersion string) PluginResourceModel {
+	m := plannedBookshelf(version)
+	m.ID = types.StringValue(bookshelfID)
+	m.InstalledVersion = types.StringValue(installedVersion)
+	return m
+}
+
+func TestUnitPluginVersionChangeReplacesUnlessItNamesInstalledVersion(t *testing.T) {
+	installed := installedBookshelf("13.0.0.0", "13.0.0.0")
+	fromKeyword := installedBookshelf("latest", "13.0.0.0")
 	beforeInstalledVersion := installed
 	beforeInstalledVersion.InstalledVersion = types.StringNull()
 
@@ -84,7 +89,9 @@ func TestUnitPluginVersionChangeReplacesUnlessItNamesInstalledVersion(t *testing
 		t.Run(c.name, func(t *testing.T) {
 			r := newFakePluginResource(t, &fakePluginServer{packages: c.packages})
 
-			resp := modifyPluginPlan(t, r, c.state, withVersion(c.state, c.version))
+			plan := c.state
+			plan.Version = c.version
+			resp := modifyPluginPlan(t, r, c.state, plan)
 
 			if resp.Diagnostics.HasError() != c.fails {
 				t.Fatalf("errors = %v, want failure %t", resp.Diagnostics.Errors(), c.fails)
@@ -100,15 +107,10 @@ func TestUnitPluginVersionChangeReplacesUnlessItNamesInstalledVersion(t *testing
 func TestUnitPluginUpdateOnlyChangesState(t *testing.T) {
 	fake := &fakePluginServer{}
 	r := newFakePluginResource(t, fake)
-	ctx := context.Background()
+	ctx := t.Context()
 
-	prior := PluginResourceModel{
-		ID:               types.StringValue(bookshelfID),
-		Name:             types.StringValue("Bookshelf"),
-		Version:          types.StringValue("13.0.0.0"),
-		InstalledVersion: types.StringValue("13.0.0.0"),
-		RepositoryURL:    types.StringNull(),
-	}
+	prior := installedBookshelf("13.0.0.0", "13.0.0.0")
+	prior.RepositoryURL = types.StringNull()
 	planned := prior
 	planned.Version = types.StringValue("latest")
 	planned.RepositoryURL = types.StringUnknown()
@@ -133,14 +135,12 @@ func TestUnitPluginUpdateOnlyChangesState(t *testing.T) {
 }
 
 func TestUnitPluginSupportedKeywordFailsPlanUnlessPackagesResolveIt(t *testing.T) {
-	// The build Jellyfin offers for the supported release on the server line
-	// the provider does not pin, as 2.6.3.0 is on 10.11.
-	build := pluginRelease(supportedSecurityPluginVersion()) + ".99"
+	unpinnedBuild := pluginRelease(supportedSecurityPluginVersion()) + ".99"
 	installed := PluginResourceModel{
 		ID:               types.StringValue("94879a0cda244eb1aa06f28b4b9333b1"),
 		Name:             types.StringValue(securityPluginName),
-		Version:          types.StringValue(build),
-		InstalledVersion: types.StringValue(build),
+		Version:          types.StringValue(unpinnedBuild),
+		InstalledVersion: types.StringValue(unpinnedBuild),
 		RepositoryURL:    types.StringValue(securityPluginRepoURL),
 	}
 	supported := installed
@@ -151,7 +151,7 @@ func TestUnitPluginSupportedKeywordFailsPlanUnlessPackagesResolveIt(t *testing.T
 		fake  *fakePluginServer
 		fails bool
 	}{
-		{"packages list the installed build", &fakePluginServer{packages: []client.PackageInfo{{Name: securityPluginName, Versions: []client.VersionInfo{{Version: build}}}}}, false},
+		{"packages list the installed build", &fakePluginServer{packages: []client.PackageInfo{{Name: securityPluginName, Versions: []client.VersionInfo{{Version: unpinnedBuild}}}}}, false},
 		{"packages cannot be listed", &fakePluginServer{packagesStatus: http.StatusInternalServerError}, true},
 		{"repositories do not offer the plugin", &fakePluginServer{packages: bookshelfPackage("13.0.0.0")}, true},
 	}
@@ -173,20 +173,14 @@ func TestUnitPluginSupportedKeywordFailsPlanUnlessPackagesResolveIt(t *testing.T
 // TestUnitPluginVersionPlan runs version's plan modifiers in order, handing
 // each the previous one's plan value as the framework does.
 func TestUnitPluginVersionPlan(t *testing.T) {
-	ctx := context.Background()
-	resourceSchema := pluginResourceSchema(t)
-	attr, ok := resourceSchema.Attributes["version"].(schema.StringAttribute)
+	ctx := t.Context()
+	attr, ok := schemaOf(NewPluginResource()).Attributes["version"].(schema.StringAttribute)
 	if !ok {
 		t.Fatal("version is not a schema.StringAttribute")
 	}
 	stateWith := func(version string) *PluginResourceModel {
-		return &PluginResourceModel{
-			ID:               types.StringValue(bookshelfID),
-			Name:             types.StringValue("Bookshelf"),
-			Version:          types.StringValue(version),
-			InstalledVersion: types.StringValue("13.0.0.0"),
-			RepositoryURL:    types.StringValue(stableRepoURL),
-		}
+		m := installedBookshelf(version, "13.0.0.0")
+		return &m
 	}
 
 	cases := []struct {
@@ -214,7 +208,7 @@ func TestUnitPluginVersionPlan(t *testing.T) {
 				ConfigValue: c.config,
 				StateValue:  types.StringNull(),
 				PlanValue:   planned,
-				State:       tfsdk.State{Schema: resourceSchema, Raw: tftypes.NewValue(resourceSchema.Type().TerraformType(ctx), nil)},
+				State:       pluginResourceNullState(ctx),
 			}
 			if c.state != nil {
 				req.State = pluginResourceState(t, *c.state)

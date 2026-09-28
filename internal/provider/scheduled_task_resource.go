@@ -7,10 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -18,16 +20,20 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 var (
 	_ resource.Resource                   = &ScheduledTaskResource{}
 	_ resource.ResourceWithImportState    = &ScheduledTaskResource{}
 	_ resource.ResourceWithValidateConfig = &ScheduledTaskResource{}
+	_ resource.ResourceWithModifyPlan     = &ScheduledTaskResource{}
+	_ wireBound                           = &ScheduledTaskResource{}
 )
 
 const (
@@ -56,9 +62,22 @@ type ScheduledTaskResource struct {
 // ScheduledTaskResourceModel describes the resource data model.
 type ScheduledTaskResourceModel struct {
 	ID       types.String `tfsdk:"id"`
+	Key      types.String `tfsdk:"key"`
 	TaskID   types.String `tfsdk:"task_id"`
 	Triggers types.List   `tfsdk:"triggers"`
 }
+
+var scheduledTaskWire = sync.OnceValues(func() (*wire.Binding, error) {
+	s := schemaOf(&ScheduledTaskResource{})
+	triggers, _ := s.Attributes["triggers"].GetType().(types.ListType)
+	return wire.Bind(s, "TaskInfo",
+		wire.Identity("id", "task_id"),
+		// A task without triggers must read as the empty list its
+		// configuration holds, whether Jellyfin serves [], null or no key.
+		wire.ReadMissingAs("triggers", types.ListValueMust(triggers.ElemType, nil)))
+})
+
+func (r *ScheduledTaskResource) Wire() (*wire.Binding, error) { return scheduledTaskWire() }
 
 // ScheduledTaskTriggerModel describes one trigger element.
 type ScheduledTaskTriggerModel struct {
@@ -86,18 +105,29 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"key": schema.StringAttribute{
+				Description:         "The task's key, the readable name Jellyfin lists next to its ID in GET /ScheduledTasks, such as RefreshLibrary (Scan Media Library) or PluginUpdates (Update Plugins). It matches exactly, case included, and set without task_id must belong to one task only. Set key, task_id, or both naming the same task; with only task_id set, key reads the task's key. A key no task has fails the plan, terraform destroy included, so once its task is gone, such as after removing the plugin that added it, remove the resource from the configuration or destroy with -refresh=false.",
+				MarkdownDescription: "The task's key, the readable name Jellyfin lists next to its ID in `GET /ScheduledTasks`, such as `RefreshLibrary` (*Scan Media Library*) or `PluginUpdates` (*Update Plugins*). It matches exactly, case included, and set without `task_id` must belong to one task only. Set `key`, `task_id`, or both naming the same task; with only `task_id` set, `key` reads the task's key. A key no task has fails the plan, `terraform destroy` included, so once its task is gone, such as after removing the plugin that added it, remove the resource from the configuration or destroy with `-refresh=false`.",
+				Optional:            true,
+				Computed:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseNonNullStateForUnknown(),
+				},
+			},
 			"task_id": schema.StringAttribute{
-				Description:         "The unique identifier of the scheduled task.",
-				MarkdownDescription: "The unique identifier of the scheduled task.",
-				Required:            true,
+				Description:         "The task's ID, which Jellyfin derives from an MD5 hash of the full name of the .NET type that runs the task and matches ignoring case, such as 7738148ffcd07979c7ceb148e06b3aed for Scan Media Library. Set key, task_id, or both naming the same task; with only key set, task_id reads the ID of the task the key selects.",
+				MarkdownDescription: "The task's ID, which Jellyfin derives from an MD5 hash of the full name of the .NET type that runs the task and matches ignoring case, such as `7738148ffcd07979c7ceb148e06b3aed` for *Scan Media Library*. Set `key`, `task_id`, or both naming the same task; with only `key` set, `task_id` reads the ID of the task the key selects.",
+				Optional:            true,
+				Computed:            true,
 				Validators:          requiredIdentifierValidators(),
 				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			// The optional trigger attributes are not Computed because Jellyfin stores
-			// each trigger exactly as posted and never fills in fields, so an omitted
-			// attribute must plan as null rather than unknown.
 			"triggers": schema.ListNestedAttribute{
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
@@ -162,26 +192,25 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 }
 
 func (r *ScheduledTaskResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
-	}
-
-	c, ok := req.ProviderData.(*client.Client)
-	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Resource Configure Type",
-			fmt.Sprintf("Expected *client.Client, got: %T.", req.ProviderData),
-		)
-		return
-	}
-
-	r.client = c
+	r.client = configuredClient(req.ProviderData, "Resource", &resp.Diagnostics)
 }
 
 func (r *ScheduledTaskResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var key, taskID types.String
 	var triggers types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("key"), &key)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("task_id"), &taskID)...)
 	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("triggers"), &triggers)...)
-	if resp.Diagnostics.HasError() || triggers.IsNull() || triggers.IsUnknown() {
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if key.IsNull() && taskID.IsNull() {
+		resp.Diagnostics.AddError("Missing scheduled task attribute",
+			`Set key, such as "RefreshLibrary", or task_id to select the scheduled task.`)
+	}
+
+	if triggers.IsNull() || triggers.IsUnknown() {
 		return
 	}
 
@@ -208,125 +237,7 @@ func (r *ScheduledTaskResource) ValidateConfig(ctx context.Context, req resource
 	}
 }
 
-func (r *ScheduledTaskResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data ScheduledTaskResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Verify the task exists.
-	if _, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString()); err != nil {
-		resp.Diagnostics.AddError("Failed to find scheduled task", err.Error())
-		return
-	}
-
-	triggersJSON, err := marshalTriggers(ctx, data.Triggers)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to serialize triggers", err.Error())
-		return
-	}
-
-	if err := r.client.UpdateScheduledTaskTriggers(ctx, data.TaskID.ValueString(), triggersJSON); err != nil {
-		resp.Diagnostics.AddError("Failed to update scheduled task triggers", err.Error())
-		return
-	}
-
-	task, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to read scheduled task after create", err.Error())
-		return
-	}
-
-	triggers, diags := flattenTriggers(ctx, task.Triggers)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	data.Triggers = triggers
-	data.ID = data.TaskID
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
-}
-
-func (r *ScheduledTaskResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var data ScheduledTaskResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	task, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString())
-	if err != nil {
-		if client.IsNotFound(err) {
-			resp.State.RemoveResource(ctx)
-			return
-		}
-		resp.Diagnostics.AddError("Failed to read scheduled task", err.Error())
-		return
-	}
-
-	triggers, diags := flattenTriggers(ctx, task.Triggers)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	data.Triggers = triggers
-	// task_id keeps the configured spelling: Jellyfin matches task IDs
-	// case-insensitively but returns them in lowercase, so copying task.ID would
-	// force a replacement on every plan for an uppercase task_id.
-	data.ID = data.TaskID
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
-}
-
-func (r *ScheduledTaskResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data ScheduledTaskResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	triggersJSON, err := marshalTriggers(ctx, data.Triggers)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to serialize triggers", err.Error())
-		return
-	}
-
-	if err := r.client.UpdateScheduledTaskTriggers(ctx, data.TaskID.ValueString(), triggersJSON); err != nil {
-		resp.Diagnostics.AddError("Failed to update scheduled task triggers", err.Error())
-		return
-	}
-
-	task, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to read scheduled task after update", err.Error())
-		return
-	}
-
-	triggers, diags := flattenTriggers(ctx, task.Triggers)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	data.Triggers = triggers
-	data.ID = data.TaskID
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
-}
-
-func (r *ScheduledTaskResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
-	// Cannot delete a scheduled task - we just remove from state.
-}
-
-func (r *ScheduledTaskResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("task_id"), req, resp)
-}
-
 // missingTriggerAttributes returns the attributes the trigger's type requires that are null.
-// Jellyfin rejects a trigger without them with a bare "Error processing request." 400.
 func missingTriggerAttributes(t ScheduledTaskTriggerModel) []string {
 	var missing []string
 	switch t.Type.ValueString() {
@@ -349,64 +260,236 @@ func missingTriggerAttributes(t ScheduledTaskTriggerModel) []string {
 	return missing
 }
 
-func marshalTriggers(ctx context.Context, list types.List) (string, error) {
-	var triggers []ScheduledTaskTriggerModel
-	if diags := list.ElementsAs(ctx, &triggers, false); diags.HasError() {
-		return "", fmt.Errorf("extracting triggers: %v", diags)
+func (r *ScheduledTaskResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var data ScheduledTaskResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	rawEntries := make([]map[string]json.RawMessage, len(triggers))
-	for i, t := range triggers {
-		entry := map[string]json.RawMessage{}
-		putJSONString(entry, "Type", t.Type)
-		putJSONInt64(entry, "TimeOfDayTicks", t.TimeOfDayTicks)
-		putJSONInt64(entry, "IntervalTicks", t.IntervalTicks)
-		putJSONString(entry, "DayOfWeek", t.DayOfWeek)
-		putJSONInt64(entry, "MaxRuntimeTicks", t.MaxRuntimeTicks)
-		rawEntries[i] = entry
+	if _, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString()); err != nil {
+		resp.Diagnostics.AddError("Failed to find scheduled task", err.Error())
+		return
 	}
 
-	b, err := json.Marshal(rawEntries)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
+	r.writeTriggers(ctx, &data, "create", &resp.Diagnostics, &resp.State)
 }
 
-func flattenTriggers(_ context.Context, raw []json.RawMessage) (types.List, diag.Diagnostics) {
+func (r *ScheduledTaskResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var data ScheduledTaskResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	b := wireBinding(&resp.Diagnostics, scheduledTaskWire)
+	if b == nil {
+		return
+	}
+
+	importedByIDOrKey := data.TaskID.IsNull()
+	if importedByIDOrKey {
+		id, d := r.lookUpTask(ctx, data.ID.ValueString(), true)
+		if d != nil {
+			resp.Diagnostics.Append(d)
+			return
+		}
+		data.TaskID = types.StringValue(id)
+	}
+
+	task, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString())
+	if err != nil {
+		if client.IsNotFound(err) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
+		resp.Diagnostics.AddError("Failed to read scheduled task", err.Error())
+		return
+	}
+
+	resp.Diagnostics.Append(b.FlattenInto(ctx, task.RawJSON, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// task_id keeps the configured spelling: Jellyfin matches task IDs
+	// case-insensitively but returns them in lowercase, so copying task.ID would
+	// force a replacement on every plan for an uppercase task_id.
+	data.ID = data.TaskID
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+func (r *ScheduledTaskResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var data ScheduledTaskResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	r.writeTriggers(ctx, &data, "update", &resp.Diagnostics, &resp.State)
+}
+
+// ModifyPlan gates each configured field on the Jellyfin version it needs, so
+// a field a later pin adds is checked without a change here, and checks a
+// configured key against the server's tasks.
+func (r *ScheduledTaskResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	checkServerHasFields(ctx, r.client, scheduledTaskWire, req.Config, &resp.Diagnostics)
+	resp.Diagnostics.Append(r.planTaskForKey(ctx, req, resp)...)
+}
+
+// planTaskForKey plans task_id from a key configured alone (replacing on a
+// new task), or checks key against a configured task_id.
+func (r *ScheduledTaskResource) planTaskForKey(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) diag.Diagnostics {
 	var diags diag.Diagnostics
-	objType := types.ObjectType{AttrTypes: map[string]attr.Type{
-		"type":              types.StringType,
-		"time_of_day_ticks": types.Int64Type,
-		"interval_ticks":    types.Int64Type,
-		"day_of_week":       types.StringType,
-		"max_runtime_ticks": types.Int64Type,
-	}}
-
-	objects := make([]attr.Value, len(raw))
-	for i, r := range raw {
-		var entry map[string]json.RawMessage
-		if err := json.Unmarshal(r, &entry); err != nil {
-			return types.ListNull(objType), append(diags, diag.NewErrorDiagnostic("Failed to parse trigger", err.Error()))
+	var key, taskID types.String
+	diags.Append(req.Config.GetAttribute(ctx, path.Root("key"), &key)...)
+	diags.Append(req.Config.GetAttribute(ctx, path.Root("task_id"), &taskID)...)
+	switch {
+	case diags.HasError() || key.IsNull():
+		return diags
+	case key.IsUnknown() && taskID.IsNull():
+		if !req.State.Raw.IsNull() {
+			resp.RequiresReplace.Append(path.Root("key"))
 		}
-
-		attrs := map[string]attr.Value{
-			"type":              getJSONString(entry, "Type"),
-			"time_of_day_ticks": getJSONInt64(entry, "TimeOfDayTicks"),
-			"interval_ticks":    getJSONInt64(entry, "IntervalTicks"),
-			"day_of_week":       getJSONString(entry, "DayOfWeek"),
-			"max_runtime_ticks": getJSONInt64(entry, "MaxRuntimeTicks"),
+		return diags
+	case key.IsUnknown() || taskID.IsUnknown() || r.client == nil:
+		return diags
+	case !taskID.IsNull():
+		task, err := r.client.GetScheduledTask(ctx, taskID.ValueString())
+		switch {
+		case client.IsNotFound(err):
+			id, d := r.lookUpTask(ctx, key.ValueString(), false)
+			if d != nil {
+				return append(diags, diag.WithPath(path.Root("key"), d))
+			}
+			diags.AddAttributeError(path.Root("task_id"), "Conflicting scheduled task attributes", fmt.Sprintf(
+				"No scheduled task has the ID %q, and the key %q names the task %s. Set key or task_id alone, or both to the same task.",
+				taskID.ValueString(), key.ValueString(), id))
+		case err != nil:
+			diags.AddError("Failed to read scheduled task", err.Error())
+		case task.Key != key.ValueString():
+			diags.AddAttributeError(path.Root("key"), "Conflicting scheduled task attributes", fmt.Sprintf(
+				"task_id %q names the task with the key %q, not %q. Set key or task_id alone, or both to the same task.",
+				taskID.ValueString(), task.Key, key.ValueString()))
 		}
-		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
-		if d.HasError() {
-			return types.ListNull(objType), append(diags, d...)
-		}
-		objects[i] = obj
+		return diags
 	}
 
-	list, d := types.ListValue(objType, objects)
-	if d.HasError() {
-		return types.ListNull(objType), append(diags, d...)
+	id, d := r.lookUpTask(ctx, key.ValueString(), false)
+	if d != nil {
+		return append(diags, diag.WithPath(path.Root("key"), d))
 	}
-	return list, diags
+	if !req.State.Raw.IsNull() {
+		var stored types.String
+		diags.Append(req.State.GetAttribute(ctx, path.Root("task_id"), &stored)...)
+		if diags.HasError() || strings.EqualFold(stored.ValueString(), id) {
+			return diags
+		}
+		resp.RequiresReplace.Append(path.Root("task_id"))
+	}
+	return append(diags, resp.Plan.SetAttribute(ctx, path.Root("task_id"), id)...)
+}
+
+func (r *ScheduledTaskResource) lookUpTask(ctx context.Context, ref string, byID bool) (string, diag.Diagnostic) {
+	tasks, err := r.client.GetScheduledTasks(ctx)
+	if err != nil {
+		return "", diag.NewErrorDiagnostic("Failed to list scheduled tasks", err.Error())
+	}
+	return findTask(tasks, ref, byID)
+}
+
+// findTask returns the one task ref selects: by ID case-insensitively
+// (keeping ref's spelling), by key exactly.
+func findTask(tasks []client.ScheduledTask, ref string, byID bool) (string, diag.Diagnostic) {
+	var ids, keys []string
+	for _, t := range tasks {
+		if byID && strings.EqualFold(t.ID, ref) {
+			return ref, nil
+		}
+		if t.Key == ref {
+			ids = append(ids, t.ID)
+		}
+		if t.Key != "" {
+			keys = append(keys, t.Key)
+		}
+	}
+	switch len(ids) {
+	case 1:
+		return ids[0], nil
+	case 0:
+		slices.Sort(keys)
+		what, gone := "key", " If a plugin or a Jellyfin upgrade removed the task, remove the resource from the configuration, or destroy it with -refresh=false."
+		if byID {
+			what, gone = "ID or key", ""
+		}
+		return "", diag.NewErrorDiagnostic("Scheduled task not found", fmt.Sprintf(
+			"No scheduled task has the %s %q. Keys match exactly, case included. The server's tasks have these keys: %s.%s",
+			what, ref, strings.Join(keys, ", "), gone))
+	}
+	choose := "set task_id to the ID of the one to manage"
+	if byID {
+		choose = "import the one to manage by its ID"
+	}
+	return "", diag.NewErrorDiagnostic("Ambiguous scheduled task key", fmt.Sprintf(
+		"Several tasks have the key %q (IDs %s); %s.", ref, strings.Join(ids, ", "), choose))
+}
+
+func (r *ScheduledTaskResource) writeTriggers(ctx context.Context, data *ScheduledTaskResourceModel, operation string, diags *diag.Diagnostics, state *tfsdk.State) {
+	b := wireBinding(diags, scheduledTaskWire)
+	if b == nil {
+		return
+	}
+
+	body, d := triggersBody(ctx, b, data)
+	diags.Append(d...)
+	if diags.HasError() {
+		return
+	}
+
+	if err := r.client.UpdateScheduledTaskTriggers(ctx, data.TaskID.ValueString(), body); err != nil {
+		diags.AddError("Failed to update scheduled task triggers", err.Error())
+		return
+	}
+
+	updated, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString())
+	if err != nil {
+		diags.AddError("Failed to read scheduled task after "+operation, err.Error())
+		return
+	}
+
+	diags.Append(b.FlattenAfterApply(ctx, updated.RawJSON, data)...)
+	data.ID = data.TaskID
+	diags.Append(state.Set(ctx, data)...)
+}
+
+// triggersBody writes the task's triggers through b and returns the list on
+// its own, which is what the triggers endpoint takes.
+func triggersBody(ctx context.Context, b *wire.Binding, data *ScheduledTaskResourceModel) (string, diag.Diagnostics) {
+	task := map[string]json.RawMessage{}
+	diags := b.OverlayModel(ctx, task, data)
+	if diags.HasError() {
+		return "", diags
+	}
+	for _, f := range b.Fields {
+		if f.Path != "triggers" || len(f.KeyPath) != 1 {
+			continue
+		}
+		if raw, ok := task[f.KeyPath[0]]; ok {
+			return string(raw), diags
+		}
+	}
+	diags.AddError("Failed to serialize triggers", "The task binding wrote no top-level triggers list.\n\nThis is a bug in the provider.")
+	return "", diags
+}
+
+func (r *ScheduledTaskResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
+	// Cannot delete a scheduled task - we just remove from state.
+}
+
+func (r *ScheduledTaskResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }

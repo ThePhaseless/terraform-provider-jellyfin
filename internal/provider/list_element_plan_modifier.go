@@ -5,6 +5,7 @@ package provider
 
 import (
 	"context"
+	"slices"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -19,6 +20,8 @@ import (
 // that qualifies, else the first. A group is tried for every element before the
 // next group, so an exact key claims its element before a looser one can.
 // Unmatched elements keep their unknowns and take the server's values on apply.
+// A list of objects that a matched element configures is filled the same way,
+// with the values each of its elements configures as the key.
 //
 // The final plan must not contradict this one. A value unknown in config stays
 // unknown, and while any key or element is unknown in config nothing is filled:
@@ -29,11 +32,6 @@ import (
 // Every configured key then equals the prior one at its index, so preferring
 // that element makes this plan pair them by index as well, even where two prior
 // elements share a key.
-//
-// It stands in for UseStateForUnknown on the nested attributes, which pairs
-// elements by index: an inserted or reordered element would take the values of
-// the element that held its index before, and an appended one would be planned
-// null.
 func useStateForUnknownByKey(keyGroups ...[]string) planmodifier.List {
 	return useStateForUnknownByKeyModifier{keyGroups: keyGroups}
 }
@@ -60,22 +58,20 @@ func (m useStateForUnknownByKeyModifier) PlanModifyList(ctx context.Context, req
 		return
 	}
 
-	configured := knownObjects(req.ConfigValue.Elements())
-	if len(configured) != len(req.PlanValue.Elements()) {
+	configElements, elements := req.ConfigValue.Elements(), req.PlanValue.Elements()
+	if len(configElements) != len(elements) {
 		return
 	}
-	for i, e := range req.ConfigValue.Elements() {
+	configured := knownObjects(configElements)
+	for i, e := range configElements {
 		if e.IsUnknown() || m.hasUnknownKey(configured[i]) {
 			return
 		}
 	}
 
-	planned := knownObjects(req.PlanValue.Elements())
+	planned := knownObjects(elements)
 	prior := knownObjects(req.StateValue.Elements())
-	matches := make([]int, len(planned))
-	for i := range matches {
-		matches[i] = -1
-	}
+	matches := slices.Repeat([]int{-1}, len(planned))
 	claimed := make([]bool, len(prior))
 
 	for _, group := range m.keyGroups {
@@ -90,28 +86,21 @@ func (m useStateForUnknownByKeyModifier) PlanModifyList(ctx context.Context, req
 		}
 	}
 
-	elements := req.PlanValue.Elements()
 	changed := false
 	for i, j := range matches {
 		if j < 0 {
 			continue
 		}
-		attrs := make(map[string]attr.Value, len(planned[i]))
-		for name, v := range planned[i] {
-			attrs[name] = v
-			if cv, ok := configured[i][name]; ok && cv.IsNull() && v.IsUnknown() {
-				if prev, ok := prior[j][name]; ok {
-					attrs[name] = prev
-					changed = true
-				}
-			}
+		attrs, filled := fillUnset(ctx, configured[i], planned[i], prior[j])
+		if !filled {
+			continue
 		}
 		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
 		resp.Diagnostics.Append(d...)
 		if d.HasError() {
 			return
 		}
-		elements[i] = obj
+		elements[i], changed = obj, true
 	}
 	if !changed {
 		return
@@ -123,6 +112,111 @@ func (m useStateForUnknownByKeyModifier) PlanModifyList(ctx context.Context, req
 		return
 	}
 	resp.PlanValue = list
+}
+
+func (m useStateForUnknownByKeyModifier) hasUnknownKey(attrs map[string]attr.Value) bool {
+	for _, group := range m.keyGroups {
+		for _, name := range group {
+			if v, ok := attrs[name]; ok && v.IsUnknown() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// fillUnset returns planned with each attribute that configured leaves unset
+// and planned leaves unknown taken from prior, and reports whether it took any.
+// A list of objects that configured sets is filled element by element.
+func fillUnset(ctx context.Context, configured, planned, prior map[string]attr.Value) (map[string]attr.Value, bool) {
+	attrs := make(map[string]attr.Value, len(planned))
+	filled := false
+	for name, v := range planned {
+		attrs[name] = v
+		cv, ok := configured[name]
+		if !ok {
+			continue
+		}
+		prev, ok := prior[name]
+		if !ok {
+			continue
+		}
+		if cv.IsNull() && v.IsUnknown() {
+			attrs[name], filled = prev, true
+			continue
+		}
+		if list, ok := fillUnsetInList(ctx, cv, v, prev); ok {
+			attrs[name], filled = list, true
+		}
+	}
+	return attrs, filled
+}
+
+// fillUnsetInList fills a list of objects as useStateForUnknownByKey fills its
+// own, with the values each element configures as its key: an element takes
+// the unset values of an unclaimed prior element with the same configured
+// values, preferring the one at its own index, so a reordered element keeps
+// its own values. An element that configures nothing is left as planned, and
+// nothing is filled while any configured value is unknown, as that value could
+// pair the element with another prior element on apply.
+func fillUnsetInList(ctx context.Context, configured, planned, prior attr.Value) (attr.Value, bool) {
+	c, ok1 := configured.(types.List)
+	p, ok2 := planned.(types.List)
+	s, ok3 := prior.(types.List)
+	if !ok1 || !ok2 || !ok3 || p.IsNull() || p.IsUnknown() || s.IsNull() || s.IsUnknown() {
+		return nil, false
+	}
+	objType, ok := p.ElementType(ctx).(types.ObjectType)
+	if !ok || len(c.Elements()) != len(p.Elements()) || !fullyKnown(ctx, c) {
+		return nil, false
+	}
+	cs, ps, ss := knownObjects(c.Elements()), knownObjects(p.Elements()), knownObjects(s.Elements())
+	claimed := make([]bool, len(ss))
+	elements := p.Elements()
+	filled := false
+	for k := range elements {
+		key := nonNullNames(cs[k])
+		if ps[k] == nil || len(key) == 0 {
+			continue
+		}
+		j := unclaimedMatch(cs[k], k, ss, claimed, key)
+		if j < 0 {
+			continue
+		}
+		claimed[j] = true
+		attrs, ok := fillUnset(ctx, cs[k], ps[k], ss[j])
+		if !ok {
+			continue
+		}
+		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
+		if d.HasError() {
+			return nil, false
+		}
+		elements[k], filled = obj, true
+	}
+	if !filled {
+		return nil, false
+	}
+	list, d := types.ListValue(objType, elements)
+	if d.HasError() {
+		return nil, false
+	}
+	return list, true
+}
+
+func fullyKnown(ctx context.Context, v attr.Value) bool {
+	tv, err := v.ToTerraformValue(ctx)
+	return err == nil && tv.IsFullyKnown()
+}
+
+func nonNullNames(attrs map[string]attr.Value) []string {
+	var names []string
+	for name, v := range attrs {
+		if !v.IsNull() {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // knownObjects returns the attributes of each element, or nil for an element
@@ -154,17 +248,6 @@ func unclaimedMatch(attrs map[string]attr.Value, i int, prior []map[string]attr.
 		}
 	}
 	return -1
-}
-
-func (m useStateForUnknownByKeyModifier) hasUnknownKey(attrs map[string]attr.Value) bool {
-	for _, group := range m.keyGroups {
-		for _, name := range group {
-			if v, ok := attrs[name]; ok && v.IsUnknown() {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func hasKnownValues(attrs map[string]attr.Value, names []string) bool {

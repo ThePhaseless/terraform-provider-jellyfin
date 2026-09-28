@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -24,59 +23,19 @@ type User struct {
 
 // UserPolicy represents the policy/permissions for a user.
 type UserPolicy struct {
-	IsAdministrator                  bool              `json:"IsAdministrator"`
-	IsHidden                         bool              `json:"IsHidden"`
-	IsDisabled                       bool              `json:"IsDisabled"`
-	MaxParentalRating                *int              `json:"MaxParentalRating,omitempty"`
-	BlockedTags                      []string          `json:"BlockedTags"`
-	AllowedTags                      []string          `json:"AllowedTags"`
-	EnableUserPreferenceAccess       bool              `json:"EnableUserPreferenceAccess"`
-	AccessSchedules                  []json.RawMessage `json:"AccessSchedules"`
-	BlockUnratedItems                []string          `json:"BlockUnratedItems"`
-	EnableRemoteControlOfOtherUsers  bool              `json:"EnableRemoteControlOfOtherUsers"`
-	EnableSharedDeviceControl        bool              `json:"EnableSharedDeviceControl"`
-	EnableRemoteAccess               bool              `json:"EnableRemoteAccess"`
-	EnableLiveTvManagement           bool              `json:"EnableLiveTvManagement"`
-	EnableLiveTvAccess               bool              `json:"EnableLiveTvAccess"`
-	EnableMediaPlayback              bool              `json:"EnableMediaPlayback"`
-	EnableAudioPlaybackTranscoding   bool              `json:"EnableAudioPlaybackTranscoding"`
-	EnableVideoPlaybackTranscoding   bool              `json:"EnableVideoPlaybackTranscoding"`
-	EnablePlaybackRemuxing           bool              `json:"EnablePlaybackRemuxing"`
-	ForceRemoteSourceTranscoding     bool              `json:"ForceRemoteSourceTranscoding"`
-	EnableContentDeletion            bool              `json:"EnableContentDeletion"`
-	EnableContentDeletionFromFolders []string          `json:"EnableContentDeletionFromFolders"`
-	EnableContentDownloading         bool              `json:"EnableContentDownloading"`
-	EnableSyncTranscoding            bool              `json:"EnableSyncTranscoding"`
-	EnableMediaConversion            bool              `json:"EnableMediaConversion"`
-	EnabledDevices                   []string          `json:"EnabledDevices"`
-	EnableAllDevices                 bool              `json:"EnableAllDevices"`
-	EnabledChannels                  []string          `json:"EnabledChannels"`
-	EnableAllChannels                bool              `json:"EnableAllChannels"`
-	EnabledFolders                   []string          `json:"EnabledFolders"`
-	EnableAllFolders                 bool              `json:"EnableAllFolders"`
-	InvalidLoginAttemptCount         int               `json:"InvalidLoginAttemptCount"`
-	LoginAttemptsBeforeLockout       int               `json:"LoginAttemptsBeforeLockout"`
-	MaxActiveSessions                int               `json:"MaxActiveSessions"`
-	EnablePublicSharing              bool              `json:"EnablePublicSharing"`
-	BlockedMediaFolders              []string          `json:"BlockedMediaFolders"`
-	BlockedChannels                  []string          `json:"BlockedChannels"`
-	RemoteClientBitrateLimit         int               `json:"RemoteClientBitrateLimit"`
-	AuthenticationProviderID         string            `json:"AuthenticationProviderId"`
-	PasswordResetProviderID          string            `json:"PasswordResetProviderId"`
-	SyncPlayAccess                   string            `json:"SyncPlayAccess"`
-	EnableCollectionManagement       bool              `json:"EnableCollectionManagement"`
-	EnableSubtitleManagement         bool              `json:"EnableSubtitleManagement"`
-	EnableLyricManagement            bool              `json:"EnableLyricManagement"`
+	IsAdministrator          bool   `json:"IsAdministrator"`
+	IsDisabled               bool   `json:"IsDisabled"`
+	EnableAllFolders         bool   `json:"EnableAllFolders"`
+	AuthenticationProviderID string `json:"AuthenticationProviderId"`
+	PasswordResetProviderID  string `json:"PasswordResetProviderId"`
 }
 
-// errBlankUserID stops a user update before it is sent: Jellyfin applies an
-// update whose userId is missing or only whitespace to the signed-in user,
-// which is the account the provider authenticates as.
+// errBlankUserID stops a user update before it is sent: Jellyfin applies one
+// whose userId is blank to the signed-in user, the provider's own account.
 var errBlankUserID = errors.New("user id is blank")
 
 // AuthResult represents the result of a user authentication.
 type AuthResult struct {
-	User        User   `json:"User"`
 	AccessToken string `json:"AccessToken"`
 	ServerID    string `json:"ServerId"`
 }
@@ -84,23 +43,10 @@ type AuthResult struct {
 // GetUsers retrieves all users.
 func (c *Client) GetUsers(ctx context.Context) ([]User, error) {
 	var users []User
-	if err := c.get(ctx, "/Users", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&users)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/Users", &users); err != nil {
 		return nil, fmt.Errorf("getting users: %w", err)
 	}
 	return users, nil
-}
-
-// GetUserByID retrieves a user by their ID.
-func (c *Client) GetUserByID(ctx context.Context, id string) (*User, error) {
-	var user User
-	if err := c.get(ctx, fmt.Sprintf("/Users/%s", url.PathEscape(id)), func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&user)
-	}); err != nil {
-		return nil, fmt.Errorf("getting user %s: %w", id, err)
-	}
-	return &user, nil
 }
 
 // CreateUser creates a new user with the given name and password.
@@ -114,9 +60,7 @@ func (c *Client) CreateUser(ctx context.Context, name, password string) (*User, 
 		return nil, fmt.Errorf("marshaling create user request for %s: %w", name, err)
 	}
 	var user User
-	if err := c.postAndDecode(ctx, "/Users/New", jsonBody, func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&user)
-	}); err != nil {
+	if err := c.postJSON(ctx, "/Users/New", jsonBody, &user); err != nil {
 		return nil, fmt.Errorf("creating user %s: %w", name, err)
 	}
 	return &user, nil
@@ -197,6 +141,9 @@ func (c *Client) GetUserPolicyRaw(ctx context.Context, id string) (string, error
 
 // UpdateUserPolicyRaw POSTs a raw policy JSON to /Users/{id}/Policy.
 func (c *Client) UpdateUserPolicyRaw(ctx context.Context, id, policyJSON string) error {
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("updating policy: %w", errBlankUserID)
+	}
 	if err := c.postRaw(ctx, fmt.Sprintf("/Users/%s/Policy", url.PathEscape(id)), policyJSON); err != nil {
 		return fmt.Errorf("updating policy for user %s: %w", id, err)
 	}
@@ -216,8 +163,8 @@ func (c *Client) AuthenticateByName(ctx context.Context, username, password stri
 		return nil, fmt.Errorf("marshaling auth request: %w", err)
 	}
 
-	url := c.BaseURL + "/Users/AuthenticateByName"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
+	const path = "/Users/AuthenticateByName"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("creating auth request: %w", err)
 	}
@@ -231,8 +178,8 @@ func (c *Client) AuthenticateByName(ctx context.Context, username, password stri
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("authentication failed for user %s: %w", username, &HTTPError{Method: http.MethodPost, Path: "/Users/AuthenticateByName", StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)})
+	if err := checkStatus(http.MethodPost, path, resp); err != nil {
+		return nil, fmt.Errorf("authentication failed for user %s: %w", username, err)
 	}
 
 	var result AuthResult

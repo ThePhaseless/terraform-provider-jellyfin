@@ -4,16 +4,20 @@
 package provider
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
@@ -64,10 +68,18 @@ func (r *PluginConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			"configuration_json": schema.StringAttribute{
 				Description: "The plugin configuration as a JSON string. " +
 					"For SSO-Auth, this would include SAML/OIDC configuration. " +
-					"This allows universal configuration of any plugin.",
+					"This allows universal configuration of any plugin. " +
+					"Jellyfin replaces the plugin's whole configuration with it, so a key it leaves out takes the plugin's default, " +
+					"and only the keys it names are compared with what the server holds: a key added outside Terraform, " +
+					"such as an SSO provider added on the plugin's page, plans no change, and the next update removes it. " +
+					"An import reads every key.",
 				MarkdownDescription: "The plugin configuration as a JSON string. " +
 					"For SSO-Auth, this would include SAML/OIDC configuration. " +
-					"This allows universal configuration of any plugin.",
+					"This allows universal configuration of any plugin. " +
+					"Jellyfin replaces the plugin's whole configuration with it, so a key it leaves out takes the plugin's default, " +
+					"and only the keys it names are compared with what the server holds: a key added outside Terraform, " +
+					"such as an SSO provider added on the plugin's page, plans no change, and the next update removes it. " +
+					"An import reads every key.",
 				Required:   true,
 				CustomType: jsontypes.NormalizedType{},
 			},
@@ -76,36 +88,11 @@ func (r *PluginConfigurationResource) Schema(_ context.Context, _ resource.Schem
 }
 
 func (r *PluginConfigurationResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
-	}
-
-	c, ok := req.ProviderData.(*client.Client)
-	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Resource Configure Type",
-			fmt.Sprintf("Expected *client.Client, got: %T.", req.ProviderData),
-		)
-		return
-	}
-
-	r.client = c
+	r.client = configuredClient(req.ProviderData, "Resource", &resp.Diagnostics)
 }
 
 func (r *PluginConfigurationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data PluginConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	if err := r.client.UpdatePluginConfiguration(ctx, data.PluginID.ValueString(), data.Configuration.ValueString()); err != nil {
-		resp.Diagnostics.AddError("Failed to update plugin configuration", err.Error())
-		return
-	}
-
-	data.ID = data.PluginID
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	r.write(ctx, req.Plan, &resp.Diagnostics, &resp.State)
 }
 
 func (r *PluginConfigurationResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -125,44 +112,116 @@ func (r *PluginConfigurationResource) Read(ctx context.Context, req resource.Rea
 		return
 	}
 
-	normalized, err := normalizeJSON(configJSON)
+	// An import has no configuration yet, and reads the whole of it.
+	served, err := servedConfiguration(configJSON, data.Configuration.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to normalize plugin configuration", err.Error())
+		resp.Diagnostics.AddError("Failed to read plugin configuration", err.Error())
 		return
 	}
 
-	data.Configuration = jsontypes.NewNormalizedValue(normalized)
+	data.Configuration = jsontypes.NewNormalizedValue(served)
 	data.ID = data.PluginID
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *PluginConfigurationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	r.write(ctx, req.Plan, &resp.Diagnostics, &resp.State)
+}
+
+// write posts the planned configuration and reads back what the server keeps
+// of it.
+func (r *PluginConfigurationResource) write(ctx context.Context, plan tfsdk.Plan, diags *diag.Diagnostics, state *tfsdk.State) {
 	var data PluginConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
+	diags.Append(plan.Get(ctx, &data)...)
+	if diags.HasError() {
 		return
 	}
 
 	if err := r.client.UpdatePluginConfiguration(ctx, data.PluginID.ValueString(), data.Configuration.ValueString()); err != nil {
-		resp.Diagnostics.AddError("Failed to update plugin configuration", err.Error())
+		diags.AddError("Failed to update plugin configuration", err.Error())
 		return
 	}
 
 	configJSON, err := r.client.GetPluginConfiguration(ctx, data.PluginID.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to read plugin configuration after update", err.Error())
+		diags.AddError("Failed to read plugin configuration after update", err.Error())
 		return
 	}
-	normalized, err := normalizeJSON(configJSON)
+	served, err := servedConfiguration(configJSON, data.Configuration.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to normalize plugin configuration", err.Error())
+		diags.AddError("Failed to read plugin configuration after update", err.Error())
 		return
 	}
-	data.Configuration = jsontypes.NewNormalizedValue(normalized)
+	data.Configuration = jsontypes.NewNormalizedValue(served)
 	data.ID = data.PluginID
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	diags.Append(state.Set(ctx, &data)...)
+}
+
+// servedConfiguration returns the normalized configuration served holds,
+// keeping only the keys managed has at each level of its objects. Jellyfin
+// replaces a plugin's whole configuration with the one posted and serves
+// every key back, a key the configuration leaves out with its default, so
+// only the keys the configuration names say whether the server kept it. An
+// empty managed, as on an import, keeps every key.
+func servedConfiguration(served, managed string) (string, error) {
+	if managed == "" {
+		return normalizeJSON(served)
+	}
+	servedValue, err := decodeJSON(served)
+	if err != nil {
+		return "", fmt.Errorf("parsing the served configuration: %w", err)
+	}
+	managedValue, err := decodeJSON(managed)
+	if err != nil {
+		return "", fmt.Errorf("parsing the configuration: %w", err)
+	}
+	kept, err := json.Marshal(keysOf(servedValue, managedValue))
+	if err != nil {
+		return "", err
+	}
+	return normalizeJSON(string(kept))
+}
+
+func decodeJSON(raw string) (any, error) {
+	d := json.NewDecoder(strings.NewReader(raw))
+	d.UseNumber()
+	var v any
+	if err := d.Decode(&v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+// keysOf returns served with only the object keys shape has, at any depth,
+// following lists of the same length element by element.
+func keysOf(served, shape any) any {
+	switch s := shape.(type) {
+	case map[string]any:
+		m, ok := served.(map[string]any)
+		if !ok {
+			return served
+		}
+		out := make(map[string]any, len(s))
+		for k, v := range s {
+			if sv, ok := m[k]; ok {
+				out[k] = keysOf(sv, v)
+			}
+		}
+		return out
+	case []any:
+		l, ok := served.([]any)
+		if !ok || len(l) != len(s) {
+			return served
+		}
+		out := make([]any, len(l))
+		for i := range l {
+			out[i] = keysOf(l[i], s[i])
+		}
+		return out
+	}
+	return served
 }
 
 func (r *PluginConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
@@ -193,12 +252,9 @@ func normalizeGUID(s string) string {
 	return strings.ToLower(strings.ReplaceAll(s, "-", ""))
 }
 
-// samePluginGUIDPlanModifier plans the plugin_id in state when the
-// configuration spells the same GUID another way. jellyfin_plugin's id and GET
-// /Plugins use the dash-free spelling while a GUID copied from elsewhere, such
-// as an import ID, often has dashes, and without this a change of spelling
-// would replace the resource. Terraform accepts a prior value in place of a
-// configured one the provider treats as equal.
+// samePluginGUIDPlanModifier plans the state's plugin_id when the configuration
+// spells the same GUID another way, so a dashed GUID, as in an import ID, does
+// not replace the resource.
 type samePluginGUIDPlanModifier struct{}
 
 func (samePluginGUIDPlanModifier) Description(context.Context) string {
@@ -216,4 +272,66 @@ func (samePluginGUIDPlanModifier) PlanModifyString(_ context.Context, req planmo
 	if normalizeGUID(req.PlanValue.ValueString()) == normalizeGUID(req.StateValue.ValueString()) {
 		resp.PlanValue = req.StateValue
 	}
+}
+
+// normalizeJSON re-encodes JSON to remove insignificant formatting and sort object keys.
+func normalizeJSON(raw string) (string, error) {
+	normalized, err := normalizeJSONRecursive(json.RawMessage(raw), 0)
+	if err != nil {
+		return "", fmt.Errorf("parsing JSON for normalization: %w", err)
+	}
+	return string(normalized), nil
+}
+
+const maxJSONNormalizeDepth = 100
+
+func normalizeJSONRecursive(raw json.RawMessage, depth int) (json.RawMessage, error) {
+	if depth > maxJSONNormalizeDepth {
+		return nil, fmt.Errorf("JSON nesting exceeds maximum depth of %d", maxJSONNormalizeDepth)
+	}
+
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw); err != nil {
+		return nil, err
+	}
+
+	trimmed := bytes.TrimSpace(compact.Bytes())
+	if len(trimmed) == 0 {
+		return nil, fmt.Errorf("empty JSON value")
+	}
+
+	switch trimmed[0] {
+	case '{':
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(trimmed, &object); err != nil {
+			return nil, err
+		}
+		for key, value := range object {
+			normalized, err := normalizeJSONRecursive(value, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			object[key] = normalized
+		}
+		return json.Marshal(object)
+	case '[':
+		var list []json.RawMessage
+		if err := json.Unmarshal(trimmed, &list); err != nil {
+			return nil, err
+		}
+		for i, value := range list {
+			normalized, err := normalizeJSONRecursive(value, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			list[i] = normalized
+		}
+		return json.Marshal(list)
+	}
+
+	var rawValue json.RawMessage
+	if err := json.Unmarshal(trimmed, &rawValue); err != nil {
+		return nil, err
+	}
+	return json.Marshal(rawValue)
 }

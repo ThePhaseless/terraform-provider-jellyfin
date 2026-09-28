@@ -45,6 +45,8 @@ type RestartResourceModel struct {
 // how many poll intervals to wait before the first of them.
 const restartSettleReads = 3
 
+const defaultRestartTimeoutSeconds = 120
+
 func (r *RestartResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_restart"
 }
@@ -63,8 +65,8 @@ func (r *RestartResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"triggers": schema.MapAttribute{
-				Description:         "Map of arbitrary string values that, when changed, force a new restart. Tie restarts to upstream changes, e.g. `triggers = { plugin_version = jellyfin_plugin.x.version }`.",
-				MarkdownDescription: "Map of arbitrary string values that, when changed, force a new restart. Tie restarts to upstream changes, e.g. `triggers = { plugin_version = jellyfin_plugin.x.version }`.",
+				Description:         "Map of arbitrary string values that, when changed, force a new restart. Tie restarts to upstream changes, e.g. `triggers = { plugin_version = jellyfin_plugin.x.installed_version }`.",
+				MarkdownDescription: "Map of arbitrary string values that, when changed, force a new restart. Tie restarts to upstream changes, e.g. `triggers = { plugin_version = jellyfin_plugin.x.installed_version }`.",
 				ElementType:         types.StringType,
 				Optional:            true,
 				PlanModifiers: []planmodifier.Map{
@@ -76,7 +78,7 @@ func (r *RestartResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				MarkdownDescription: "Maximum number of seconds to wait for the server to come back up after restart. Defaults to 120.",
 				Optional:            true,
 				Computed:            true,
-				Default:             int64default.StaticInt64(120),
+				Default:             int64default.StaticInt64(defaultRestartTimeoutSeconds),
 			},
 			"completed_at": schema.StringAttribute{
 				Description:         "RFC3339 timestamp marking when the server was ready after the restart.",
@@ -91,20 +93,7 @@ func (r *RestartResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 }
 
 func (r *RestartResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
-	}
-
-	c, ok := req.ProviderData.(*client.Client)
-	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Resource Configure Type",
-			fmt.Sprintf("Expected *client.Client, got: %T.", req.ProviderData),
-		)
-		return
-	}
-
-	r.client = c
+	r.client = configuredClient(req.ProviderData, "Resource", &resp.Diagnostics)
 }
 
 func (r *RestartResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -119,11 +108,11 @@ func (r *RestartResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	timeout := 120 * time.Second
+	timeout := defaultRestartTimeoutSeconds * time.Second
 	if !data.Timeout.IsNull() && !data.Timeout.IsUnknown() {
 		timeout = time.Duration(data.Timeout.ValueInt64()) * time.Second
 	}
-	if err := waitForServerReady(ctx, r.client, timeout); err != nil {
+	if err := awaitRestart(ctx, r.client, timeout, startupStatusDelay); err != nil {
 		resp.Diagnostics.AddError("Jellyfin server did not become ready after restart", err.Error())
 		return
 	}
@@ -140,7 +129,6 @@ func (r *RestartResource) Create(ctx context.Context, req resource.CreateRequest
 }
 
 func (r *RestartResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	// The restart is a point-in-time action; refresh preserves state as-is.
 	var data RestartResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
@@ -149,31 +137,23 @@ func (r *RestartResource) Read(ctx context.Context, req resource.ReadRequest, re
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func (r *RestartResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
-	// `triggers` forces replacement, so Update is never reached.
-	resp.Diagnostics.AddError("Update not supported", "jellyfin_restart is replace-only: change a value in triggers to force a new restart.")
+// Update is reached only for a change to timeout, as triggers forces
+// replacement. timeout bounds only the wait after a restart, so the new value
+// takes effect without restarting the server again.
+func (r *RestartResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var data RestartResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *RestartResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
-	// Nothing to undo on the server; just drop from state.
-}
-
-// waitForServerReady blocks until a restart already requested has completed,
-// or timeout elapses.
-func waitForServerReady(ctx context.Context, c *client.Client, timeout time.Duration) error {
-	return awaitRestart(ctx, c, timeout, startupStatusDelay)
 }
 
 // awaitRestart waits out a restart that has already been requested, returning
 // once the server has answered successfully restartSettleReads times in a row.
-//
-// Two things rule out the obvious signals. Jellyfin keeps serving for a moment
-// after it accepts POST /System/Restart, so polling immediately reads the host
-// that is about to go away; the settle delay covers that. And Jellyfin restarts
-// in-process here rather than exiting, so the server may never stop answering
-// at all, which is why an outage is not required. HasPendingRestart is no help
-// either: background plugin auto-updates raise it again seconds after a restart
-// clears it.
 func awaitRestart(ctx context.Context, c *client.Client, timeout, poll time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
@@ -207,7 +187,6 @@ func pause(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// randomID returns a 16-byte hex string for the resource id.
 func randomID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {

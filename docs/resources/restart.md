@@ -29,7 +29,7 @@ resource "jellyfin_plugin" "example" {
 #   }
 resource "jellyfin_restart" "example" {
   triggers = {
-    plugin_version = jellyfin_plugin.example.version
+    plugin_version = jellyfin_plugin.example.installed_version
   }
 }
 ```
@@ -40,7 +40,7 @@ resource "jellyfin_restart" "example" {
 ### Optional
 
 - `timeout` (Number) Maximum number of seconds to wait for the server to come back up after restart. Defaults to 120.
-- `triggers` (Map of String) Map of arbitrary string values that, when changed, force a new restart. Tie restarts to upstream changes, e.g. `triggers = { plugin_version = jellyfin_plugin.x.version }`.
+- `triggers` (Map of String) Map of arbitrary string values that, when changed, force a new restart. Tie restarts to upstream changes, e.g. `triggers = { plugin_version = jellyfin_plugin.x.installed_version }`.
 
 ### Read-Only
 

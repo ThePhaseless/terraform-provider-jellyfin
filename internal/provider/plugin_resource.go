@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -22,10 +23,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/release"
 )
 
-// pluginInstallTimeout bounds the wait for a Jellyfin install to land on disk;
-// the download runs asynchronously after the API call returns.
 const (
 	pluginInstallTimeout = 2 * time.Minute
 	pluginPollInterval   = 2 * time.Second
@@ -127,9 +127,8 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Validators: []validator.String{
 					stringvalidator.LengthAtLeast(1),
 				},
-				// An unset value is planned unknown when version changes in
-				// place and state holds no repository, which must not replace
-				// the plugin.
+				// An unset value is planned unknown when version changes in place;
+				// replacing on it would reinstall the plugin.
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplaceIfConfigured(),
@@ -140,20 +139,7 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 }
 
 func (r *PluginResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
-	}
-
-	c, ok := req.ProviderData.(*client.Client)
-	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Resource Configure Type",
-			fmt.Sprintf("Expected *client.Client, got: %T.", req.ProviderData),
-		)
-		return
-	}
-
-	r.client = c
+	r.client = configuredClient(req.ProviderData, "Resource", &resp.Diagnostics)
 }
 
 func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -163,16 +149,13 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	if data.RepositoryURL.IsUnknown() || data.RepositoryURL.IsNull() || data.RepositoryURL.ValueString() == "" {
+	if data.RepositoryURL.ValueString() == "" {
 		resp.Diagnostics.AddError(
 			"Missing plugin repository URL",
 			"The repository_url attribute must be set when installing a plugin so the provider can reproduce the install source.",
 		)
 		return
 	}
-	// Resolve version: "supported" (or unset for known plugins) uses the
-	// hardcoded supported version; "latest" resolves the newest from the
-	// repository manifest; any other value is used as-is.
 	resolvedVersion, err := r.resolvePluginVersion(ctx, data.Name.ValueString(), data.Version)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to resolve plugin version", err.Error())
@@ -191,9 +174,6 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 		data.Version = types.StringValue(resolvedVersion)
 	}
 
-	// Jellyfin returns 404 when POSTing an install for a version that is
-	// already present, so detect that up front and treat it as idempotent
-	// rather than erroring.
 	installed, err := r.findInstalledPlugin(ctx, data.Name.ValueString(), resolvedVersion)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to check installed plugins", err.Error())
@@ -202,13 +182,8 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 
 	if installed == nil {
 		if err := r.client.InstallPlugin(ctx, data.Name.ValueString(), resolvedVersion, data.RepositoryURL.ValueString()); err != nil {
-			// If the install failed because the plugin is already installed
-			// (e.g. a concurrent install raced ahead of us), treat it as
-			// success and reconcile via the installed list below.
-			if !client.IsNotFound(err) {
-				resp.Diagnostics.AddError("Failed to install plugin", err.Error())
-				return
-			}
+			resp.Diagnostics.AddError("Failed to install plugin", err.Error()+notOfferedHint(err, data.Name.ValueString(), resolvedVersion))
+			return
 		}
 
 		installed, err = r.waitForPlugin(ctx, data.Name.ValueString(), resolvedVersion, pluginInstallTimeout)
@@ -238,17 +213,7 @@ func (r *PluginResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
-	// State written before installed_version existed holds the installed
-	// version in version.
-	held := data.InstalledVersion.ValueString()
-	if data.InstalledVersion.IsNull() || data.InstalledVersion.IsUnknown() {
-		held = data.Version.ValueString()
-	}
-	if isPluginVersionKeyword(held) {
-		held = ""
-	}
-
-	p, found := selectInstalledPlugin(plugins, data.ID.ValueString(), data.Name.ValueString(), held)
+	p, found := selectInstalledPlugin(plugins, data.ID.ValueString(), data.Name.ValueString(), heldVersion(data))
 	if !found {
 		resp.State.RemoveResource(ctx)
 		return
@@ -260,8 +225,7 @@ func (r *PluginResource) Read(ctx context.Context, req resource.ReadRequest, res
 		data.Version = types.StringValue(p.Version)
 	}
 
-	// Populate repository_url from available packages if not already set.
-	if data.RepositoryURL.IsNull() || data.RepositoryURL.ValueString() == "" {
+	if data.RepositoryURL.ValueString() == "" {
 		repoURL := r.resolveRepositoryURL(ctx, data.Name.ValueString(), p.Version)
 		if repoURL != "" {
 			data.RepositoryURL = types.StringValue(repoURL)
@@ -283,11 +247,7 @@ func (r *PluginResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	if resp.Diagnostics.HasError() || plan.Version.Equal(state.Version) {
 		return
 	}
-	installed := state.InstalledVersion.ValueString()
-	if state.InstalledVersion.IsNull() && !isPluginVersionKeyword(state.Version.ValueString()) {
-		installed = state.Version.ValueString()
-	}
-	keeps, err := r.versionNamesInstalled(ctx, plan.Name.ValueString(), plan.Version, installed)
+	keeps, err := r.versionNamesInstalled(ctx, plan.Name.ValueString(), plan.Version, heldVersion(state))
 	if err != nil {
 		resp.Diagnostics.AddAttributeError(path.Root("version"), "Failed to resolve plugin version", err.Error())
 		return
@@ -297,11 +257,21 @@ func (r *PluginResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	}
 }
 
-// versionNamesInstalled reports whether version, planned to replace another
-// value, names the installed version, in which case the plugin stays as it is
-// and only state changes. A keyword is resolved as an install would resolve
-// it, so importing a plugin into a configuration that asks for the latest
-// version, when that is the version installed, does not reinstall it.
+// heldVersion returns "" when state records none. State written before
+// installed_version existed holds the installed version in version.
+func heldVersion(state PluginResourceModel) string {
+	held := state.InstalledVersion.ValueString()
+	if state.InstalledVersion.IsNull() || state.InstalledVersion.IsUnknown() {
+		held = state.Version.ValueString()
+	}
+	if isPluginVersionKeyword(held) {
+		return ""
+	}
+	return held
+}
+
+// versionNamesInstalled reports whether version, planned to replace another value, names the
+// installed version; a keyword is resolved as an install would resolve it.
 func (r *PluginResource) versionNamesInstalled(ctx context.Context, name string, version types.String, installed string) (bool, error) {
 	if version.IsUnknown() || version.IsNull() || installed == "" {
 		return false, nil
@@ -366,18 +336,13 @@ func (r *PluginResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	}
 }
 
-// uninstall removes every listed version of the plugin with the given id that
-// Jellyfin lets users uninstall, other than a version a jellyfin_plugin
-// created in this run, and returns the versions Jellyfin does not let users
-// uninstall, which are the ones it bundles.
-//
-// After an update Jellyfin lists both the running version and the one that
-// loads at the next restart, and removing only one leaves the other to load at
-// that restart. Each version goes by its own DELETE: the DELETE without a
-// version removes a version that is not loaded, which under
-// create_before_destroy is the one the replacement just installed. A failed
-// request still counts once its version is no longer listed, which is how an
-// uninstall that raced another one for the same plugin ends.
+func (r *PluginResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), req.ID)...)
+}
+
+// uninstall removes every listed version Jellyfin lets users uninstall, other than one a
+// jellyfin_plugin created this run, and returns the bundled versions it cannot remove.
 func (r *PluginResource) uninstall(ctx context.Context, id string) ([]client.InstalledPlugin, error) {
 	listed, err := r.listedPlugins(ctx, id)
 	if err != nil {
@@ -385,13 +350,11 @@ func (r *PluginResource) uninstall(ctx context.Context, id string) ([]client.Ins
 	}
 	var errs []error
 	for _, p := range listed {
-		// Jellyfin answers 204 to the DELETE of a plugin it does not let users
-		// uninstall and leaves it in place.
 		if !p.CanUninstall {
 			continue
 		}
 		if r.createdThisRun(p) {
-			tflog.Debug(ctx, "Leaving the plugin version another jellyfin_plugin created in this run", map[string]interface{}{"plugin": p.Name, "version": p.Version})
+			tflog.Debug(ctx, "Leaving the plugin version another jellyfin_plugin created in this run", map[string]any{"plugin": p.Name, "version": p.Version})
 			continue
 		}
 		if err := r.client.UninstallPluginVersion(ctx, p.ID, p.Version); err != nil {
@@ -418,12 +381,8 @@ func (r *PluginResource) uninstall(ctx context.Context, id string) ([]client.Ins
 	return bundled, nil
 }
 
-// pluginVersionsCreated holds the plugin versions that a jellyfin_plugin
-// created or adopted, keyed by the provider's client, which lasts one
-// Terraform run. Under create_before_destroy a replacement is created before
-// the object it replaces is destroyed, and both share the plugin's GUID, so
-// this is how that destroy tells the replacement's version from an update
-// Jellyfin installed on its own, which it must remove.
+// pluginVersionsCreated holds the plugin versions a jellyfin_plugin created or adopted,
+// keyed by client (one Terraform run), so a destroy spares a create_before_destroy replacement.
 var pluginVersionsCreated sync.Map
 
 type createdPluginVersion struct {
@@ -449,12 +408,8 @@ func pluginVersions(plugins []client.InstalledPlugin) []string {
 	return versions
 }
 
-// selectInstalledPlugin returns the entry GET /Plugins lists for the plugin
-// with the given id in either GUID spelling, or with the given name, which is
-// all an import by name knows. Jellyfin lists every version on disk, so after
-// an update both the running version and the one that loads at the next
-// restart are listed: the entry at version wins, otherwise the newest.
-// Versions Jellyfin deletes at the next restart do not count.
+// selectInstalledPlugin returns the GET /Plugins entry for id (either GUID spelling) or name:
+// the one at version, else the newest, skipping versions pending deletion.
 func selectInstalledPlugin(plugins []client.InstalledPlugin, id, name, version string) (client.InstalledPlugin, bool) {
 	var selected client.InstalledPlugin
 	found := false
@@ -465,11 +420,31 @@ func selectInstalledPlugin(plugins []client.InstalledPlugin, id, name, version s
 		if version != "" && samePluginVersion(p.Version, version) {
 			return p, true
 		}
-		if !found || compareDottedVersions(p.Version, selected.Version) > 0 {
+		if !found || release.Compare(p.Version, selected.Version) > 0 {
 			selected, found = p, true
 		}
 	}
 	return selected, found
+}
+
+// ImportablePlugins returns, for each plugin that plugins, the answer of GET
+// /Plugins, lists, the entry that a jellyfin_plugin imported by the plugin's
+// ID reads: one entry per plugin, although Jellyfin lists each version it
+// holds, and none for a plugin it deletes at the next restart.
+func ImportablePlugins(plugins []client.InstalledPlugin) []client.InstalledPlugin {
+	var out []client.InstalledPlugin
+	seen := map[string]bool{}
+	for _, p := range plugins {
+		id := normalizeGUID(p.ID)
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if selected, found := selectInstalledPlugin(plugins, p.ID, "", ""); found {
+			out = append(out, selected)
+		}
+	}
+	return out
 }
 
 // listedPlugins returns the entries GET /Plugins lists for the plugin with
@@ -490,16 +465,6 @@ func (r *PluginResource) listedPlugins(ctx context.Context, id string) ([]client
 
 // waitForPlugin blocks until name is installed at version and returns the
 // entry GET /Plugins lists for it.
-//
-// Matching the version, not just the name, is what lets a caller restart the
-// server afterwards and be sure it loads the assembly this install put down:
-// Jellyfin's install is asynchronous and returns long before the download
-// lands, so a name-only match returns while the previous version is still the
-// only one on disk. Jellyfin registers the new version as soon as it is
-// written, with status "Restart" and the version it replaces "Superceded", so
-// this does not wait on a restart that has not happened yet. A version left
-// behind for deletion at the next restart is not the one this install put
-// down.
 func (r *PluginResource) waitForPlugin(ctx context.Context, name, version string, timeout time.Duration) (*client.InstalledPlugin, error) {
 	deadline := time.Now().Add(timeout)
 	var seen string
@@ -517,8 +482,10 @@ func (r *PluginResource) waitForPlugin(ctx context.Context, name, version string
 			}
 			seen = p.Version
 		}
-		tflog.Debug(ctx, "Waiting for plugin to appear", map[string]interface{}{"plugin": name, "version": version, "seen": seen})
-		time.Sleep(pluginPollInterval)
+		tflog.Debug(ctx, "Waiting for plugin to appear", map[string]any{"plugin": name, "version": version, "seen": seen})
+		if err := pause(ctx, min(pluginPollInterval, time.Until(deadline))); err != nil {
+			return nil, err
+		}
 	}
 	if seen != "" {
 		return nil, fmt.Errorf("plugin %q is installed at %s but %s did not appear within %s", name, seen, version, timeout)
@@ -526,14 +493,14 @@ func (r *PluginResource) waitForPlugin(ctx context.Context, name, version string
 	return nil, fmt.Errorf("plugin %q did not appear within %s", name, timeout)
 }
 
-func (r *PluginResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Plugins can be imported by name (e.g. `terraform import jellyfin_plugin.x
-	// "SSO-Auth"`) or by the server-assigned UUID. We set the import ID into both
-	// `id` and `name` so Read can match whichever one is correct — it matches
-	// an entry by either and overwrites both with the canonical values from the
-	// server afterward.
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), req.ID)...)
+// notOfferedHint explains the 404 Jellyfin answers an install with when none
+// of its enabled repositories offers the package at that version for this
+// server.
+func notOfferedHint(err error, name, version string) string {
+	if !client.IsNotFound(err) {
+		return ""
+	}
+	return fmt.Sprintf("\n\nNo enabled plugin repository offers %s %s for this server's Jellyfin version. Check the version as the repository lists it (four parts, such as 13.0.0.0), and the repository_url.", name, version)
 }
 
 // findInstalledPlugin returns the entry GET /Plugins lists for name at
@@ -551,9 +518,8 @@ func (r *PluginResource) findInstalledPlugin(ctx context.Context, name, version 
 	return nil, nil
 }
 
-// versionDescribes reports whether version, as held in state, still describes
-// the installed version: a keyword, which is resolved only at install time, or
-// the installed release in any spelling samePluginVersion accepts.
+// versionDescribes reports whether version in state still describes installed: a keyword,
+// or the installed release in any spelling samePluginVersion accepts.
 func versionDescribes(version types.String, installed string) bool {
 	if version.IsNull() || version.IsUnknown() {
 		return false
@@ -562,9 +528,7 @@ func versionDescribes(version types.String, installed string) bool {
 }
 
 // omittedVersionPlanModifier plans the installed version for a version the
-// configuration no longer sets while state holds a keyword. Terraform plans an
-// omitted Optional and Computed value as the prior one, and Read keeps a
-// keyword, so the keyword would otherwise stay in state for good.
+// configuration no longer sets while state holds a keyword.
 type omittedVersionPlanModifier struct{}
 
 func (omittedVersionPlanModifier) Description(context.Context) string {
@@ -581,7 +545,7 @@ func (omittedVersionPlanModifier) PlanModifyString(ctx context.Context, req plan
 	}
 	var installed types.String
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("installed_version"), &installed)...)
-	if installed.IsNull() || installed.IsUnknown() || installed.ValueString() == "" {
+	if installed.ValueString() == "" {
 		return
 	}
 	resp.PlanValue = installed
@@ -591,62 +555,61 @@ func isPluginVersionKeyword(version string) bool {
 	return version == pluginVersionSupported || version == pluginVersionLatest
 }
 
-// samePluginVersion reports whether two plugin versions denote the same
-// release. Jellyfin reports four-segment assembly versions (2.5.22.0) while a
-// configuration may carry the three-segment release (2.5.22), so the trailing
-// zero must not make them differ. An empty want matches anything.
+// samePluginVersion reports whether two plugin versions denote the same release, so
+// 2.5.22.0 matches 2.5.22. An empty want matches anything.
 func samePluginVersion(got, want string) bool {
 	if want == "" {
 		return true
 	}
-	return compareDottedVersions(got, want) == 0
+	return release.Compare(got, want) == 0
 }
 
-// resolveRepositoryURL attempts to find the repository URL for a plugin by
-// querying the /Packages endpoint and matching on name and version.
+// resolveRepositoryURL finds the repository URL of the plugin name at
+// version from the packages the server offers, or returns "".
 func (r *PluginResource) resolveRepositoryURL(ctx context.Context, name, version string) string {
 	pkgs, err := r.client.GetAvailablePackages(ctx)
 	if err != nil {
-		tflog.Debug(ctx, "Could not resolve repository URL for plugin (packages unavailable)", map[string]interface{}{
+		tflog.Debug(ctx, "Could not resolve repository URL for plugin (packages unavailable)", map[string]any{
 			"plugin": name,
 			"error":  err.Error(),
 		})
 		return ""
 	}
-
-	for _, pkg := range pkgs {
-		if pkg.Name == name {
-			for _, v := range pkg.Versions {
-				if v.Version == version && v.RepositoryURL != "" {
-					return v.RepositoryURL
-				}
-			}
-
-			tflog.Debug(ctx, "Could not resolve repository URL for plugin (exact version unavailable)", map[string]interface{}{
-				"plugin":  name,
-				"version": version,
-			})
-			return ""
-		}
+	repositoryURL := PluginRepositoryURL(pkgs, name, version)
+	if repositoryURL == "" {
+		tflog.Debug(ctx, "Could not resolve repository URL for plugin (exact version unavailable)", map[string]any{
+			"plugin":  name,
+			"version": version,
+		})
 	}
+	return repositoryURL
+}
 
+// PluginRepositoryURL returns the repository URL jellyfin_plugin reads for
+// the plugin name at version: that of the first package pkgs lists with the
+// name, for its entry at exactly that version, or "".
+func PluginRepositoryURL(pkgs []client.PackageInfo, name, version string) string {
+	for _, pkg := range pkgs {
+		if pkg.Name != name {
+			continue
+		}
+		for _, v := range pkg.Versions {
+			if v.Version == version && v.RepositoryURL != "" {
+				return v.RepositoryURL
+			}
+		}
+		return ""
+	}
 	return ""
 }
 
-// resolvePluginVersion resolves the version for a plugin install.
-//
-//   - "supported" or unset for a known plugin → hardcoded supported release,
-//     in the build this server is offered
-//   - "latest" → newest version from the repository manifest, with a warning
-//     if its release is newer than the supported one (when one exists)
-//   - Any other value (e.g. "2.5.20.0") → used as-is
-//   - Unset for unknown plugins → resolves latest from the repository.
+// resolvePluginVersion resolves "supported", "latest" or an unset version to the version to
+// install, in the build this server is offered; any other value is used as-is.
 func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, version types.String) (string, error) {
 	supported := supportedVersionForPlugin(name)
 
 	switch {
-	case version.IsNull() || version.IsUnknown() || version.ValueString() == "":
-		// Unset: use supported for known plugins, latest for others.
+	case version.ValueString() == "":
 		if supported != "" {
 			return r.resolveSupportedBuild(ctx, name, supported)
 		}
@@ -663,17 +626,13 @@ func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, 
 		if err != nil {
 			return "", err
 		}
-		if supported != "" && latest != "" {
-			if c := compareDottedVersions(pluginRelease(latest), pluginRelease(supported)); c > 0 {
-				resp := "" // placeholder — warning is logged below
-				_ = resp
-				tflog.Warn(ctx, "Plugin version newer than supported", map[string]interface{}{
-					"plugin":    name,
-					"latest":    latest,
-					"supported": supported,
-					"warning":   fmt.Sprintf("Installing %s v%s which is newer than the tested/supported v%s. The typed Terraform resource may not cover all properties in this version.", name, latest, supported),
-				})
-			}
+		if supported != "" && latest != "" && release.Compare(pluginRelease(latest), pluginRelease(supported)) > 0 {
+			tflog.Warn(ctx, "Plugin version newer than supported", map[string]any{
+				"plugin":    name,
+				"latest":    latest,
+				"supported": supported,
+				"warning":   fmt.Sprintf("Installing %s v%s which is newer than the tested/supported v%s. The typed Terraform resource may not cover all properties in this version.", name, latest, supported),
+			})
 		}
 		return latest, nil
 
@@ -682,45 +641,40 @@ func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, 
 	}
 }
 
-// resolveLatestVersion fetches the latest version for a plugin from the
-// configured repository manifests via the /Packages endpoint.
-func (r *PluginResource) resolveLatestVersion(ctx context.Context, name string) (string, error) {
+// availablePackage returns the package named name, or nil if none is offered.
+func (r *PluginResource) availablePackage(ctx context.Context, name string) (*client.PackageInfo, error) {
 	pkgs, err := r.client.GetAvailablePackages(ctx)
 	if err != nil {
-		return "", fmt.Errorf("listing available packages: %w", err)
+		return nil, fmt.Errorf("listing available packages: %w", err)
 	}
-
-	for _, pkg := range pkgs {
-		if pkg.Name == name {
-			if len(pkg.Versions) == 0 {
-				return "", fmt.Errorf("plugin %q has no available versions", name)
-			}
-			// Manifests list newest version first.
-			return pkg.Versions[0].Version, nil
-		}
+	i := slices.IndexFunc(pkgs, func(pkg client.PackageInfo) bool { return pkg.Name == name })
+	if i < 0 {
+		return nil, nil
 	}
+	return &pkgs[i], nil
+}
 
-	return "", nil
+// resolveLatestVersion returns "" if the repositories do not offer the plugin.
+func (r *PluginResource) resolveLatestVersion(ctx context.Context, name string) (string, error) {
+	pkg, err := r.availablePackage(ctx, name)
+	switch {
+	case err != nil || pkg == nil:
+		return "", err
+	case len(pkg.Versions) == 0:
+		return "", fmt.Errorf("plugin %q has no available versions", name)
+	}
+	// Manifests list newest version first.
+	return pkg.Versions[0].Version, nil
 }
 
 // resolveSupportedBuild returns the build of the supported release that this
 // server is offered, or "" if the repositories do not offer the plugin.
-// JellyfinSecurity ships one build per server ABI under a single release
-// (2.6.3.0 for Jellyfin 10.11, 2.6.3.1 for 12.x) and Jellyfin lists only the
-// builds its ABI accepts, so the pinned build is not installable on the other
-// server line while its sibling is. Falling back to the pinned build when the
-// packages cannot be listed would plan a replacement on the other line.
 func (r *PluginResource) resolveSupportedBuild(ctx context.Context, name, supported string) (string, error) {
-	pkgs, err := r.client.GetAvailablePackages(ctx)
-	if err != nil {
-		return "", fmt.Errorf("listing available packages: %w", err)
+	pkg, err := r.availablePackage(ctx, name)
+	if err != nil || pkg == nil {
+		return "", err
 	}
-	for _, pkg := range pkgs {
-		if pkg.Name == name {
-			return pickReleaseBuild(pkg.Versions, supported), nil
-		}
-	}
-	return "", nil
+	return pickReleaseBuild(pkg.Versions, supported), nil
 }
 
 // pickReleaseBuild returns want when it is offered, otherwise the highest
@@ -731,7 +685,7 @@ func pickReleaseBuild(offered []client.VersionInfo, want string) string {
 		if v.Version == want {
 			return want
 		}
-		if pluginRelease(v.Version) == pluginRelease(want) && (best == "" || compareDottedVersions(v.Version, best) > 0) {
+		if pluginRelease(v.Version) == pluginRelease(want) && (best == "" || release.Compare(v.Version, best) > 0) {
 			best = v.Version
 		}
 	}
@@ -742,8 +696,7 @@ func pickReleaseBuild(offered []client.VersionInfo, want string) string {
 }
 
 // pluginRelease drops the build segment from a four-segment plugin version
-// (2.6.3.1 → 2.6.3). For JellyfinSecurity that segment selects the server ABI,
-// so builds of one release carry the same configuration schema.
+// (2.6.3.1 → 2.6.3).
 func pluginRelease(version string) string {
 	parts := strings.Split(strings.TrimSpace(version), ".")
 	if len(parts) > 3 {

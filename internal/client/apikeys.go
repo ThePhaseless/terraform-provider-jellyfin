@@ -5,9 +5,7 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/url"
 )
 
@@ -15,20 +13,14 @@ import (
 type APIKey struct {
 	AccessToken string `json:"AccessToken"`
 	AppName     string `json:"AppName"`
-	DateCreated string `json:"DateCreated"`
-}
-
-// APIKeyList represents the response from listing API keys.
-type APIKeyList struct {
-	Items []APIKey `json:"Items"`
 }
 
 // GetAPIKeys retrieves all API keys.
 func (c *Client) GetAPIKeys(ctx context.Context) ([]APIKey, error) {
-	var keyList APIKeyList
-	if err := c.get(ctx, "/Auth/Keys", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&keyList)
-	}); err != nil {
+	var keyList struct {
+		Items []APIKey `json:"Items"`
+	}
+	if err := c.getJSON(ctx, "/Auth/Keys", &keyList); err != nil {
 		return nil, fmt.Errorf("getting API keys: %w", err)
 	}
 	return keyList.Items, nil
@@ -48,28 +40,4 @@ func (c *Client) DeleteAPIKey(ctx context.Context, accessToken string) error {
 		return fmt.Errorf("deleting API key: %w", err)
 	}
 	return nil
-}
-
-// GetAPIKeyByAppName finds an API key by app name. Returns an error if multiple keys share the same name.
-func (c *Client) GetAPIKeyByAppName(ctx context.Context, appName string) (*APIKey, error) {
-	keys, err := c.GetAPIKeys(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	var matches []APIKey
-	for _, key := range keys {
-		if key.AppName == appName {
-			matches = append(matches, key)
-		}
-	}
-
-	switch len(matches) {
-	case 0:
-		return nil, fmt.Errorf("API key with app name %q not found", appName)
-	case 1:
-		return &matches[0], nil
-	default:
-		return nil, fmt.Errorf("found %d API keys with app name %q; use access_token to identify the key", len(matches), appName)
-	}
 }

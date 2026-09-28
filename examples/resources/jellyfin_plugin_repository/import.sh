@@ -1,1 +1,1 @@
-terraform import jellyfin_plugin_repository.example <repository-name>
+terraform import jellyfin_plugin_repository.stable "<repository-name>"

@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -22,7 +24,6 @@ import (
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
-// Ensure JellyfinProvider satisfies various provider interfaces.
 var _ provider.Provider = &JellyfinProvider{}
 
 // Jellyfin can answer 503 briefly after the HTTP port opens while startup tasks finish.
@@ -50,56 +51,40 @@ func (p *JellyfinProvider) Metadata(_ context.Context, _ provider.MetadataReques
 }
 
 func (p *JellyfinProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
+	const description = "The Jellyfin provider allows you to manage a Jellyfin media server instance. " +
+		"It manages users, API keys, libraries, plugin repositories, plugins, plugin configuration " +
+		"(with typed settings for the JellyfinSecurity plugin), scheduled task triggers, server restarts, " +
+		"and the system, encoding, networking, branding, Live TV, and metadata configuration. " +
+		"It reads server information through the jellyfin_system_info data source, " +
+		"and it completes the initial setup of a fresh server."
+	setting := func(desc string) schema.StringAttribute {
+		return schema.StringAttribute{
+			Description:         desc,
+			MarkdownDescription: desc,
+			Optional:            true,
+			Validators: []validator.String{
+				stringvalidator.LengthAtLeast(1),
+			},
+		}
+	}
+	secret := func(desc string) schema.StringAttribute {
+		a := setting(desc)
+		a.Sensitive = true
+		return a
+	}
 	resp.Schema = schema.Schema{
-		Description: "The Jellyfin provider allows you to manage a Jellyfin media server instance. " +
-			"It supports managing users, libraries, plugins, system configuration, and initial setup.",
-		MarkdownDescription: "The Jellyfin provider allows you to manage a Jellyfin media server instance. " +
-			"It supports managing users, libraries, plugins, system configuration, and initial setup.",
+		Description:         description,
+		MarkdownDescription: description,
 		Attributes: map[string]schema.Attribute{
-			"endpoint": schema.StringAttribute{
-				Description: "The URL of the Jellyfin server (e.g., `http://localhost:8096`). " +
-					"Can also be set via the `JELLYFIN_ENDPOINT` environment variable.",
-				MarkdownDescription: "The URL of the Jellyfin server (e.g., `http://localhost:8096`). " +
-					"Can also be set via the `JELLYFIN_ENDPOINT` environment variable.",
-				Optional: true,
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-			},
-			"api_key": schema.StringAttribute{
-				Description: "The API key for authenticating with the Jellyfin server. " +
-					"Can also be set via the `JELLYFIN_API_KEY` environment variable. " +
-					"Use username and password instead when bootstrapping a new server.",
-				MarkdownDescription: "The API key for authenticating with the Jellyfin server. " +
-					"Can also be set via the `JELLYFIN_API_KEY` environment variable. " +
-					"Use username and password instead when bootstrapping a new server.",
-				Optional:  true,
-				Sensitive: true,
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-			},
-			"username": schema.StringAttribute{
-				Description: "Username for authenticating with the Jellyfin server and creating the initial admin during bootstrap. " +
-					"Can also be set via the `JELLYFIN_USERNAME` environment variable.",
-				MarkdownDescription: "Username for authenticating with the Jellyfin server and creating the initial admin during bootstrap. " +
-					"Can also be set via the `JELLYFIN_USERNAME` environment variable.",
-				Optional: true,
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-			},
-			"password": schema.StringAttribute{
-				Description: "Password for authenticating with the Jellyfin server and creating the initial admin during bootstrap. " +
-					"Can also be set via the `JELLYFIN_PASSWORD` environment variable.",
-				MarkdownDescription: "Password for authenticating with the Jellyfin server and creating the initial admin during bootstrap. " +
-					"Can also be set via the `JELLYFIN_PASSWORD` environment variable.",
-				Optional:  true,
-				Sensitive: true,
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-			},
+			"endpoint": setting("The URL of the Jellyfin server (e.g., `http://localhost:8096`). " +
+				"Can also be set via the `JELLYFIN_ENDPOINT` environment variable."),
+			"api_key": secret("The API key for authenticating with the Jellyfin server. " +
+				"Can also be set via the `JELLYFIN_API_KEY` environment variable. " +
+				"Use username and password instead when bootstrapping a new server."),
+			"username": setting("Username for authenticating with the Jellyfin server and creating the initial admin during bootstrap. " +
+				"Can also be set via the `JELLYFIN_USERNAME` environment variable."),
+			"password": secret("Password for authenticating with the Jellyfin server and creating the initial admin during bootstrap. " +
+				"Can also be set via the `JELLYFIN_PASSWORD` environment variable."),
 		},
 	}
 }
@@ -112,25 +97,25 @@ func (p *JellyfinProvider) Configure(ctx context.Context, req provider.Configure
 		return
 	}
 
-	endpoint := os.Getenv("JELLYFIN_ENDPOINT")
-	if !data.Endpoint.IsNull() && !data.Endpoint.IsUnknown() {
-		endpoint = data.Endpoint.ValueString()
+	// A value unknown until apply, such as the address of a server the same
+	// apply creates, must not fall back to the environment, which may name
+	// another server.
+	if unknown := unknownAttributes(data); len(unknown) > 0 {
+		if req.ClientCapabilities.DeferralAllowed {
+			resp.Deferred = &provider.Deferred{Reason: provider.DeferredReasonProviderConfigUnknown}
+			return
+		}
+		for _, name := range unknown {
+			resp.Diagnostics.AddAttributeError(path.Root(name), "Unknown Jellyfin provider configuration",
+				fmt.Sprintf("The provider's %s is unknown until apply, so the provider cannot connect to Jellyfin to plan. Apply the resources it depends on first, for example with -target, or set it to a value known at plan time.", name))
+		}
+		return
 	}
 
-	apiKey := os.Getenv("JELLYFIN_API_KEY")
-	if !data.APIKey.IsNull() && !data.APIKey.IsUnknown() {
-		apiKey = data.APIKey.ValueString()
-	}
-
-	username := os.Getenv("JELLYFIN_USERNAME")
-	if !data.Username.IsNull() && !data.Username.IsUnknown() {
-		username = data.Username.ValueString()
-	}
-
-	password := os.Getenv("JELLYFIN_PASSWORD")
-	if !data.Password.IsNull() && !data.Password.IsUnknown() {
-		password = data.Password.ValueString()
-	}
+	endpoint := configuredOrEnv(data.Endpoint, "JELLYFIN_ENDPOINT")
+	apiKey := configuredOrEnv(data.APIKey, "JELLYFIN_API_KEY")
+	username := configuredOrEnv(data.Username, "JELLYFIN_USERNAME")
+	password := configuredOrEnv(data.Password, "JELLYFIN_PASSWORD")
 
 	if endpoint == "" {
 		resp.Diagnostics.AddError(
@@ -158,6 +143,24 @@ func (p *JellyfinProvider) Configure(ctx context.Context, req provider.Configure
 
 	resp.DataSourceData = c
 	resp.ResourceData = c
+}
+
+func configuredOrEnv(v types.String, env string) string {
+	if v.IsNull() {
+		return os.Getenv(env)
+	}
+	return v.ValueString()
+}
+
+func unknownAttributes(data JellyfinProviderModel) []string {
+	var unknown []string
+	for name, v := range map[string]types.String{"endpoint": data.Endpoint, "api_key": data.APIKey, "username": data.Username, "password": data.Password} {
+		if v.IsUnknown() {
+			unknown = append(unknown, name)
+		}
+	}
+	slices.Sort(unknown)
+	return unknown
 }
 
 func configureClient(ctx context.Context, endpoint, apiKey, username, password string) (*client.Client, *client.PublicSystemInfo, error) {
@@ -208,7 +211,7 @@ func configureClient(ctx context.Context, endpoint, apiKey, username, password s
 
 func getPublicSystemInfo(ctx context.Context, c *client.Client) (*client.PublicSystemInfo, error) {
 	var lastErr error
-	for i := 0; i < startupStatusRetries; i++ {
+	for range startupStatusRetries {
 		info, err := c.GetPublicSystemInfo(ctx)
 		if err == nil {
 			return info, nil
@@ -220,10 +223,8 @@ func getPublicSystemInfo(ctx context.Context, c *client.Client) (*client.PublicS
 		}
 		lastErr = err
 
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(startupStatusDelay):
+		if err := pause(ctx, startupStatusDelay); err != nil {
+			return nil, err
 		}
 	}
 

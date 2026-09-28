@@ -71,8 +71,8 @@ Optional:
 - `allowed_tags` (List of String) Tags that are explicitly allowed for the user.
 - `authentication_provider_id` (String) Authentication provider ID.
 - `block_unrated_items` (List of String) Item types that are blocked when unrated.
-- `blocked_channels` (List of String) Channels that are blocked.
-- `blocked_media_folders` (List of String) Media folders that are blocked.
+- `blocked_channels` (List of String) Channels that are blocked, by ID as Jellyfin lists it.
+- `blocked_media_folders` (List of String) Media folders that are blocked, by ID as Jellyfin lists it, such as a library's `item_id`.
 - `blocked_tags` (List of String) Tags that are blocked for the user.
 - `enable_all_channels` (Boolean) Whether all channels are enabled.
 - `enable_all_devices` (Boolean) Whether all devices are enabled.
@@ -95,9 +95,9 @@ Optional:
 - `enable_sync_transcoding` (Boolean) Whether sync transcoding is enabled.
 - `enable_user_preference_access` (Boolean) Whether the user can access their own preferences.
 - `enable_video_playback_transcoding` (Boolean) Whether video playback transcoding is enabled.
-- `enabled_channels` (List of String) Channels explicitly enabled for the user.
+- `enabled_channels` (List of String) Channels explicitly enabled for the user, by ID as Jellyfin lists it.
 - `enabled_devices` (List of String) Devices explicitly enabled for the user.
-- `enabled_folders` (List of String) Folders explicitly enabled for the user.
+- `enabled_folders` (List of String) Folders explicitly enabled for the user, by ID as Jellyfin lists it, such as a library's `item_id`.
 - `force_remote_source_transcoding` (Boolean) Whether remote source transcoding is forced.
 - `is_hidden` (Boolean) Whether the user is hidden from login screens.
 - `login_attempts_before_lockout` (Number) Number of failed login attempts before the account is locked.

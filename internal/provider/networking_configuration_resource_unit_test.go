@@ -4,38 +4,30 @@
 package provider
 
 import (
-	"context"
-	"encoding/json"
 	"testing"
+
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 )
 
-func TestUnitNetworkingConfigurationOverlay(t *testing.T) {
-	ctx := context.Background()
+func TestUnitNetworkingConfigurationRoundTrip(t *testing.T) {
 	fixture := `{"BaseUrl":"BaseURL","EnableHttps":true,"RequireHttps":true,"CertificatePath":"CertificatePath","CertificatePassword":"CertificatePassword","InternalHttpPort":8096,"InternalHttpsPort":8920,"PublicHttpPort":8096,"PublicHttpsPort":8920,"AutoDiscovery":true,"EnableUPnP":false,"EnableIPv4":true,"EnableIPv6":false,"EnableRemoteAccess":true,"LocalNetworkSubnets":["10.0.0.0/8"],"LocalNetworkAddresses":["localhost"],"KnownProxies":["10.244.0.0/16"],"IgnoreVirtualInterfaces":true,"VirtualInterfaceNames":["veth"],"EnablePublishedServerUriByRequest":true,"PublishedServerUriBySubnet":["all=https://example.com"],"RemoteIPFilter":[],"IsRemoteIPFilterBlacklist":false}`
+	checkRoundTrip[NetworkingConfigurationResourceModel](t, mustWire(t, networkingWire), fixture)
+}
 
-	var data NetworkingConfigurationResourceModel
-	flattenNetworkingConfiguration(ctx, fixture, &data, nil)
-
-	base := map[string]json.RawMessage{}
-	overlayNetworkingConfiguration(ctx, base, &data)
-
-	result, err := json.Marshal(base)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
+// Jellyfin stores a base URL with a leading / and without a trailing one.
+func TestUnitNetworkingBaseURLTakesOnlyWhatJellyfinStores(t *testing.T) {
+	a, ok := schemaOf(&NetworkingConfigurationResource{}).Attributes["base_url"].(schema.StringAttribute)
+	if !ok {
+		t.Fatal("base_url is not a string attribute")
 	}
-
-	var got map[string]interface{}
-	if err := json.Unmarshal(result, &got); err != nil {
-		t.Fatalf("unmarshal result: %v", err)
-	}
-	var want map[string]interface{}
-	if err := json.Unmarshal([]byte(fixture), &want); err != nil {
-		t.Fatalf("unmarshal fixture: %v", err)
-	}
-
-	gotJSON, _ := json.Marshal(got)
-	wantJSON, _ := json.Marshal(want)
-	if string(gotJSON) != string(wantJSON) {
-		t.Fatalf("round-trip mismatch\n got: %s\nwant: %s", gotJSON, wantJSON)
-	}
+	testUnitAssertStringValidation(t, a, map[string]bool{
+		"":            false,
+		"/jellyfin":   false,
+		"/a/b":        false,
+		"jellyfin":    true,
+		"/jellyfin/":  true,
+		"/":           true,
+		" ":           true,
+		"/jelly fin ": false,
+	})
 }

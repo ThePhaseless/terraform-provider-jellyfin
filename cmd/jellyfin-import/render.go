@@ -1,0 +1,167 @@
+// Copyright IBM Corp. 2021, 2025
+// SPDX-License-Identifier: MPL-2.0
+
+package main
+
+import (
+	"context"
+	"fmt"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/provider"
+)
+
+// omittedAttributes lists, by resource type, the configurable attributes the
+// importer leaves out on purpose, as dotted paths through nested attributes.
+// Each is optional and computed, so the imported state keeps its value
+// without the configuration planning a change.
+var omittedAttributes = map[string][]string{
+	"jellyfin_user":    {"policy"},
+	"jellyfin_library": {"library_options"},
+	// Jellyfin maintains it itself.
+	"jellyfin_livetv_configuration": {"media_locations_created"},
+	// key says which task it is where the hash in task_id does not. The
+	// importer writes task_id only for a task no key selects on its own.
+	"jellyfin_scheduled_task": {"task_id"},
+}
+
+var sharedKeys = sync.OnceValues(func() (map[string]map[string]string, error) {
+	return provider.SharedKeys(context.Background())
+})
+
+// rendered reports whether the importer writes the attribute at attrPath of
+// resourceType into the configuration, where null reports whether an
+// attribute of the same object reads null. Sensitive values stay out of
+// resources.tf. A deprecated attribute leaves the imported value to the
+// attribute that also writes its Jellyfin keys, unless that one reads null,
+// as it does where it cannot write them.
+func rendered(resourceType, attrPath string, a schema.Attribute, null func(name string) bool) bool {
+	if !a.IsOptional() && !a.IsRequired() || a.IsSensitive() || slices.Contains(omittedAttributes[resourceType], attrPath) {
+		return false
+	}
+	if a.GetDeprecationMessage() == "" {
+		return true
+	}
+	shared, err := sharedKeys()
+	by, ok := shared[resourceType][attrPath]
+	return err == nil && ok && null(by)
+}
+
+// importedAttributes renders the attributes of resourceType as the Read that
+// follows its import with importID reads them from raw, the document
+// Jellyfin serves, and from what else c serves, so the configuration sets
+// exactly what the imported state holds.
+func importedAttributes(ctx context.Context, c *client.Client, resourceType, importID, raw string) (map[string]string, error) {
+	if _, err := sharedKeys(); err != nil {
+		return nil, err
+	}
+	s, state, err := provider.ReadForImport(ctx, c, resourceType, importID, raw)
+	if err != nil {
+		return nil, err
+	}
+	return renderAttributes(resourceType, "", s.Attributes, state, 1)
+}
+
+// renderAttributes renders the non-null values of obj's attributes that
+// rendered accepts. depth is the block nesting level the attributes are
+// written at, used to indent multi-line values.
+func renderAttributes(resourceType, parent string, attrs map[string]schema.Attribute, obj basetypes.ObjectValue, depth int) (map[string]string, error) {
+	out := map[string]string{}
+	values := obj.Attributes()
+	null := func(name string) bool { return values[name] == nil || values[name].IsNull() }
+	for name, a := range attrs {
+		p := joinPath(parent, name)
+		v := values[name]
+		if null(name) || v.IsUnknown() || !rendered(resourceType, p, a, null) {
+			continue
+		}
+		s, err := renderValue(resourceType, p, a, v, depth)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", p, err)
+		}
+		out[name] = s
+	}
+	return out, nil
+}
+
+func joinPath(parent, name string) string {
+	if parent == "" {
+		return name
+	}
+	return parent + "." + name
+}
+
+func renderValue(resourceType, attrPath string, a schema.Attribute, v attr.Value, depth int) (string, error) {
+	switch n := a.(type) {
+	case schema.SingleNestedAttribute:
+		o, ok := v.(basetypes.ObjectValue)
+		if !ok {
+			return "", fmt.Errorf("got %T for an object", v)
+		}
+		attrs, err := renderAttributes(resourceType, attrPath, n.Attributes, o, depth+1)
+		if err != nil {
+			return "", err
+		}
+		return hclObject(attrs, depth), nil
+	case schema.ListNestedAttribute:
+		l, ok := v.(basetypes.ListValue)
+		if !ok {
+			return "", fmt.Errorf("got %T for a list", v)
+		}
+		if len(l.Elements()) == 0 {
+			return "[]", nil
+		}
+		indent := strings.Repeat("  ", depth)
+		var b strings.Builder
+		b.WriteString("[\n")
+		for _, e := range l.Elements() {
+			o, ok := e.(basetypes.ObjectValue)
+			if !ok {
+				return "", fmt.Errorf("got %T for a list element", e)
+			}
+			attrs, err := renderAttributes(resourceType, attrPath, n.NestedObject.Attributes, o, depth+2)
+			if err != nil {
+				return "", err
+			}
+			b.WriteString(indent + "  " + hclObject(attrs, depth+1) + ",\n")
+		}
+		b.WriteString(indent + "]")
+		return b.String(), nil
+	}
+	return renderScalar(v)
+}
+
+func renderScalar(v attr.Value) (string, error) {
+	if v.IsNull() {
+		return "null", nil
+	}
+	switch x := v.(type) {
+	case basetypes.StringValue:
+		return hclString(x.ValueString()), nil
+	case basetypes.BoolValue:
+		return strconv.FormatBool(x.ValueBool()), nil
+	case basetypes.Int64Value:
+		return strconv.FormatInt(x.ValueInt64(), 10), nil
+	case basetypes.Float64Value:
+		return strconv.FormatFloat(x.ValueFloat64(), 'f', -1, 64), nil
+	case basetypes.ListValue:
+		elems := make([]string, len(x.Elements()))
+		for i, e := range x.Elements() {
+			s, err := renderScalar(e)
+			if err != nil {
+				return "", err
+			}
+			elems[i] = s
+		}
+		return "[" + strings.Join(elems, ", ") + "]", nil
+	}
+	return "", fmt.Errorf("cannot render a %T", v)
+}

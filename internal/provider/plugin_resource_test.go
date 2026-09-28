@@ -7,8 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"strings"
+	"slices"
 	"testing"
 	"time"
 
@@ -30,7 +29,6 @@ func TestAccPluginResource(t *testing.T) {
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Install plugin.
 			{
 				Config: fmt.Sprintf(`
 resource "jellyfin_plugin" "test" {
@@ -52,11 +50,8 @@ resource "jellyfin_plugin" "test" {
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
-			// Import by plugin *name* — the scenario from issue #84: the user
-			// runs `terraform import jellyfin_plugin.x "SSO-Auth"` using the
-			// plugin name, not the server-assigned UUID. ImportStateId overrides
-			// the default behaviour (which imports using the state ID) so we can
-			// pass the plugin name explicitly.
+			// Import by plugin name, as terraform import jellyfin_plugin.x "SSO-Auth"
+			// does, not by the state ID.
 			{
 				ResourceName:            "jellyfin_plugin.test",
 				ImportState:             true,
@@ -78,10 +73,8 @@ resource "jellyfin_plugin" "test" {
 					return id[:8] + "-" + id[8:12] + "-" + id[12:16] + "-" + id[16:20] + "-" + id[20:], nil
 				},
 			},
-			// Verify Create is idempotent when the plugin is already installed
-			// (issue #84): adding a second resource for the same plugin name
-			// must not 404. Create detects the plugin is already present and
-			// reuses the existing install instead of POSTing again.
+			// A second resource for an installed plugin must not 404: Create reuses
+			// the install.
 			{
 				Config: fmt.Sprintf(`
 resource "jellyfin_plugin" "test" {
@@ -313,9 +306,7 @@ resource "jellyfin_plugin" "test" {
 // task runs at startup, so it only stays pinned across a restart with the
 // task's triggers removed.
 func TestAccPluginResourcePinSurvivesRestartWithoutUpdateTriggers(t *testing.T) {
-	if os.Getenv("JELLYFIN_RESTART_ACC") == "" {
-		t.Skip("set JELLYFIN_RESTART_ACC=1 to run tests that restart the server; run against a disposable Jellyfin (e.g. the bundled docker-compose) in isolation, not a shared instance")
-	}
+	testAccRestartPreCheck(t, "tests that restart the server")
 	pkg := testAccFindUninstalledPackage(t, stableRepoURL, 2)
 	pinned := pkg.Versions[1].Version
 	taskID := testAccRestorePluginUpdateTriggers(t)
@@ -384,7 +375,7 @@ func testAccRestorePluginUpdateTriggers(t *testing.T) string {
 		t.Cleanup(func() {
 			// The provider's sign-in has signed c out by now, since both share
 			// a device ID.
-			if err := testAccClient(t).UpdateScheduledTaskTriggers(context.Background(), task.ID, string(found)); err != nil {
+			if err := testAccClient(t).UpdateScheduledTaskTriggers(context.WithoutCancel(t.Context()), task.ID, string(found)); err != nil {
 				t.Errorf("putting back the PluginUpdates triggers: %v", err)
 			}
 		})
@@ -394,18 +385,28 @@ func testAccRestorePluginUpdateTriggers(t *testing.T) string {
 	return ""
 }
 
+func testAccListedPlugins(ctx context.Context, c *client.Client, name string) ([]client.InstalledPlugin, error) {
+	plugins, err := c.GetInstalledPlugins(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(plugins, func(p client.InstalledPlugin) bool {
+		return p.Name != name || p.Status == pluginStatusDeleted
+	}), nil
+}
+
 // testAccCheckPluginStaysAt fails if Jellyfin lists the named plugin at any
 // version other than want during the time its startup tasks take to run.
 func testAccCheckPluginStaysAt(t *testing.T, name, want string) resource.TestCheckFunc {
 	return func(*terraform.State) error {
 		c := testAccClient(t)
 		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(pluginPollInterval) {
-			plugins, err := c.GetInstalledPlugins(context.Background())
+			listed, err := testAccListedPlugins(t.Context(), c, name)
 			if err != nil {
 				return err
 			}
-			for _, p := range plugins {
-				if p.Name == name && p.Status != pluginStatusDeleted && p.Version != want {
+			for _, p := range listed {
+				if p.Version != want {
 					return fmt.Errorf("%s is listed at %s (%s) next to the pinned %s", name, p.Version, p.Status, want)
 				}
 			}
@@ -418,14 +419,12 @@ func testAccCheckPluginStaysAt(t *testing.T, name, want string) resource.TestChe
 // named plugin other than one it deletes at the next restart.
 func testAccCheckPluginNotListed(t *testing.T, name string) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		plugins, err := testAccClient(t).GetInstalledPlugins(context.Background())
+		listed, err := testAccListedPlugins(t.Context(), testAccClient(t), name)
 		if err != nil {
 			return err
 		}
-		for _, p := range plugins {
-			if p.Name == name && p.Status != pluginStatusDeleted {
-				return fmt.Errorf("plugin %s is still listed at version %s with status %s", name, p.Version, p.Status)
-			}
+		if len(listed) > 0 {
+			return fmt.Errorf("plugin %s is still listed at version %s with status %s", name, listed[0].Version, listed[0].Status)
 		}
 		return nil
 	}
@@ -436,18 +435,16 @@ func testAccCheckPluginNotListed(t *testing.T, name string) resource.TestCheckFu
 // restart.
 func testAccCheckPluginListedOnlyAt(t *testing.T, name, version string) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		plugins, err := testAccClient(t).GetInstalledPlugins(context.Background())
+		listed, err := testAccListedPlugins(t.Context(), testAccClient(t), name)
 		if err != nil {
 			return err
 		}
-		var listed []string
-		for _, p := range plugins {
-			if p.Name == name && p.Status != pluginStatusDeleted {
-				listed = append(listed, p.Version+" ("+p.Status+")")
+		if len(listed) != 1 || listed[0].Version != version {
+			var found []string
+			for _, p := range listed {
+				found = append(found, p.Version+" ("+p.Status+")")
 			}
-		}
-		if len(listed) != 1 || !strings.HasPrefix(listed[0], version+" ") {
-			return fmt.Errorf("plugin %s is listed at %v, want only %s", name, listed, version)
+			return fmt.Errorf("plugin %s is listed at %v, want only %s", name, found, version)
 		}
 		return nil
 	}
@@ -456,45 +453,15 @@ func testAccCheckPluginListedOnlyAt(t *testing.T, name, version string) resource
 // testAccCheckPluginListed fails unless Jellyfin lists the named plugin.
 func testAccCheckPluginListed(t *testing.T, name string) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		plugins, err := testAccClient(t).GetInstalledPlugins(context.Background())
+		listed, err := testAccListedPlugins(t.Context(), testAccClient(t), name)
 		if err != nil {
 			return err
 		}
-		for _, p := range plugins {
-			if p.Name == name && p.Status != pluginStatusDeleted {
-				return nil
-			}
+		if len(listed) == 0 {
+			return fmt.Errorf("plugin %s is no longer listed", name)
 		}
-		return fmt.Errorf("plugin %s is no longer listed", name)
+		return nil
 	}
-}
-
-// testAccRegisterRepository registers the plugin repository for the rest of the
-// test unless it already is, and puts the previous list back afterwards.
-func testAccRegisterRepository(t *testing.T, name, repoURL string) {
-	t.Helper()
-
-	c := testAccClient(t)
-	repos, err := c.GetPluginRepositories(t.Context())
-	if err != nil {
-		t.Fatalf("failed to get plugin repositories: %v", err)
-	}
-	for _, r := range repos {
-		if r.URL == repoURL {
-			return
-		}
-	}
-
-	if err := c.SetPluginRepositories(t.Context(), append(repos, client.PluginRepository{Name: name, URL: repoURL, Enabled: true})); err != nil {
-		t.Fatalf("failed to register repository %s: %v", repoURL, err)
-	}
-	t.Cleanup(func() {
-		// t.Context() is done by now, and the provider's sign-in has signed c
-		// out, since both share a device ID.
-		if err := testAccClient(t).SetPluginRepositories(context.Background(), repos); err != nil {
-			t.Errorf("failed to restore plugin repositories: %v", err)
-		}
-	})
 }
 
 // testAccFindInstallablePlugin temporarily registers the given repository, queries
@@ -517,7 +484,6 @@ func testAccFindUninstalledPackage(t *testing.T, repoURL string, minVersions int
 	c := testAccClient(t)
 	ctx := t.Context()
 
-	// Query available packages.
 	pkgs, err := c.GetAvailablePackages(ctx)
 	if err != nil {
 		t.Skipf("failed to list packages (repository may be unavailable): %v", err)
@@ -526,7 +492,6 @@ func testAccFindUninstalledPackage(t *testing.T, repoURL string, minVersions int
 		t.Skip("no packages available in the stable repository")
 	}
 
-	// Get currently installed plugins to avoid picking one that's already installed.
 	installed, err := c.GetInstalledPlugins(ctx)
 	if err != nil {
 		t.Fatalf("failed to get installed plugins: %v", err)
@@ -536,7 +501,6 @@ func testAccFindUninstalledPackage(t *testing.T, repoURL string, minVersions int
 		installedNames[p.Name] = true
 	}
 
-	// Return the first available package that is not already installed.
 	for _, pkg := range pkgs {
 		if !installedNames[pkg.Name] && len(pkg.Versions) >= minVersions {
 			return pkg

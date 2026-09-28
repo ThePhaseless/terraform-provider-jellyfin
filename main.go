@@ -16,18 +16,15 @@ import (
 var version = "dev"
 
 func main() {
-	var debug bool
-
-	flag.BoolVar(&debug, "debug", false, "set to true to run the provider with support for debuggers like delve")
+	debug := flag.Bool("debug", false, "set to true to run the provider with support for debuggers like delve")
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
 		Address: "registry.terraform.io/ThePhaseless/jellyfin",
-		Debug:   debug,
+		Debug:   *debug,
 	}
 
-	err := providerserver.Serve(context.Background(), provider.New(version), opts)
-	if err != nil {
-		log.Fatal(err.Error())
+	if err := providerserver.Serve(context.Background(), provider.New(version), opts); err != nil {
+		log.Fatal(err)
 	}
 }

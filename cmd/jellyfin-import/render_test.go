@@ -4,13 +4,12 @@
 package main
 
 import (
-	"strings"
+	"maps"
+	"slices"
 	"testing"
-
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
-func TestLivetvAttributes(t *testing.T) {
+func TestImportedAttributesForLiveTV(t *testing.T) {
 	raw := `{
   "GuideDays": 14,
   "RecordingPath": null,
@@ -21,9 +20,9 @@ func TestLivetvAttributes(t *testing.T) {
   "RecordingPostProcessorArguments": "\"{path}\""
 }`
 
-	attrs, err := hclAttributes(raw, livetvFields, 1)
+	attrs, err := importedAttributes(t.Context(), nil, "jellyfin_livetv_configuration", "livetv", raw)
 	if err != nil {
-		t.Fatalf("hclAttributes() error: %v", err)
+		t.Fatalf("importedAttributes() error: %v", err)
 	}
 
 	want := map[string]string{
@@ -53,41 +52,11 @@ func TestLivetvAttributes(t *testing.T) {
   ]`,
 	}
 	if len(attrs) != len(want) {
-		t.Errorf("hclAttributes() keys = %v, want %d keys", sortedKeys(attrs), len(want))
+		t.Errorf("importedAttributes() keys = %v, want %d keys", slices.Sorted(maps.Keys(attrs)), len(want))
 	}
 	for k, v := range want {
 		if attrs[k] != v {
-			t.Errorf("hclAttributes()[%q] =\n%s\nwant\n%s", k, attrs[k], v)
+			t.Errorf("importedAttributes()[%q] =\n%s\nwant\n%s", k, attrs[k], v)
 		}
-	}
-}
-
-func TestGenerateSingletonConfigsRendersTypedLivetvAttributes(t *testing.T) {
-	server := setupTestServer(t)
-	defer server.Close()
-
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
-
-	_, resources, err := g.generateSingletonConfigs()
-	if err != nil {
-		t.Fatalf("generateSingletonConfigs() error: %v", err)
-	}
-
-	var livetv string
-	for _, r := range resources {
-		if strings.HasPrefix(r, `resource "jellyfin_livetv_configuration" "this"`) {
-			livetv = r
-		}
-	}
-	want := `resource "jellyfin_livetv_configuration" "this" {
-  enable_recording_subfolders = false
-}
-`
-	if livetv != want {
-		t.Errorf("livetv resource block =\n%s\nwant\n%s", livetv, want)
 	}
 }

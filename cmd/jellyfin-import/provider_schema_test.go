@@ -9,8 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"slices"
-	"sort"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -23,39 +22,10 @@ import (
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/provider"
 )
 
-// omittedAttributes lists, by resource type, the configurable attributes the
-// importer leaves out on purpose, as dotted paths through nested attributes.
-var omittedAttributes = map[string][]string{
-	"jellyfin_user":                     {"password", "policy"},
-	"jellyfin_library":                  {"library_options"},
-	"jellyfin_livetv_configuration":     {"media_locations_created", "listing_providers.password"},
-	"jellyfin_networking_configuration": {"certificate_password"},
-}
-
-func isOmitted(resourceType, attrPath string) bool {
-	for _, p := range omittedAttributes[resourceType] {
-		if p == attrPath {
-			return true
-		}
-	}
-	return false
-}
-
-func isConfigurable(a schema.Attribute) bool {
-	return a.IsOptional() || a.IsRequired()
-}
-
-func joinPath(parent, name string) string {
-	if parent == "" {
-		return name
-	}
-	return parent + "." + name
-}
-
 func providerSchemas(t *testing.T) map[string]schema.Schema {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	schemas := make(map[string]schema.Schema)
 	for _, newResource := range provider.New("test")().Resources(ctx) {
 		r := newResource()
@@ -71,36 +41,48 @@ func providerSchemas(t *testing.T) map[string]schema.Schema {
 	return schemas
 }
 
-func TestFieldTablesMatchProviderSchemas(t *testing.T) {
+// TestOmittedAttributesAreConfigurable keeps omittedAttributes from naming
+// an attribute the provider renamed or dropped, which would leave nothing out.
+func TestOmittedAttributesAreConfigurable(t *testing.T) {
 	schemas := providerSchemas(t)
-	tables := map[string][]hclField{
-		"jellyfin_scheduled_task":           scheduledTaskFields,
-		"jellyfin_system_configuration":     systemFields,
-		"jellyfin_encoding_configuration":   encodingFields,
-		"jellyfin_networking_configuration": networkingFields,
-		"jellyfin_branding_configuration":   brandingFields,
-		"jellyfin_livetv_configuration":     livetvFields,
-		"jellyfin_metadata_configuration":   metadataFields,
+	for resourceType, paths := range omittedAttributes {
+		s, ok := schemas[resourceType]
+		if !ok {
+			t.Errorf("the provider has no %s resource", resourceType)
+			continue
+		}
+		for _, p := range paths {
+			a, ok := attributeAt(s.Attributes, p)
+			switch {
+			case !ok:
+				t.Errorf("%s has no attribute %s", resourceType, p)
+			case !a.IsOptional() && !a.IsRequired():
+				t.Errorf("%s.%s is not configurable", resourceType, p)
+			}
+		}
 	}
+}
 
-	for resourceType, fields := range tables {
-		t.Run(resourceType, func(t *testing.T) {
-			s, ok := schemas[resourceType]
-			if !ok {
-				t.Fatalf("the provider has no %s resource", resourceType)
-			}
-			for _, err := range compareFieldsToSchema(resourceType, "", fields, s.Attributes) {
-				t.Error(err)
-			}
-		})
+func attributeAt(attrs map[string]schema.Attribute, attrPath string) (schema.Attribute, bool) {
+	name, rest, nested := strings.Cut(attrPath, ".")
+	a, ok := attrs[name]
+	if !ok || !nested {
+		return a, ok
 	}
+	switch n := a.(type) {
+	case schema.ListNestedAttribute:
+		return attributeAt(n.NestedObject.Attributes, rest)
+	case schema.SingleNestedAttribute:
+		return attributeAt(n.Attributes, rest)
+	}
+	return nil, false
 }
 
 // TestLibraryCollectionTypesMatchProviderValidator runs every collection type
 // Jellyfin offers through jellyfin_library's validators, so the importer skips
 // exactly the libraries the provider would reject.
 func TestLibraryCollectionTypesMatchProviderValidator(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, ok := providerSchemas(t)["jellyfin_library"]
 	if !ok {
 		t.Fatal("the provider has no jellyfin_library resource")
@@ -120,83 +102,26 @@ func TestLibraryCollectionTypesMatchProviderValidator(t *testing.T) {
 				ConfigValue: types.StringValue(collectionType),
 			}, &resp)
 		}
-		if accepted := !resp.Diagnostics.HasError(); accepted != libraryCollectionTypes[collectionType] {
-			t.Errorf("jellyfin_library accepts %q: %t, but libraryCollectionTypes says %t", collectionType, accepted, libraryCollectionTypes[collectionType])
+		_, imported := provider.LibraryCollectionType(collectionType)
+		if accepted := !resp.Diagnostics.HasError(); accepted != imported {
+			t.Errorf("jellyfin_library accepts %q: %t, but the importer imports it: %t", collectionType, accepted, imported)
 		}
 	}
-	for collectionType := range libraryCollectionTypes {
-		if !slices.Contains(jellyfinTypes, collectionType) {
-			t.Errorf("libraryCollectionTypes has %q, which Jellyfin does not offer", collectionType)
-		}
-	}
-}
-
-// compareFieldsToSchema reports fields that name no configurable attribute
-// or disagree with it on nesting, and configurable attributes that are
-// neither generated nor listed in omittedAttributes.
-func compareFieldsToSchema(resourceType, parent string, fields []hclField, attrs map[string]schema.Attribute) []error {
-	var errs []error
-	generated := make(map[string]bool, len(fields))
-	for _, f := range fields {
-		p := joinPath(parent, f.attr)
-		generated[f.attr] = true
-		a, ok := attrs[f.attr]
-		switch {
-		case !ok:
-			errs = append(errs, fmt.Errorf("%s has no attribute %s", resourceType, p))
-			continue
-		case !isConfigurable(a):
-			errs = append(errs, fmt.Errorf("%s.%s is not configurable", resourceType, p))
-			continue
-		}
-		switch a := a.(type) {
-		case schema.ListNestedAttribute:
-			if f.nested == nil || f.object {
-				errs = append(errs, fmt.Errorf("%s.%s is a list of objects", resourceType, p))
-				continue
-			}
-			errs = append(errs, compareFieldsToSchema(resourceType, p, f.nested, a.NestedObject.Attributes)...)
-		case schema.SingleNestedAttribute:
-			if !f.object {
-				errs = append(errs, fmt.Errorf("%s.%s is a single object", resourceType, p))
-				continue
-			}
-			errs = append(errs, compareFieldsToSchema(resourceType, p, f.nested, a.Attributes)...)
-		default:
-			if f.nested != nil {
-				errs = append(errs, fmt.Errorf("%s.%s is not a nested attribute", resourceType, p))
-			}
-		}
-	}
-
-	names := make([]string, 0, len(attrs))
-	for name := range attrs {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		p := joinPath(parent, name)
-		if generated[name] || !isConfigurable(attrs[name]) || isOmitted(resourceType, p) {
-			continue
-		}
-		errs = append(errs, fmt.Errorf("%s.%s is neither generated nor listed in omittedAttributes", resourceType, p))
-	}
-	return errs
 }
 
 // configMatchesImportedState checks that the configuration of every resource
-// the plan imports sets each configurable attribute the imported state holds
-// a value for, to that value. Terraform plans no change for an attribute that
-// is optional and computed and left out of the configuration, so an empty
-// plan alone would not show that the importer missed one.
+// the plan imports sets each attribute rendered accepts and the imported
+// state holds a value for, to that value. Terraform plans no change for an
+// attribute that is optional and computed and left out of the configuration,
+// so an empty plan alone would not show that the importer missed one.
 type configMatchesImportedState struct {
 	schemas map[string]schema.Schema
 }
 
 func (c configMatchesImportedState) CheckPlan(_ context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
-	config := make(map[string]map[string]interface{})
+	config := make(map[string]map[string]any)
 	for _, r := range req.Plan.Config.RootModule.Resources {
-		values := make(map[string]interface{}, len(r.Expressions))
+		values := make(map[string]any, len(r.Expressions))
 		for name, expr := range r.Expressions {
 			if expr != nil && expr.ExpressionData != nil {
 				values[name] = expr.ConstantValue
@@ -217,7 +142,7 @@ func (c configMatchesImportedState) CheckPlan(_ context.Context, req plancheck.C
 			errs = append(errs, fmt.Errorf("%s: the provider has no %s resource", rc.Address, rc.Type))
 			continue
 		}
-		state, _ := rc.Change.Before.(map[string]interface{})
+		state, _ := rc.Change.Before.(map[string]any)
 		errs = append(errs, compareConfigToState(rc.Type, rc.Address, "", s.Attributes, state, config[rc.Address])...)
 	}
 	if imported == 0 {
@@ -226,12 +151,12 @@ func (c configMatchesImportedState) CheckPlan(_ context.Context, req plancheck.C
 	resp.Error = errors.Join(errs...)
 }
 
-func compareConfigToState(resourceType, address, parent string, attrs map[string]schema.Attribute, state, config map[string]interface{}) []error {
+func compareConfigToState(resourceType, address, parent string, attrs map[string]schema.Attribute, state, config map[string]any) []error {
 	var errs []error
 	for name, a := range attrs {
 		p := joinPath(parent, name)
 		stateValue := state[name]
-		if stateValue == nil || !isConfigurable(a) || isOmitted(resourceType, p) {
+		if stateValue == nil || !rendered(resourceType, p, a, func(name string) bool { return state[name] == nil }) {
 			continue
 		}
 		configValue, ok := config[name]
@@ -242,23 +167,23 @@ func compareConfigToState(resourceType, address, parent string, attrs map[string
 
 		switch a := a.(type) {
 		case schema.SingleNestedAttribute:
-			s, sok := stateValue.(map[string]interface{})
-			c, cok := configValue.(map[string]interface{})
+			s, sok := stateValue.(map[string]any)
+			c, cok := configValue.(map[string]any)
 			if !sok || !cok {
 				errs = append(errs, fmt.Errorf("%s: %s is %s in the configuration, want an object", address, p, show(configValue)))
 				continue
 			}
 			errs = append(errs, compareConfigToState(resourceType, address, p, a.Attributes, s, c)...)
 		case schema.ListNestedAttribute:
-			s, sok := stateValue.([]interface{})
-			c, cok := configValue.([]interface{})
+			s, sok := stateValue.([]any)
+			c, cok := configValue.([]any)
 			if !sok || !cok || len(s) != len(c) {
 				errs = append(errs, fmt.Errorf("%s: %s is %s in the configuration, want %s", address, p, show(configValue), show(stateValue)))
 				continue
 			}
 			for i := range s {
-				se, _ := s[i].(map[string]interface{})
-				ce, _ := c[i].(map[string]interface{})
+				se, _ := s[i].(map[string]any)
+				ce, _ := c[i].(map[string]any)
 				errs = append(errs, compareConfigToState(resourceType, address, p, a.NestedObject.Attributes, se, ce)...)
 			}
 		default:
@@ -270,7 +195,7 @@ func compareConfigToState(resourceType, address, parent string, attrs map[string
 	return errs
 }
 
-func show(v interface{}) string {
+func show(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Sprint(v)
@@ -280,7 +205,7 @@ func show(v interface{}) string {
 
 // normalizeNumbers turns json.Number values into float64, so a number reads
 // the same whether Terraform rendered it from the configuration or the state.
-func normalizeNumbers(v interface{}) interface{} {
+func normalizeNumbers(v any) any {
 	switch v := v.(type) {
 	case json.Number:
 		f, err := v.Float64()
@@ -288,14 +213,14 @@ func normalizeNumbers(v interface{}) interface{} {
 			return v.String()
 		}
 		return f
-	case []interface{}:
-		out := make([]interface{}, len(v))
+	case []any:
+		out := make([]any, len(v))
 		for i, e := range v {
 			out[i] = normalizeNumbers(e)
 		}
 		return out
-	case map[string]interface{}:
-		out := make(map[string]interface{}, len(v))
+	case map[string]any:
+		out := make(map[string]any, len(v))
 		for k, e := range v {
 			out[k] = normalizeNumbers(e)
 		}

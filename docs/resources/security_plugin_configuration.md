@@ -91,7 +91,7 @@ variable "oidc_client_secret" {
 - `enable_password_recovery` (Boolean) Enable password recovery.
 - `enabled` (Boolean) Whether the plugin is enabled.
 - `enforcement_scope` (String) 2FA enforcement scope: Optional, Admins, or All.
-- `enrollment_deadline` (String) 2FA enrollment deadline as an ISO 8601 date-time, e.g. `2030-01-01T00:00:00Z`.
+- `enrollment_deadline` (String) 2FA enrollment deadline as an ISO 8601 date-time, e.g. `2030-01-01T00:00:00Z`, or an empty string for none, which clears a deadline set before.
 - `exempt_administrators_from_lockout` (Boolean) Exempt administrators from lockout.
 - `geo_ip_asn_db_path` (String) Path to GeoIP ASN database.
 - `geo_ip_city_db_path` (String) Path to GeoIP city database.
@@ -153,9 +153,9 @@ variable "oidc_client_secret" {
 - `webauthn_origins` (List of String) WebAuthn allowed origins.
 - `webauthn_rp_id` (String) WebAuthn relying party ID.
 - `webhook_ed25519_private_key` (String, Sensitive) Webhook Ed25519 private key.
-- `webhook_headers` (List of String) Extra webhook headers, one "Name: Value" entry each.
+- `webhook_headers` (List of String, Sensitive) Extra webhook headers, one "Name: Value" entry each. Sensitive, as receivers authenticate with a header such as Authorization.
 - `webhook_secret` (String, Sensitive) Webhook signing secret.
-- `webhook_url` (String) Webhook notification URL.
+- `webhook_url` (String, Sensitive) Webhook notification URL. Sensitive, as receivers such as Discord and Slack take a token in the URL.
 
 ### Read-Only
 

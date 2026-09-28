@@ -33,6 +33,9 @@ linters:
       - builtin$
       - examples$
   settings:
+    usetesting:
+      context-background: true
+      context-todo: true
     depguard:
       rules:
         main:

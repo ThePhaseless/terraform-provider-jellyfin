@@ -13,30 +13,21 @@ Manages the Jellyfin networking configuration.
 ## Example Usage
 
 ```terraform
+# Every attribute is optional: set only those to manage. These values are
+# Jellyfin's defaults for a server reached on its LAN and remotely.
 resource "jellyfin_networking_configuration" "example" {
-  base_url                               = ""
-  enable_https                           = false
-  require_https                          = false
-  certificate_path                       = ""
-  certificate_password                   = ""
-  internal_http_port                     = 0
-  internal_https_port                    = 0
-  public_http_port                       = 0
-  public_https_port                      = 0
-  auto_discovery                         = false
-  enable_upnp                            = false
-  enable_ipv4                            = false
-  enable_ipv6                            = false
-  enable_remote_access                   = false
-  local_network_subnets                  = []
-  local_network_addresses                = []
-  known_proxies                          = []
-  ignore_virtual_interfaces              = false
-  virtual_interface_names                = []
-  enable_published_server_uri_by_request = false
-  published_server_uri_by_subnet         = []
-  remote_ip_filter                       = []
-  is_remote_ip_filter_blacklist          = false
+  base_url             = ""
+  enable_https         = false
+  require_https        = false
+  internal_http_port   = 8096
+  internal_https_port  = 8920
+  public_http_port     = 8096
+  public_https_port    = 8920
+  auto_discovery       = true
+  enable_ipv4          = true
+  enable_ipv6          = false
+  enable_remote_access = true
+  known_proxies        = []
 }
 ```
 
@@ -46,7 +37,7 @@ resource "jellyfin_networking_configuration" "example" {
 ### Optional
 
 - `auto_discovery` (Boolean) Whether auto discovery is enabled.
-- `base_url` (String) The base URL.
+- `base_url` (String) The base URL, such as `/jellyfin`: empty, or a path that starts with `/` and does not end with one, as Jellyfin stores it.
 - `certificate_password` (String, Sensitive) Password for the TLS certificate.
 - `certificate_path` (String) Path to the TLS certificate.
 - `enable_https` (Boolean) Whether HTTPS is enabled.

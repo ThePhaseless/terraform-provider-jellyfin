@@ -6,6 +6,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -44,15 +45,24 @@ func NewClient(baseURL, apiKey string) *Client {
 	return &Client{
 		BaseURL:    strings.TrimRight(baseURL, "/"),
 		APIKey:     apiKey,
-		HTTPClient: &http.Client{Timeout: 30 * time.Second},
+		HTTPClient: &http.Client{Timeout: 30 * time.Second, Transport: newTransport()},
 	}
 }
 
-// doRequest executes an HTTP request with authentication and returns the response.
-func (c *Client) doRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
-	url := c.BaseURL + path
+const maxIdleConnsPerHost = 10
 
-	req, err := http.NewRequestWithContext(ctx, method, url, body)
+func newTransport() http.RoundTripper {
+	t, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return http.DefaultTransport
+	}
+	t = t.Clone()
+	t.MaxIdleConnsPerHost = maxIdleConnsPerHost
+	return t
+}
+
+func (c *Client) doRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, body)
 	if err != nil {
 		return nil, fmt.Errorf("creating %s request for %s: %w", method, path, err)
 	}
@@ -73,123 +83,75 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 	return resp, nil
 }
 
-// get performs an authenticated GET request and decodes the JSON response into target.
-func (c *Client) get(ctx context.Context, path string, decode func(io.Reader) error) error {
-	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
+// send fails with an HTTPError on a non-2xx answer, else hands the body to
+// read (if non-nil).
+func (c *Client) send(ctx context.Context, method, path string, body io.Reader, read func(io.Reader) error) error {
+	resp, err := c.doRequest(ctx, method, path, body)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &HTTPError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)}
+	if err := checkStatus(method, path, resp); err != nil {
+		return err
 	}
-
-	if err := decode(resp.Body); err != nil {
-		return fmt.Errorf("decoding response from GET %s: %w", path, err)
+	if read == nil {
+		return nil
 	}
-
+	if err := read(resp.Body); err != nil {
+		return fmt.Errorf("reading the response to %s %s: %w", method, path, err)
+	}
 	return nil
 }
 
-// getRaw performs an authenticated GET request and returns the raw response body as a string.
+func (c *Client) getJSON(ctx context.Context, path string, target any) error {
+	return c.send(ctx, http.MethodGet, path, nil, decodeInto(target))
+}
+
 func (c *Client) getRaw(ctx context.Context, path string) (string, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", &HTTPError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)}
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("reading response body from GET %s: %w", path, err)
-	}
-
-	return string(bodyBytes), nil
+	var raw []byte
+	err := c.send(ctx, http.MethodGet, path, nil, func(r io.Reader) error {
+		var err error
+		raw, err = io.ReadAll(r)
+		return err
+	})
+	return string(raw), err
 }
 
-// post performs an authenticated POST request with an optional JSON body.
 func (c *Client) post(ctx context.Context, path string, body []byte) error {
-	var reader io.Reader
-	if body != nil {
-		reader = bytes.NewReader(body)
-	}
-
-	resp, err := c.doRequest(ctx, http.MethodPost, path, reader)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &HTTPError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)}
-	}
-
-	return nil
+	return c.send(ctx, http.MethodPost, path, bodyReader(body), nil)
 }
 
-// postRaw performs an authenticated POST request with a raw JSON string body.
-func (c *Client) postRaw(ctx context.Context, path string, rawJSON string) error {
-	resp, err := c.doRequest(ctx, http.MethodPost, path, strings.NewReader(rawJSON))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &HTTPError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)}
-	}
-
-	return nil
+func (c *Client) postRaw(ctx context.Context, path, rawJSON string) error {
+	return c.send(ctx, http.MethodPost, path, strings.NewReader(rawJSON), nil)
 }
 
-// postAndDecode performs an authenticated POST request with a JSON body and decodes the response.
-func (c *Client) postAndDecode(ctx context.Context, path string, body []byte, decode func(io.Reader) error) error {
-	var reader io.Reader
-	if body != nil {
-		reader = bytes.NewReader(body)
-	}
-
-	resp, err := c.doRequest(ctx, http.MethodPost, path, reader)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &HTTPError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)}
-	}
-
-	if err := decode(resp.Body); err != nil {
-		return fmt.Errorf("decoding response from POST %s: %w", path, err)
-	}
-
-	return nil
+func (c *Client) postJSON(ctx context.Context, path string, body []byte, target any) error {
+	return c.send(ctx, http.MethodPost, path, bodyReader(body), decodeInto(target))
 }
 
-// delete performs an authenticated DELETE request.
 func (c *Client) delete(ctx context.Context, path string) error {
-	resp, err := c.doRequest(ctx, http.MethodDelete, path, nil)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &HTTPError{Method: http.MethodDelete, Path: path, StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)}
-	}
-
-	return nil
+	return c.send(ctx, http.MethodDelete, path, nil, nil)
 }
 
-func readResponseBody(body io.Reader) string {
-	bodyBytes, err := io.ReadAll(body)
-	if err != nil {
-		return fmt.Sprintf("failed to read response body: %v", err)
+func bodyReader(body []byte) io.Reader {
+	if body == nil {
+		return nil
 	}
-	return string(bodyBytes)
+	return bytes.NewReader(body)
+}
+
+func decodeInto(target any) func(io.Reader) error {
+	return func(r io.Reader) error { return json.NewDecoder(r).Decode(target) }
+}
+
+func checkStatus(method, path string, resp *http.Response) error {
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		body = fmt.Appendf(nil, "failed to read response body: %v", err)
+	}
+	return &HTTPError{Method: method, Path: path, StatusCode: resp.StatusCode, Body: string(body)}
 }

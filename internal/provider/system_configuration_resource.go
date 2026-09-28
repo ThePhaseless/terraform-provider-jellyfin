@@ -4,21 +4,17 @@
 package provider
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
-	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -27,11 +23,15 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 var (
 	_ resource.Resource                = &SystemConfigurationResource{}
 	_ resource.ResourceWithImportState = &SystemConfigurationResource{}
+	_ resource.ResourceWithModifyPlan  = &SystemConfigurationResource{}
+	_ wireBound                        = &SystemConfigurationResource{}
+	_ offersProviders                  = &SystemConfigurationResource{}
 )
 
 // NewSystemConfigurationResource creates a new system configuration resource.
@@ -101,49 +101,20 @@ type SystemConfigurationResourceModel struct {
 	ServerName                          types.String `tfsdk:"server_name"`
 }
 
-// MetadataOptionsModel describes a metadata options entry.
-type MetadataOptionsModel struct {
-	ItemType                 types.String `tfsdk:"item_type"`
-	DisabledMetadataSavers   types.List   `tfsdk:"disabled_metadata_savers"`
-	LocalMetadataReaderOrder types.List   `tfsdk:"local_metadata_reader_order"`
-	DisabledMetadataFetchers types.List   `tfsdk:"disabled_metadata_fetchers"`
-	MetadataFetcherOrder     types.List   `tfsdk:"metadata_fetcher_order"`
-	DisabledImageFetchers    types.List   `tfsdk:"disabled_image_fetchers"`
-	ImageFetcherOrder        types.List   `tfsdk:"image_fetcher_order"`
-}
+var systemWire = sync.OnceValues(func() (*wire.Binding, error) {
+	return wire.Bind(schemaOf(&SystemConfigurationResource{}), "ServerConfiguration",
+		wire.Identity("id"),
+		// Merged into the served options, so that the settings a create
+		// leaves unset, and so plans unknown, keep their values.
+		wire.Document("TrickplayOptions"),
+		wire.Complement("metadata_options.metadata_fetchers", "metadata_fetcher_order", "disabled_metadata_fetchers", "MetadataFetchers", "item_type"),
+		wire.Complement("metadata_options.image_fetchers", "image_fetcher_order", "disabled_image_fetchers", "ImageFetchers", "item_type"))
+})
 
-// NameValuePairModel describes a name/value pair entry.
-type NameValuePairModel struct {
-	Name  types.String `tfsdk:"name"`
-	Value types.String `tfsdk:"value"`
-}
+func (r *SystemConfigurationResource) Wire() (*wire.Binding, error) { return systemWire() }
 
-// PathSubstitutionModel describes a path substitution entry.
-type PathSubstitutionModel struct {
-	From types.String `tfsdk:"from"`
-	To   types.String `tfsdk:"to"`
-}
-
-// CastReceiverApplicationModel describes a cast receiver application entry.
-type CastReceiverApplicationModel struct {
-	ID   types.String `tfsdk:"id"`
-	Name types.String `tfsdk:"name"`
-}
-
-// TrickplayOptionsModel describes the trickplay options object.
-type TrickplayOptionsModel struct {
-	EnableHwAcceleration         types.Bool   `tfsdk:"enable_hw_acceleration"`
-	EnableHwEncoding             types.Bool   `tfsdk:"enable_hw_encoding"`
-	EnableKeyFrameOnlyExtraction types.Bool   `tfsdk:"enable_key_frame_only_extraction"`
-	ScanBehavior                 types.String `tfsdk:"scan_behavior"`
-	ProcessPriority              types.String `tfsdk:"process_priority"`
-	Interval                     types.Int64  `tfsdk:"interval"`
-	WidthResolutions             types.List   `tfsdk:"width_resolutions"`
-	TileWidth                    types.Int64  `tfsdk:"tile_width"`
-	TileHeight                   types.Int64  `tfsdk:"tile_height"`
-	Qscale                       types.Int64  `tfsdk:"qscale"`
-	JpegQuality                  types.Int64  `tfsdk:"jpeg_quality"`
-	ProcessThreads               types.Int64  `tfsdk:"process_threads"`
+func (r *SystemConfigurationResource) offered(c *client.Client) wire.AvailableFunc {
+	return newOfferedProviders(c).byItemType
 }
 
 func (r *SystemConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -151,74 +122,8 @@ func (r *SystemConfigurationResource) Metadata(_ context.Context, req resource.M
 }
 
 func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	optionalString := func(desc string) schema.StringAttribute {
-		return schema.StringAttribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.String{
-				stringplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-	optionalEnum := func(desc string, values ...string) schema.StringAttribute {
-		a := optionalString(desc + " One of `" + strings.Join(values, "`, `") + "`.")
-		a.Validators = []validator.String{stringvalidator.OneOf(values...)}
-		return a
-	}
-	optionalBool := func(desc string) schema.BoolAttribute {
-		return schema.BoolAttribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.Bool{
-				boolplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-	optionalInt := func(desc string) schema.Int64Attribute {
-		return schema.Int64Attribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.Int64{
-				int64planmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-	optionalStringList := func(desc string) schema.ListAttribute {
-		return schema.ListAttribute{
-			ElementType:         types.StringType,
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.List{
-				listplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-	optionalIntList := func(desc string) schema.ListAttribute {
-		return schema.ListAttribute{
-			ElementType:         types.Int64Type,
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.List{
-				listplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
 	// UseStateForUnknown also copies a null prior value, and a planned null
-	// fails the apply when the server returns a value. That happens for an
-	// entry a list gains in the plan, whose prior values are all null while
-	// the server fills in what the entry leaves out, and for the three
-	// attributes whose keys 0.3.7 and earlier misspelt, which state from
-	// those versions holds as null.
+	// fails the apply when the server returns a value.
 	nonNullStateString := func(a schema.StringAttribute) schema.StringAttribute {
 		a.PlanModifiers = []planmodifier.String{stringplanmodifier.UseNonNullStateForUnknown()}
 		return a
@@ -236,10 +141,12 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 		"item_type":                   nonNullStateString(optionalString("Item type.")),
 		"disabled_metadata_savers":    nonNullStateList(optionalStringList("Disabled metadata savers.")),
 		"local_metadata_reader_order": nonNullStateList(optionalStringList("Local metadata reader order.")),
-		"disabled_metadata_fetchers":  nonNullStateList(optionalStringList("Disabled metadata fetchers.")),
-		"metadata_fetcher_order":      nonNullStateList(optionalStringList("Metadata fetcher order.")),
-		"disabled_image_fetchers":     nonNullStateList(optionalStringList("Disabled image fetchers.")),
-		"image_fetcher_order":         nonNullStateList(optionalStringList("Image fetcher order.")),
+		"metadata_fetchers":           combinedStringList(itemTypeFetchersDescription("metadata", "disabled_metadata_fetchers", "metadata_fetcher_order"), "disabled_metadata_fetchers", "metadata_fetcher_order"),
+		"disabled_metadata_fetchers":  replacedBy(nonNullStateList(optionalStringList("Disabled metadata fetchers.")), itemTypeFetchersDeprecation("metadata"), "metadata_fetchers"),
+		"metadata_fetcher_order":      replacedBy(nonNullStateList(optionalStringList("Metadata fetcher order.")), itemTypeFetchersDeprecation("metadata"), "metadata_fetchers"),
+		"image_fetchers":              combinedStringList(itemTypeFetchersDescription("image", "disabled_image_fetchers", "image_fetcher_order"), "disabled_image_fetchers", "image_fetcher_order"),
+		"disabled_image_fetchers":     replacedBy(nonNullStateList(optionalStringList("Disabled image fetchers.")), itemTypeFetchersDeprecation("image"), "image_fetchers"),
+		"image_fetcher_order":         replacedBy(nonNullStateList(optionalStringList("Image fetcher order.")), itemTypeFetchersDeprecation("image"), "image_fetchers"),
 	}
 
 	nameValuePairAttributes := map[string]schema.Attribute{
@@ -310,8 +217,8 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: metadataOptionsAttributes,
 				},
-				Description:         "Metadata options.",
-				MarkdownDescription: "Metadata options.",
+				Description:         "Metadata options, one entry per item type. The list replaces the server's list, so an item type it leaves out loses its entry, and Jellyfin then uses its defaults for that type, which enable every fetcher.",
+				MarkdownDescription: "Metadata options, one entry per item type. The list replaces the server's list, so an item type it leaves out loses its entry, and Jellyfin then uses its defaults for that type, which enable every fetcher.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.List{
@@ -366,10 +273,8 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			"cast_receiver_applications": schema.ListNestedAttribute{
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: castReceiverApplicationAttributes,
-					// Required on id and name would make Terraform propose null for
-					// them whenever the list is left out of the configuration, so
-					// every plan would differ from state; the element validator
-					// enforces them only for entries that are configured.
+					// Not Required on id and name: Terraform would propose null for them when the
+					// list is left out, so plans would never be empty.
 					Validators: []validator.Object{
 						objectvalidator.AlsoRequires(path.MatchRelative().AtName("id"), path.MatchRelative().AtName("name")),
 					},
@@ -397,51 +302,28 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 	}
 }
 
+func itemTypeFetchersDescription(kind, disabledAttr, orderAttr string) string {
+	return fmt.Sprintf("Enabled %[1]s fetchers for `item_type`, in priority order: Jellyfin asks the first one first and disables every other %[1]s fetcher it offers for the item type. Jellyfin applies them to items whose library has no `type_options` entry for their type. Each name must match one the server offers exactly, so it works only for an item type whose fetchers Jellyfin lists, such as Movie or Series; for any other, such as Person, it reads as null and setting it is an error, and `%[2]s` and `%[3]s` still apply. Jellyfin enables any %[1]s fetcher installed later, which then shows up as a change to this list. Conflicts with `%[2]s` and `%[3]s`, which it replaces.", kind, disabledAttr, orderAttr)
+}
+
+func itemTypeFetchersDeprecation(kind string) string {
+	return fmt.Sprintf("Deprecated: list the enabled %[1]s fetchers in priority order in `%[1]s_fetchers` instead, which disables the rest. It will be removed in a future release.", kind)
+}
+
 func (r *SystemConfigurationResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
-	}
-
-	c, ok := req.ProviderData.(*client.Client)
-	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Resource Configure Type",
-			fmt.Sprintf("Expected *client.Client, got: %T.", req.ProviderData),
-		)
-		return
-	}
-
-	r.client = c
+	r.client = configuredClient(req.ProviderData, "Resource", &resp.Diagnostics)
 }
 
 func (r *SystemConfigurationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data SystemConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *SystemConfigurationResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var data SystemConfigurationResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.read(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().read(wire.WithAvailable(ctx, r.offered(r.client)), req.State, &resp.State, &resp.Diagnostics)
 }
 
 func (r *SystemConfigurationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data SystemConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *SystemConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
@@ -449,643 +331,112 @@ func (r *SystemConfigurationResource) Delete(_ context.Context, _ resource.Delet
 }
 
 func (r *SystemConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Singleton resource — the import ID is not used. Read will populate all fields.
-	// Set only the id: the framework types every other attribute from the
-	// schema, and the Read that follows an import fills them. Writing a
-	// zero-valued model here left list attributes without an element type.
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("system"))...)
+	r.singleton().setID(ctx, &resp.State, &resp.Diagnostics)
 }
 
-func (r *SystemConfigurationResource) apply(ctx context.Context, data *SystemConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
-	current, err := r.client.GetSystemConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read current system configuration", err.Error())
+// ModifyPlan gates each configured field on the Jellyfin version it needs, so
+// a field a later pin adds is checked without a change here. It also plans
+// each metadata_options attribute left unset from the prior entry with the
+// same item type. UseNonNullStateForUnknown takes it from the prior entry at
+// the same index instead, so inserting or reordering entries would plan, and
+// then write, another item type's lists.
+func (r *SystemConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	checkServerHasFields(ctx, r.client, systemWire, req.Config, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() || req.State.Raw.IsNull() {
 		return
 	}
 
-	base, err := parseJSONObject(current.RawJSON)
-	if err != nil {
-		diags.AddError("Failed to parse current system configuration", err.Error())
+	metadataOptionsPath := path.Root("metadata_options")
+	var config, plan, state types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, metadataOptionsPath, &config)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, metadataOptionsPath, &plan)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, metadataOptionsPath, &state)...)
+	if resp.Diagnostics.HasError() || config.IsNull() || config.IsUnknown() || plan.IsNull() || plan.IsUnknown() {
 		return
 	}
 
-	if d := overlaySystemConfiguration(ctx, base, data); d.HasError() {
-		diags.Append(d...)
+	planned, diags := planMetadataOptionsByItemType(ctx, config, plan, state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
-
-	payload, err := json.Marshal(base)
-	if err != nil {
-		diags.AddError("Failed to serialize system configuration", err.Error())
-		return
-	}
-
-	if err := r.client.UpdateSystemConfiguration(ctx, &client.SystemConfiguration{RawJSON: string(payload)}); err != nil {
-		diags.AddError("Failed to update system configuration", err.Error())
-		return
-	}
-
-	updated, err := r.client.GetSystemConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read system configuration after update", err.Error())
-		return
-	}
-
-	flattenSystemConfiguration(ctx, updated.RawJSON, data, diags)
-	data.ID = types.StringValue("system")
-	diags.Append(state.Set(ctx, data)...)
+	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, metadataOptionsPath, planned)...)
 }
 
-func (r *SystemConfigurationResource) read(ctx context.Context, data *SystemConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
-	current, err := r.client.GetSystemConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read system configuration", err.Error())
-		return
-	}
-
-	flattenSystemConfiguration(ctx, current.RawJSON, data, diags)
-	data.ID = types.StringValue("system")
-	diags.Append(state.Set(ctx, data)...)
+type metadataOptionsModel struct {
+	ItemType                 types.String `tfsdk:"item_type"`
+	DisabledMetadataSavers   types.List   `tfsdk:"disabled_metadata_savers"`
+	LocalMetadataReaderOrder types.List   `tfsdk:"local_metadata_reader_order"`
+	MetadataFetchers         types.List   `tfsdk:"metadata_fetchers"`
+	DisabledMetadataFetchers types.List   `tfsdk:"disabled_metadata_fetchers"`
+	MetadataFetcherOrder     types.List   `tfsdk:"metadata_fetcher_order"`
+	ImageFetchers            types.List   `tfsdk:"image_fetchers"`
+	DisabledImageFetchers    types.List   `tfsdk:"disabled_image_fetchers"`
+	ImageFetcherOrder        types.List   `tfsdk:"image_fetcher_order"`
 }
 
-func overlaySystemConfiguration(ctx context.Context, m map[string]json.RawMessage, data *SystemConfigurationResourceModel) diag.Diagnostics {
-	var diags diag.Diagnostics
-
-	putJSONBool(m, "EnableMetrics", data.EnableMetrics)
-	putJSONBool(m, "EnableNormalizedItemByNameIds", data.EnableNormalizedItemByNameIDs)
-	putJSONBool(m, "IsPortAuthorized", data.IsPortAuthorized)
-	putJSONBool(m, "QuickConnectAvailable", data.QuickConnectAvailable)
-	putJSONBool(m, "EnableCaseSensitiveItemIds", data.EnableCaseSensitiveItemIDs)
-	putJSONBool(m, "DisableLiveTvChannelUserDataName", data.DisableLiveTvChannelUserDataName)
-	putJSONString(m, "MetadataPath", data.MetadataPath)
-	putJSONString(m, "PreferredMetadataLanguage", data.PreferredMetadataLanguage)
-	putJSONString(m, "MetadataCountryCode", data.MetadataCountryCode)
-	putJSONStringList(ctx, m, "SortReplaceCharacters", data.SortReplaceCharacters)
-	putJSONStringList(ctx, m, "SortRemoveCharacters", data.SortRemoveCharacters)
-	putJSONStringList(ctx, m, "SortRemoveWords", data.SortRemoveWords)
-	putJSONInt64(m, "MinResumePct", data.MinResumePct)
-	putJSONInt64(m, "MaxResumePct", data.MaxResumePct)
-	putJSONInt64(m, "MinResumeDurationSeconds", data.MinResumeDurationSeconds)
-	putJSONInt64(m, "MinAudiobookResume", data.MinAudiobookResume)
-	putJSONInt64(m, "MaxAudiobookResume", data.MaxAudiobookResume)
-	putJSONInt64(m, "InactiveSessionThreshold", data.InactiveSessionThreshold)
-	putJSONInt64(m, "LibraryMonitorDelay", data.LibraryMonitorDelay)
-	putJSONInt64(m, "LibraryUpdateDuration", data.LibraryUpdateDuration)
-	putJSONInt64(m, "CacheSize", data.CacheSize)
-	putJSONString(m, "ImageSavingConvention", data.ImageSavingConvention)
-	if d := overlayMetadataOptions(ctx, m, data.MetadataOptions); d.HasError() {
-		return append(diags, d...)
-	}
-	putJSONBool(m, "SkipDeserializationForBasicTypes", data.SkipDeserializationForBasicTypes)
-	putJSONString(m, "UICulture", data.UICulture)
-	putJSONBool(m, "SaveMetadataHidden", data.SaveMetadataHidden)
-	if d := overlayContentTypes(ctx, m, data.ContentTypes); d.HasError() {
-		return append(diags, d...)
-	}
-	putJSONInt64(m, "RemoteClientBitrateLimit", data.RemoteClientBitrateLimit)
-	putJSONBool(m, "EnableFolderView", data.EnableFolderView)
-	putJSONBool(m, "EnableGroupingMoviesIntoCollections", data.EnableGroupingMoviesIntoCollections)
-	putJSONBool(m, "EnableGroupingShowsIntoCollections", data.EnableGroupingShowsIntoCollections)
-	putJSONBool(m, "DisplaySpecialsWithinSeasons", data.DisplaySpecialsWithinSeasons)
-	putJSONStringList(ctx, m, "CodecsUsed", data.CodecsUsed)
-	putJSONBool(m, "EnableExternalContentInSuggestions", data.EnableExternalContentInSuggestions)
-	putJSONInt64(m, "ImageExtractionTimeoutMs", data.ImageExtractionTimeoutMs)
-	if d := overlayPathSubstitutions(ctx, m, data.PathSubstitutions); d.HasError() {
-		return append(diags, d...)
-	}
-	putJSONBool(m, "EnableSlowResponseWarning", data.EnableSlowResponseWarning)
-	putJSONInt64(m, "SlowResponseThresholdMs", data.SlowResponseThresholdMs)
-	putJSONStringList(ctx, m, "CorsHosts", data.CorsHosts)
-	putJSONInt64(m, "ActivityLogRetentionDays", data.ActivityLogRetentionDays)
-	putJSONInt64(m, "LibraryScanFanoutConcurrency", data.LibraryScanFanoutConcurrency)
-	putJSONInt64(m, "LibraryMetadataRefreshConcurrency", data.LibraryMetadataRefreshConcurrency)
-	putJSONBool(m, "AllowClientLogUpload", data.AllowClientLogUpload)
-	putJSONInt64(m, "DummyChapterDuration", data.DummyChapterDuration)
-	putJSONString(m, "ChapterImageResolution", data.ChapterImageResolution)
-	putJSONInt64(m, "ParallelImageEncodingLimit", data.ParallelImageEncodingLimit)
-	if d := overlayCastReceiverApplications(ctx, m, data.CastReceiverApplications); d.HasError() {
-		return append(diags, d...)
-	}
-	if d := overlayTrickplayOptions(ctx, m, data.TrickplayOptions); d.HasError() {
-		return append(diags, d...)
-	}
-	putJSONBool(m, "EnableLegacyAuthorization", data.EnableLegacyAuthorization)
-	putJSONInt64(m, "LogFileRetentionDays", data.LogFileRetentionDays)
-	putJSONString(m, "CachePath", data.CachePath)
-	putJSONString(m, "ServerName", data.ServerName)
-
-	return diags
-}
-
-func overlayMetadataOptions(ctx context.Context, m map[string]json.RawMessage, v types.List) diag.Diagnostics {
-	var diags diag.Diagnostics
-	if v.IsNull() || v.IsUnknown() {
-		return diags
-	}
-	var options []MetadataOptionsModel
-	if d := v.ElementsAs(ctx, &options, false); d.HasError() {
-		return append(diags, d...)
-	}
-	entries := make([]map[string]json.RawMessage, len(options))
-	for i, o := range options {
-		entry := map[string]json.RawMessage{}
-		putJSONString(entry, "ItemType", o.ItemType)
-		putJSONStringList(ctx, entry, "DisabledMetadataSavers", o.DisabledMetadataSavers)
-		putJSONStringList(ctx, entry, "LocalMetadataReaderOrder", o.LocalMetadataReaderOrder)
-		putJSONStringList(ctx, entry, "DisabledMetadataFetchers", o.DisabledMetadataFetchers)
-		putJSONStringList(ctx, entry, "MetadataFetcherOrder", o.MetadataFetcherOrder)
-		putJSONStringList(ctx, entry, "DisabledImageFetchers", o.DisabledImageFetchers)
-		putJSONStringList(ctx, entry, "ImageFetcherOrder", o.ImageFetcherOrder)
-		entries[i] = entry
-	}
-	b, err := json.Marshal(entries)
-	if err != nil {
-		return append(diags, diag.NewErrorDiagnostic("Failed to marshal metadata options", err.Error()))
-	}
-	m["MetadataOptions"] = b
-	return diags
-}
-
-func overlayNameValuePairs(ctx context.Context, m map[string]json.RawMessage, key string, v types.List) diag.Diagnostics {
-	var diags diag.Diagnostics
-	if v.IsNull() || v.IsUnknown() {
-		return diags
-	}
-	var pairs []NameValuePairModel
-	if d := v.ElementsAs(ctx, &pairs, false); d.HasError() {
-		return append(diags, d...)
-	}
-	entries := make([]map[string]json.RawMessage, len(pairs))
-	for i, p := range pairs {
-		entry := map[string]json.RawMessage{}
-		putJSONString(entry, "Name", p.Name)
-		putJSONString(entry, "Value", p.Value)
-		entries[i] = entry
-	}
-	b, err := json.Marshal(entries)
-	if err != nil {
-		return append(diags, diag.NewErrorDiagnostic("Failed to marshal name/value pairs", err.Error()))
-	}
-	m[key] = b
-	return diags
-}
-
-func overlayContentTypes(ctx context.Context, m map[string]json.RawMessage, v types.List) diag.Diagnostics {
-	return overlayNameValuePairs(ctx, m, "ContentTypes", v)
-}
-
-func overlayPathSubstitutions(ctx context.Context, m map[string]json.RawMessage, v types.List) diag.Diagnostics {
-	var diags diag.Diagnostics
-	if v.IsNull() || v.IsUnknown() {
-		return diags
-	}
-	var substitutions []PathSubstitutionModel
-	if d := v.ElementsAs(ctx, &substitutions, false); d.HasError() {
-		return append(diags, d...)
-	}
-	entries := make([]map[string]json.RawMessage, len(substitutions))
-	for i, s := range substitutions {
-		entry := map[string]json.RawMessage{}
-		putJSONString(entry, "From", s.From)
-		putJSONString(entry, "To", s.To)
-		entries[i] = entry
-	}
-	b, err := json.Marshal(entries)
-	if err != nil {
-		return append(diags, diag.NewErrorDiagnostic("Failed to marshal path substitutions", err.Error()))
-	}
-	m["PathSubstitutions"] = b
-	return diags
-}
-
-func overlayCastReceiverApplications(ctx context.Context, m map[string]json.RawMessage, v types.List) diag.Diagnostics {
-	var diags diag.Diagnostics
-	if v.IsNull() || v.IsUnknown() {
-		return diags
-	}
-	var apps []CastReceiverApplicationModel
-	if d := v.ElementsAs(ctx, &apps, false); d.HasError() {
-		return append(diags, d...)
-	}
-	entries := make([]map[string]json.RawMessage, len(apps))
-	for i, a := range apps {
-		entry := map[string]json.RawMessage{}
-		putJSONString(entry, "Id", a.ID)
-		putJSONString(entry, "Name", a.Name)
-		entries[i] = entry
-	}
-	b, err := json.Marshal(entries)
-	if err != nil {
-		return append(diags, diag.NewErrorDiagnostic("Failed to marshal cast receiver applications", err.Error()))
-	}
-	m["CastReceiverApplications"] = b
-	return diags
-}
-
-func overlayTrickplayOptions(ctx context.Context, m map[string]json.RawMessage, v types.Object) diag.Diagnostics {
-	var diags diag.Diagnostics
-	if v.IsNull() || v.IsUnknown() {
-		return diags
-	}
-	var opts TrickplayOptionsModel
-	if d := tfsdk.ValueAs(ctx, v, &opts); d.HasError() {
-		return append(diags, d...)
-	}
-	entry := map[string]json.RawMessage{}
-	putJSONBool(entry, "EnableHwAcceleration", opts.EnableHwAcceleration)
-	putJSONBool(entry, "EnableHwEncoding", opts.EnableHwEncoding)
-	putJSONBool(entry, "EnableKeyFrameOnlyExtraction", opts.EnableKeyFrameOnlyExtraction)
-	putJSONString(entry, "ScanBehavior", opts.ScanBehavior)
-	putJSONString(entry, "ProcessPriority", opts.ProcessPriority)
-	putJSONInt64(entry, "Interval", opts.Interval)
-	putJSONInt64List(ctx, entry, "WidthResolutions", opts.WidthResolutions)
-	putJSONInt64(entry, "TileWidth", opts.TileWidth)
-	putJSONInt64(entry, "TileHeight", opts.TileHeight)
-	putJSONInt64(entry, "Qscale", opts.Qscale)
-	putJSONInt64(entry, "JpegQuality", opts.JpegQuality)
-	putJSONInt64(entry, "ProcessThreads", opts.ProcessThreads)
-	b, err := json.Marshal(entry)
-	if err != nil {
-		return append(diags, diag.NewErrorDiagnostic("Failed to marshal trickplay options", err.Error()))
-	}
-	m["TrickplayOptions"] = b
-	return diags
-}
-
-func flattenSystemConfiguration(ctx context.Context, raw string, data *SystemConfigurationResourceModel, diags *diag.Diagnostics) {
-	m, err := parseJSONObject(raw)
-	if err != nil {
-		diags.AddError("Failed to parse system configuration", err.Error())
-		return
-	}
-
-	data.EnableMetrics = getJSONBool(m, "EnableMetrics")
-	data.EnableNormalizedItemByNameIDs = getJSONBool(m, "EnableNormalizedItemByNameIds")
-	data.IsPortAuthorized = getJSONBool(m, "IsPortAuthorized")
-	data.QuickConnectAvailable = getJSONBool(m, "QuickConnectAvailable")
-	data.EnableCaseSensitiveItemIDs = getJSONBool(m, "EnableCaseSensitiveItemIds")
-	data.DisableLiveTvChannelUserDataName = getJSONBool(m, "DisableLiveTvChannelUserDataName")
-	data.MetadataPath = getJSONString(m, "MetadataPath")
-	data.PreferredMetadataLanguage = getJSONString(m, "PreferredMetadataLanguage")
-	data.MetadataCountryCode = getJSONString(m, "MetadataCountryCode")
-	data.SortReplaceCharacters, _ = getJSONStringList(ctx, m, "SortReplaceCharacters")
-	data.SortRemoveCharacters, _ = getJSONStringList(ctx, m, "SortRemoveCharacters")
-	data.SortRemoveWords, _ = getJSONStringList(ctx, m, "SortRemoveWords")
-	data.MinResumePct = getJSONInt64(m, "MinResumePct")
-	data.MaxResumePct = getJSONInt64(m, "MaxResumePct")
-	data.MinResumeDurationSeconds = getJSONInt64(m, "MinResumeDurationSeconds")
-	data.MinAudiobookResume = getJSONInt64(m, "MinAudiobookResume")
-	data.MaxAudiobookResume = getJSONInt64(m, "MaxAudiobookResume")
-	data.InactiveSessionThreshold = getJSONInt64(m, "InactiveSessionThreshold")
-	data.LibraryMonitorDelay = getJSONInt64(m, "LibraryMonitorDelay")
-	data.LibraryUpdateDuration = getJSONInt64(m, "LibraryUpdateDuration")
-	data.CacheSize = getJSONInt64(m, "CacheSize")
-	data.ImageSavingConvention = getJSONString(m, "ImageSavingConvention")
-	data.MetadataOptions = flattenMetadataOptions(ctx, m, diags)
-	data.SkipDeserializationForBasicTypes = getJSONBool(m, "SkipDeserializationForBasicTypes")
-	data.UICulture = getJSONString(m, "UICulture")
-	data.SaveMetadataHidden = getJSONBool(m, "SaveMetadataHidden")
-	data.ContentTypes = flattenNameValuePairs(ctx, m, "ContentTypes", diags)
-	data.RemoteClientBitrateLimit = getJSONInt64(m, "RemoteClientBitrateLimit")
-	data.EnableFolderView = getJSONBool(m, "EnableFolderView")
-	data.EnableGroupingMoviesIntoCollections = getJSONBool(m, "EnableGroupingMoviesIntoCollections")
-	data.EnableGroupingShowsIntoCollections = getJSONBool(m, "EnableGroupingShowsIntoCollections")
-	data.DisplaySpecialsWithinSeasons = getJSONBool(m, "DisplaySpecialsWithinSeasons")
-	data.CodecsUsed, _ = getJSONStringList(ctx, m, "CodecsUsed")
-	data.EnableExternalContentInSuggestions = getJSONBool(m, "EnableExternalContentInSuggestions")
-	data.ImageExtractionTimeoutMs = getJSONInt64(m, "ImageExtractionTimeoutMs")
-	data.PathSubstitutions = flattenPathSubstitutions(ctx, m, diags)
-	data.EnableSlowResponseWarning = getJSONBool(m, "EnableSlowResponseWarning")
-	data.SlowResponseThresholdMs = getJSONInt64(m, "SlowResponseThresholdMs")
-	data.CorsHosts, _ = getJSONStringList(ctx, m, "CorsHosts")
-	data.ActivityLogRetentionDays = getJSONInt64(m, "ActivityLogRetentionDays")
-	data.LibraryScanFanoutConcurrency = getJSONInt64(m, "LibraryScanFanoutConcurrency")
-	data.LibraryMetadataRefreshConcurrency = getJSONInt64(m, "LibraryMetadataRefreshConcurrency")
-	data.AllowClientLogUpload = getJSONBool(m, "AllowClientLogUpload")
-	data.DummyChapterDuration = getJSONInt64(m, "DummyChapterDuration")
-	data.ChapterImageResolution = getJSONString(m, "ChapterImageResolution")
-	data.ParallelImageEncodingLimit = getJSONInt64(m, "ParallelImageEncodingLimit")
-	data.CastReceiverApplications = flattenCastReceiverApplications(ctx, m, diags)
-	data.TrickplayOptions = flattenTrickplayOptions(ctx, m, diags)
-	data.EnableLegacyAuthorization = getJSONBool(m, "EnableLegacyAuthorization")
-	data.LogFileRetentionDays = getJSONInt64(m, "LogFileRetentionDays")
-	data.CachePath = getJSONString(m, "CachePath")
-	data.ServerName = getJSONString(m, "ServerName")
-}
-
-func flattenMetadataOptions(ctx context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
-	raw, ok := m["MetadataOptions"]
-	if !ok {
-		return types.ListNull(metadataOptionsObjectType())
-	}
-	if isJSONNull(raw) {
-		return types.ListNull(metadataOptionsObjectType())
-	}
-	var entries []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		diags.AddError("Failed to parse metadata options", err.Error())
-		return types.ListNull(metadataOptionsObjectType())
-	}
-	objType := metadataOptionsObjectType()
-	objects := make([]attr.Value, len(entries))
-	for i, entry := range entries {
-		attrs := map[string]attr.Value{
-			"item_type":                   getJSONString(entry, "ItemType"),
-			"disabled_metadata_savers":    nullStringList(),
-			"local_metadata_reader_order": nullStringList(),
-			"disabled_metadata_fetchers":  nullStringList(),
-			"metadata_fetcher_order":      nullStringList(),
-			"disabled_image_fetchers":     nullStringList(),
-			"image_fetcher_order":         nullStringList(),
+// planMetadataOptionsByItemType plans each entry's attributes as its schema's
+// plan modifiers do, but against the prior entry with its item type.
+func planMetadataOptionsByItemType(ctx context.Context, config, plan, state types.List) (types.List, diag.Diagnostics) {
+	return replanEntries(ctx, config, plan, state, func(i int, e metadataOptionsModel, p *metadataOptionsModel, s []metadataOptionsModel) diag.Diagnostics {
+		// Without an item type, an entry takes the one of the prior entry at
+		// its index, so its plan from that entry stands.
+		if e.ItemType.IsNull() {
+			return nil
 		}
-		if v, d := getJSONStringList(ctx, entry, "DisabledMetadataSavers"); !d.HasError() {
-			attrs["disabled_metadata_savers"] = v
-		}
-		if v, d := getJSONStringList(ctx, entry, "LocalMetadataReaderOrder"); !d.HasError() {
-			attrs["local_metadata_reader_order"] = v
-		}
-		if v, d := getJSONStringList(ctx, entry, "DisabledMetadataFetchers"); !d.HasError() {
-			attrs["disabled_metadata_fetchers"] = v
-		}
-		if v, d := getJSONStringList(ctx, entry, "MetadataFetcherOrder"); !d.HasError() {
-			attrs["metadata_fetcher_order"] = v
-		}
-		if v, d := getJSONStringList(ctx, entry, "DisabledImageFetchers"); !d.HasError() {
-			attrs["disabled_image_fetchers"] = v
-		}
-		if v, d := getJSONStringList(ctx, entry, "ImageFetcherOrder"); !d.HasError() {
-			attrs["image_fetcher_order"] = v
-		}
-		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
-		if d.HasError() {
-			diags.Append(d...)
-			return types.ListNull(objType)
-		}
-		objects[i] = obj
-	}
-	list, d := types.ListValue(objType, objects)
-	if d.HasError() {
-		diags.Append(d...)
-		return types.ListNull(objType)
-	}
-	return list
-}
-
-func metadataOptionsObjectType() types.ObjectType {
-	return types.ObjectType{AttrTypes: map[string]attr.Type{
-		"item_type":                   types.StringType,
-		"disabled_metadata_savers":    types.ListType{ElemType: types.StringType},
-		"local_metadata_reader_order": types.ListType{ElemType: types.StringType},
-		"disabled_metadata_fetchers":  types.ListType{ElemType: types.StringType},
-		"metadata_fetcher_order":      types.ListType{ElemType: types.StringType},
-		"disabled_image_fetchers":     types.ListType{ElemType: types.StringType},
-		"image_fetcher_order":         types.ListType{ElemType: types.StringType},
-	}}
-}
-
-func flattenNameValuePairs(_ context.Context, m map[string]json.RawMessage, key string, diags *diag.Diagnostics) types.List {
-	raw, ok := m[key]
-	if !ok {
-		return types.ListNull(nameValuePairObjectType())
-	}
-	if isJSONNull(raw) {
-		return types.ListNull(nameValuePairObjectType())
-	}
-	var entries []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		diags.AddError("Failed to parse name/value pairs", err.Error())
-		return types.ListNull(nameValuePairObjectType())
-	}
-	objType := nameValuePairObjectType()
-	objects := make([]attr.Value, len(entries))
-	for i, entry := range entries {
-		attrs := map[string]attr.Value{
-			"name":  getJSONString(entry, "Name"),
-			"value": getJSONString(entry, "Value"),
-		}
-		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
-		if d.HasError() {
-			diags.Append(d...)
-			return types.ListNull(objType)
-		}
-		objects[i] = obj
-	}
-	list, d := types.ListValue(objType, objects)
-	if d.HasError() {
-		diags.Append(d...)
-		return types.ListNull(objType)
-	}
-	return list
-}
-
-func nameValuePairObjectType() types.ObjectType {
-	return types.ObjectType{AttrTypes: map[string]attr.Type{
-		"name":  types.StringType,
-		"value": types.StringType,
-	}}
-}
-
-func flattenPathSubstitutions(_ context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
-	raw, ok := m["PathSubstitutions"]
-	if !ok {
-		return types.ListNull(pathSubstitutionObjectType())
-	}
-	if isJSONNull(raw) {
-		return types.ListNull(pathSubstitutionObjectType())
-	}
-	var entries []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		diags.AddError("Failed to parse path substitutions", err.Error())
-		return types.ListNull(pathSubstitutionObjectType())
-	}
-	objType := pathSubstitutionObjectType()
-	objects := make([]attr.Value, len(entries))
-	for i, entry := range entries {
-		attrs := map[string]attr.Value{
-			"from": getJSONString(entry, "From"),
-			"to":   getJSONString(entry, "To"),
-		}
-		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
-		if d.HasError() {
-			diags.Append(d...)
-			return types.ListNull(objType)
-		}
-		objects[i] = obj
-	}
-	list, d := types.ListValue(objType, objects)
-	if d.HasError() {
-		diags.Append(d...)
-		return types.ListNull(objType)
-	}
-	return list
-}
-
-func pathSubstitutionObjectType() types.ObjectType {
-	return types.ObjectType{AttrTypes: map[string]attr.Type{
-		"from": types.StringType,
-		"to":   types.StringType,
-	}}
-}
-
-func flattenCastReceiverApplications(_ context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.List {
-	raw, ok := m["CastReceiverApplications"]
-	if !ok {
-		return types.ListNull(castReceiverApplicationObjectType())
-	}
-	if isJSONNull(raw) {
-		return types.ListNull(castReceiverApplicationObjectType())
-	}
-	var entries []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		diags.AddError("Failed to parse cast receiver applications", err.Error())
-		return types.ListNull(castReceiverApplicationObjectType())
-	}
-	objType := castReceiverApplicationObjectType()
-	objects := make([]attr.Value, len(entries))
-	for i, entry := range entries {
-		attrs := map[string]attr.Value{
-			"id":   getJSONString(entry, "Id"),
-			"name": getJSONString(entry, "Name"),
-		}
-		obj, d := types.ObjectValue(objType.AttrTypes, attrs)
-		if d.HasError() {
-			diags.Append(d...)
-			return types.ListNull(objType)
-		}
-		objects[i] = obj
-	}
-	list, d := types.ListValue(objType, objects)
-	if d.HasError() {
-		diags.Append(d...)
-		return types.ListNull(objType)
-	}
-	return list
-}
-
-func castReceiverApplicationObjectType() types.ObjectType {
-	return types.ObjectType{AttrTypes: map[string]attr.Type{
-		"id":   types.StringType,
-		"name": types.StringType,
-	}}
-}
-
-func flattenTrickplayOptions(ctx context.Context, m map[string]json.RawMessage, diags *diag.Diagnostics) types.Object {
-	raw, ok := m["TrickplayOptions"]
-	if !ok {
-		return types.ObjectNull(trickplayOptionsObjectType().AttrTypes)
-	}
-	if isJSONNull(raw) {
-		return types.ObjectNull(trickplayOptionsObjectType().AttrTypes)
-	}
-	var entry map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &entry); err != nil {
-		diags.AddError("Failed to parse trickplay options", err.Error())
-		return types.ObjectNull(trickplayOptionsObjectType().AttrTypes)
-	}
-	objType := trickplayOptionsObjectType()
-	widthResolutions, _ := getJSONInt64List(ctx, entry, "WidthResolutions")
-	attrs := map[string]attr.Value{
-		"enable_hw_acceleration":           getJSONBool(entry, "EnableHwAcceleration"),
-		"enable_hw_encoding":               getJSONBool(entry, "EnableHwEncoding"),
-		"enable_key_frame_only_extraction": getJSONBool(entry, "EnableKeyFrameOnlyExtraction"),
-		"scan_behavior":                    getJSONString(entry, "ScanBehavior"),
-		"process_priority":                 getJSONString(entry, "ProcessPriority"),
-		"interval":                         getJSONInt64(entry, "Interval"),
-		"width_resolutions":                widthResolutions,
-		"tile_width":                       getJSONInt64(entry, "TileWidth"),
-		"tile_height":                      getJSONInt64(entry, "TileHeight"),
-		"qscale":                           getJSONInt64(entry, "Qscale"),
-		"jpeg_quality":                     getJSONInt64(entry, "JpegQuality"),
-		"process_threads":                  getJSONInt64(entry, "ProcessThreads"),
-	}
-	obj, d := types.ObjectValue(objType.AttrTypes, attrs)
-	if d.HasError() {
-		diags.Append(d...)
-		return types.ObjectNull(objType.AttrTypes)
-	}
-	return obj
-}
-
-func trickplayOptionsObjectType() types.ObjectType {
-	return types.ObjectType{AttrTypes: map[string]attr.Type{
-		"enable_hw_acceleration":           types.BoolType,
-		"enable_hw_encoding":               types.BoolType,
-		"enable_key_frame_only_extraction": types.BoolType,
-		"scan_behavior":                    types.StringType,
-		"process_priority":                 types.StringType,
-		"interval":                         types.Int64Type,
-		"width_resolutions":                types.ListType{ElemType: types.Int64Type},
-		"tile_width":                       types.Int64Type,
-		"tile_height":                      types.Int64Type,
-		"qscale":                           types.Int64Type,
-		"jpeg_quality":                     types.Int64Type,
-		"process_threads":                  types.Int64Type,
-	}}
-}
-
-// normalizeJSON re-encodes JSON to remove insignificant formatting and sort object keys.
-// Kept for plugin_configuration_resource.go compatibility.
-func normalizeJSON(raw string) (string, error) {
-	normalized, err := normalizeJSONRecursive(json.RawMessage(raw), 0)
-	if err != nil {
-		return "", fmt.Errorf("parsing JSON for normalization: %w", err)
-	}
-	return string(normalized), nil
-}
-
-const maxJSONNormalizeDepth = 100
-
-func normalizeJSONRecursive(raw json.RawMessage, depth int) (json.RawMessage, error) {
-	if depth > maxJSONNormalizeDepth {
-		return nil, fmt.Errorf("JSON nesting exceeds maximum depth of %d", maxJSONNormalizeDepth)
-	}
-
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, raw); err != nil {
-		return nil, err
-	}
-
-	trimmed := bytes.TrimSpace(compact.Bytes())
-	if len(trimmed) == 0 {
-		return nil, fmt.Errorf("empty JSON value")
-	}
-
-	switch trimmed[0] {
-	case '{':
-		var object map[string]json.RawMessage
-		if err := json.Unmarshal(trimmed, &object); err != nil {
-			return nil, err
-		}
-		for key, value := range object {
-			normalized, err := normalizeJSONRecursive(value, depth+1)
-			if err != nil {
-				return nil, err
+		prior, found := priorMetadataOptions(s, i, e.ItemType)
+		fromPrior := func(configured, planned, prior types.List, sharedKeysChange bool) types.List {
+			switch {
+			case !configured.IsNull():
+				return planned
+			case found && !sharedKeysChange && !prior.IsNull():
+				return prior
+			case found && !sharedKeysChange && planned.IsNull():
+				// Only a plan that changes nothing holds a null; otherwise the
+				// framework plans every unset attribute unknown.
+				return planned
 			}
-			object[key] = normalized
+			return types.ListUnknown(types.StringType)
 		}
-		return json.Marshal(object)
-	case '[':
-		var list []json.RawMessage
-		if err := json.Unmarshal(trimmed, &list); err != nil {
-			return nil, err
-		}
-		for i, value := range list {
-			normalized, err := normalizeJSONRecursive(value, depth+1)
-			if err != nil {
-				return nil, err
-			}
-			list[i] = normalized
-		}
-		return json.Marshal(list)
-	}
+		p.DisabledMetadataSavers = fromPrior(e.DisabledMetadataSavers, p.DisabledMetadataSavers, prior.DisabledMetadataSavers, false)
+		p.LocalMetadataReaderOrder = fromPrior(e.LocalMetadataReaderOrder, p.LocalMetadataReaderOrder, prior.LocalMetadataReaderOrder, false)
+		p.MetadataFetchers = fromPrior(e.MetadataFetchers, p.MetadataFetchers, prior.MetadataFetchers,
+			changes(e.DisabledMetadataFetchers, prior.DisabledMetadataFetchers) || changes(e.MetadataFetcherOrder, prior.MetadataFetcherOrder))
+		p.DisabledMetadataFetchers = fromPrior(e.DisabledMetadataFetchers, p.DisabledMetadataFetchers, prior.DisabledMetadataFetchers, changes(e.MetadataFetchers, prior.MetadataFetchers))
+		p.MetadataFetcherOrder = fromPrior(e.MetadataFetcherOrder, p.MetadataFetcherOrder, prior.MetadataFetcherOrder, changes(e.MetadataFetchers, prior.MetadataFetchers))
+		p.ImageFetchers = fromPrior(e.ImageFetchers, p.ImageFetchers, prior.ImageFetchers,
+			changes(e.DisabledImageFetchers, prior.DisabledImageFetchers) || changes(e.ImageFetcherOrder, prior.ImageFetcherOrder))
+		p.DisabledImageFetchers = fromPrior(e.DisabledImageFetchers, p.DisabledImageFetchers, prior.DisabledImageFetchers, changes(e.ImageFetchers, prior.ImageFetchers))
+		p.ImageFetcherOrder = fromPrior(e.ImageFetcherOrder, p.ImageFetcherOrder, prior.ImageFetcherOrder, changes(e.ImageFetchers, prior.ImageFetchers))
+		return nil
+	})
+}
 
-	var rawValue json.RawMessage
-	if err := json.Unmarshal(trimmed, &rawValue); err != nil {
-		return nil, err
+// priorMetadataOptions prefers the prior entry at index when it has the item type,
+// so an item type held twice plans each entry from its own prior values.
+func priorMetadataOptions(state []metadataOptionsModel, index int, itemType types.String) (metadataOptionsModel, bool) {
+	if index < len(state) && !state[index].ItemType.IsNull() && !itemType.IsUnknown() && strings.EqualFold(state[index].ItemType.ValueString(), itemType.ValueString()) {
+		return state[index], true
 	}
-	result, err := json.Marshal(rawValue)
-	if err != nil {
-		return nil, err
+	return entryWithType(state, itemType, func(e metadataOptionsModel) types.String { return e.ItemType })
+}
+
+func (r *SystemConfigurationResource) write(ctx context.Context, plan tfsdk.Plan, state *tfsdk.State, diags *diag.Diagnostics) {
+	// The document holds the plugin repositories, which the write posts back
+	// as read.
+	serverConfigurationMu.Lock()
+	defer serverConfigurationMu.Unlock()
+
+	r.singleton().write(wire.WithAvailable(ctx, r.offered(r.client)), plan, state, diags)
+}
+
+func (r *SystemConfigurationResource) singleton() singleton[SystemConfigurationResourceModel] {
+	return singleton[SystemConfigurationResourceModel]{
+		id:   "system",
+		bind: systemWire,
+		doc:  document{what: "system configuration", get: r.client.GetSystemConfiguration, put: r.client.UpdateSystemConfiguration},
 	}
-	return result, nil
 }

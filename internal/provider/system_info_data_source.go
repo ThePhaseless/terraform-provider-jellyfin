@@ -5,7 +5,6 @@ package provider
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -41,38 +40,26 @@ func (d *SystemInfoDataSource) Metadata(_ context.Context, req datasource.Metada
 }
 
 func (d *SystemInfoDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	computedString := func(desc string) schema.StringAttribute {
+		return schema.StringAttribute{
+			Description:         desc,
+			MarkdownDescription: desc,
+			Computed:            true,
+		}
+	}
+	const pendingRestart = "Whether the Jellyfin server has a pending restart (e.g. after a plugin install). True until the server is restarted."
 	resp.Schema = schema.Schema{
 		Description:         "Retrieves system information from the Jellyfin server.",
 		MarkdownDescription: "Retrieves system information from the Jellyfin server.",
 		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{
-				Description:         "The unique server identifier.",
-				MarkdownDescription: "The unique server identifier.",
-				Computed:            true,
-			},
-			"server_name": schema.StringAttribute{
-				Description:         "The server name.",
-				MarkdownDescription: "The server name.",
-				Computed:            true,
-			},
-			"version": schema.StringAttribute{
-				Description:         "The Jellyfin server version.",
-				MarkdownDescription: "The Jellyfin server version.",
-				Computed:            true,
-			},
-			"operating_system": schema.StringAttribute{
-				Description:         "The server operating system.",
-				MarkdownDescription: "The server operating system.",
-				Computed:            true,
-			},
-			"local_address": schema.StringAttribute{
-				Description:         "The local network address of the server.",
-				MarkdownDescription: "The local network address of the server.",
-				Computed:            true,
-			},
+			"id":               computedString("The unique server identifier."),
+			"server_name":      computedString("The server name."),
+			"version":          computedString("The Jellyfin server version."),
+			"operating_system": computedString("The server operating system."),
+			"local_address":    computedString("The local network address of the server."),
 			"pending_restart": schema.BoolAttribute{
-				Description:         "Whether the Jellyfin server has a pending restart (e.g. after a plugin install). True until the server is restarted.",
-				MarkdownDescription: "Whether the Jellyfin server has a pending restart (e.g. after a plugin install). True until the server is restarted.",
+				Description:         pendingRestart,
+				MarkdownDescription: pendingRestart,
 				Computed:            true,
 			},
 		},
@@ -80,20 +67,7 @@ func (d *SystemInfoDataSource) Schema(_ context.Context, _ datasource.SchemaRequ
 }
 
 func (d *SystemInfoDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
-	}
-
-	c, ok := req.ProviderData.(*client.Client)
-	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Data Source Configure Type",
-			fmt.Sprintf("Expected *client.Client, got: %T.", req.ProviderData),
-		)
-		return
-	}
-
-	d.client = c
+	d.client = configuredClient(req.ProviderData, "Data Source", &resp.Diagnostics)
 }
 
 func (d *SystemInfoDataSource) Read(ctx context.Context, _ datasource.ReadRequest, resp *datasource.ReadResponse) {

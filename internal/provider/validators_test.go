@@ -15,6 +15,17 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
+func validateStringWith(ctx context.Context, value string, validators ...validator.String) diag.Diagnostics {
+	var resp validator.StringResponse
+	for _, v := range validators {
+		v.ValidateString(ctx, validator.StringRequest{
+			Path:        path.Root("name"),
+			ConfigValue: types.StringValue(value),
+		}, &resp)
+	}
+	return resp.Diagnostics
+}
+
 func TestNoPathSeparatorsValidator(t *testing.T) {
 	t.Parallel()
 
@@ -32,14 +43,8 @@ func TestNoPathSeparatorsValidator(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			resp := validator.StringResponse{}
-			noPathSeparatorsValidator.ValidateString(context.Background(), validator.StringRequest{
-				Path:        path.Root("id"),
-				ConfigValue: types.StringValue(test.value),
-			}, &resp)
-
-			if resp.Diagnostics.HasError() != test.expectError {
-				t.Fatalf("expected error %t, got diagnostics: %v", test.expectError, resp.Diagnostics)
+			if d := validateStringWith(t.Context(), test.value, noPathSeparatorsValidator); d.HasError() != test.expectError {
+				t.Fatalf("expected error %t, got diagnostics: %v", test.expectError, d)
 			}
 		})
 	}
@@ -48,8 +53,8 @@ func TestNoPathSeparatorsValidator(t *testing.T) {
 func TestUnsupportedLibraryOptionValidatorRejectsOnlySetValues(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
-	v := unsupportedLibraryOptionValidator{}
+	ctx := t.Context()
+	v := unsupportedLibraryOption.reject
 	p := path.Root("library_options").AtName("disabled_metadata_savers")
 	validateBool := func(value types.Bool) diag.Diagnostics {
 		resp := validator.BoolResponse{}
@@ -101,14 +106,8 @@ func TestUnsupportedLibraryOptionValidatorRejectsOnlySetValues(t *testing.T) {
 func TestNoSurroundingWhitespaceValidatorMatchesUnicodeIsSpace(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
 	rejects := func(value string) bool {
-		resp := validator.StringResponse{}
-		noSurroundingWhitespaceValidator.ValidateString(ctx, validator.StringRequest{
-			Path:        path.Root("name"),
-			ConfigValue: types.StringValue(value),
-		}, &resp)
-		return resp.Diagnostics.HasError()
+		return validateStringWith(t.Context(), value, noSurroundingWhitespaceValidator).HasError()
 	}
 
 	for r := rune(0); r <= unicode.MaxRune; r++ {
@@ -121,7 +120,6 @@ func TestNoSurroundingWhitespaceValidatorMatchesUnicodeIsSpace(t *testing.T) {
 				t.Errorf("%+q: rejected %t, want %t", value, got, want)
 			}
 		}
-		// .NET's . does not match \n, so Jellyfin rejects it inside a name too.
 		if got := rejects("a" + string(r) + "a"); got != (r == '\n') {
 			t.Errorf("%+q: rejected %t, want %t", "a"+string(r)+"a", got, r == '\n')
 		}
@@ -162,16 +160,8 @@ func TestLibraryNameValidators(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			resp := validator.StringResponse{}
-			for _, v := range libraryNameValidators() {
-				v.ValidateString(context.Background(), validator.StringRequest{
-					Path:        path.Root("name"),
-					ConfigValue: types.StringValue(test.value),
-				}, &resp)
-			}
-
-			if resp.Diagnostics.HasError() != test.expectError {
-				t.Fatalf("expected error %t, got diagnostics: %v", test.expectError, resp.Diagnostics)
+			if d := validateStringWith(t.Context(), test.value, libraryNameValidators()...); d.HasError() != test.expectError {
+				t.Fatalf("expected error %t, got diagnostics: %v", test.expectError, d)
 			}
 		})
 	}

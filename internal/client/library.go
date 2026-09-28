@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/url"
 	"strings"
 )
@@ -19,6 +18,13 @@ type VirtualFolder struct {
 	CollectionType string          `json:"CollectionType"`
 	ItemID         string          `json:"ItemId"`
 	LibraryOptions json.RawMessage `json:"LibraryOptions,omitempty"`
+}
+
+// GetLibraryOptions extracts the LibraryOptions from a VirtualFolder as a LibraryOptions struct.
+func (vf *VirtualFolder) GetLibraryOptions() *LibraryOptions {
+	return &LibraryOptions{
+		RawJSON: strings.TrimSpace(string(vf.LibraryOptions)),
+	}
 }
 
 // LibraryOptions represents the configuration for a library.
@@ -35,18 +41,10 @@ func (lo *LibraryOptions) MarshalJSON() ([]byte, error) {
 	return []byte(lo.RawJSON), nil
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling for LibraryOptions.
-func (lo *LibraryOptions) UnmarshalJSON(data []byte) error {
-	lo.RawJSON = string(data)
-	return nil
-}
-
 // GetVirtualFolders retrieves all virtual folders (libraries).
 func (c *Client) GetVirtualFolders(ctx context.Context) ([]VirtualFolder, error) {
 	var folders []VirtualFolder
-	if err := c.get(ctx, "/Library/VirtualFolders", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&folders)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/Library/VirtualFolders", &folders); err != nil {
 		return nil, fmt.Errorf("getting virtual folders: %w", err)
 	}
 	return folders, nil
@@ -66,14 +64,13 @@ func (c *Client) AddVirtualFolder(ctx context.Context, name, collectionType stri
 
 	var body []byte
 	if libraryOptions != nil {
-		requestBody := struct {
+		var err error
+		body, err = json.Marshal(struct {
 			LibraryOptions *LibraryOptions `json:"LibraryOptions"`
-		}{LibraryOptions: libraryOptions}
-		jsonBody, err := json.Marshal(requestBody)
+		}{LibraryOptions: libraryOptions})
 		if err != nil {
 			return fmt.Errorf("marshaling virtual folder %s request: %w", name, err)
 		}
-		body = jsonBody
 	}
 
 	if err := c.post(ctx, apiPath, body); err != nil {
@@ -98,9 +95,6 @@ func (c *Client) RemoveVirtualFolder(ctx context.Context, name string) error {
 
 // UpdateVirtualFolder updates the library options for a virtual folder.
 func (c *Client) UpdateVirtualFolder(ctx context.Context, itemID string, libraryOptions *LibraryOptions) error {
-	// POST /Library/VirtualFolders/LibraryOptions takes UpdateLibraryOptionsDto:
-	// the library's item id and the options object. Sending the options flat
-	// left Id empty and the server refused it ("Guid can't be empty").
 	rawOpts := "{}"
 	if libraryOptions != nil && libraryOptions.RawJSON != "" {
 		rawOpts = libraryOptions.RawJSON
@@ -109,23 +103,51 @@ func (c *Client) UpdateVirtualFolder(ctx context.Context, itemID string, library
 		return fmt.Errorf("parsing library options for virtual folder %s: invalid JSON", itemID)
 	}
 
-	body, err := json.Marshal(map[string]json.RawMessage{
-		"Id":             json.RawMessage(fmt.Sprintf("%q", itemID)),
-		"LibraryOptions": json.RawMessage(rawOpts),
-	})
+	body, err := json.Marshal(struct {
+		ID             string          `json:"Id"`
+		LibraryOptions json.RawMessage `json:"LibraryOptions"`
+	}{ID: itemID, LibraryOptions: json.RawMessage(rawOpts)})
 	if err != nil {
 		return fmt.Errorf("marshaling library options for virtual folder %s: %w", itemID, err)
 	}
 
-	if err := c.postRaw(ctx, "/Library/VirtualFolders/LibraryOptions", string(body)); err != nil {
+	if err := c.post(ctx, "/Library/VirtualFolders/LibraryOptions", body); err != nil {
 		return fmt.Errorf("updating virtual folder %s: %w", itemID, err)
 	}
 	return nil
 }
 
-// GetVirtualFolderLibraryOptions extracts the LibraryOptions from a VirtualFolder as a LibraryOptions struct.
-func (vf *VirtualFolder) GetLibraryOptions() *LibraryOptions {
-	return &LibraryOptions{
-		RawJSON: strings.TrimSpace(string(vf.LibraryOptions)),
+// AvailableLibraryOptions is what Jellyfin offers a library of one content
+// type: the providers it can enable, per list and per item type.
+type AvailableLibraryOptions struct {
+	SubtitleFetchers []AvailableOption          `json:"SubtitleFetchers"`
+	TypeOptions      []AvailableLibraryTypeInfo `json:"TypeOptions"`
+}
+
+// AvailableLibraryTypeInfo is what Jellyfin offers for one item type.
+// Jellyfin 10.x lists no SimilarItemProviders.
+type AvailableLibraryTypeInfo struct {
+	Type                 string            `json:"Type"`
+	MetadataFetchers     []AvailableOption `json:"MetadataFetchers"`
+	ImageFetchers        []AvailableOption `json:"ImageFetchers"`
+	SimilarItemProviders []AvailableOption `json:"SimilarItemProviders"`
+}
+
+// AvailableOption names one provider Jellyfin offers.
+type AvailableOption struct {
+	Name string `json:"Name"`
+}
+
+// GetAvailableLibraryOptions lists what Jellyfin offers a library of
+// contentType. Jellyfin answers a content type it does not know, such as
+// mixed, as it does a library without one.
+func (c *Client) GetAvailableLibraryOptions(ctx context.Context, contentType string) (*AvailableLibraryOptions, error) {
+	params := url.Values{}
+	params.Set("libraryContentType", contentType)
+
+	var opts AvailableLibraryOptions
+	if err := c.getJSON(ctx, "/Libraries/AvailableOptions?"+params.Encode(), &opts); err != nil {
+		return nil, fmt.Errorf("getting the library options Jellyfin offers for %q: %w", contentType, err)
 	}
+	return &opts, nil
 }

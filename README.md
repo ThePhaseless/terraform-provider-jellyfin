@@ -5,12 +5,20 @@ A [Terraform](https://www.terraform.io) provider for managing [Jellyfin](https:/
 ## Features
 
 - **User Management** — Create, update, and delete users with policy control
+- **API Keys** — Create API keys for external applications
 - **Library Management** — Configure media libraries with custom paths and options
 - **Plugin Repositories** — Manage plugin repository sources
 - **Plugin Installation** — Install and uninstall plugins from repositories
 - **Plugin Configuration** — Universal plugin settings via JSON (supports SSO-Auth, and any other plugin)
+- **JellyfinSecurity Plugin Configuration** — Typed settings for the JellyfinSecurity plugin
 - **System Configuration** — Full server configuration management
 - **Encoding Configuration** — Transcoding and hardware acceleration settings
+- **Networking Configuration** — Ports, HTTPS, remote access, and proxy settings
+- **Branding Configuration** — Login disclaimer, custom CSS, and splash screen
+- **Live TV Configuration** — Tuner hosts, guide listing providers, and recording settings
+- **Metadata Configuration** — Server-wide metadata settings
+- **Scheduled Tasks** — Set the triggers of scheduled tasks
+- **Server Restart** — Restart the server, for example to load newly installed plugins
 - **Initial Setup** — Configure a fresh Jellyfin instance after installation
 - **Data Sources** — Read server information and status
 
@@ -121,14 +129,17 @@ Any plugin can be configured using the `jellyfin_plugin_configuration` resource 
 resource "jellyfin_plugin_configuration" "sso" {
   plugin_id = jellyfin_plugin.sso_auth.id
 
+  # SSO-Auth keys its providers by name.
   configuration_json = jsonencode({
-    SamlConfigs = []
-    OidConfigs = [{
-      OidClientId = "jellyfin"
-      OidSecret   = var.oidc_secret
-      OidEndpoint = "https://auth.example.com"
-      Enabled     = true
-    }]
+    SamlConfigs = {}
+    OidConfigs = {
+      authelia = {
+        OidClientId = "jellyfin"
+        OidSecret   = var.oidc_secret
+        OidEndpoint = "https://auth.example.com"
+        Enabled     = true
+      }
+    }
   })
 }
 ```
@@ -140,6 +151,8 @@ resource "jellyfin_plugin_configuration" "sso" {
 ```shell
 go install
 ```
+
+This will build the provider and put the provider binary in the `$GOPATH/bin` directory.
 
 ### Testing
 
@@ -156,28 +169,16 @@ Run acceptance tests:
 TF_ACC=1 go test -v ./internal/provider/
 ```
 
+In order to run the full suite of Acceptance tests, run `make testacc`.
+
+*Note:* Acceptance tests create real resources on a Jellyfin server. They run against the local Jellyfin in Docker that `docker-compose.yml` starts and `scripts/setup_jellyfin.sh` prepares, as shown above.
+
 ### Linting
 
 ```shell
 golangci-lint run
 ```
 
-## Using the provider
-
-Fill this in for each provider
-
-## Developing the Provider
-
-If you wish to work on the provider, you'll first need [Go](http://www.golang.org) installed on your machine (see [Requirements](#requirements) above).
-
-To compile the provider, run `go install`. This will build the provider and put the provider binary in the `$GOPATH/bin` directory.
+### Documentation
 
 To generate or update documentation, run `make generate`.
-
-In order to run the full suite of Acceptance tests, run `make testacc`.
-
-*Note:* Acceptance tests create real resources, and often cost money to run.
-
-```shell
-make testacc
-```

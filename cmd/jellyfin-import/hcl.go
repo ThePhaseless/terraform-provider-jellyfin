@@ -4,100 +4,11 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 )
-
-// hclField maps a Jellyfin JSON property to a Terraform attribute. nested
-// describes the attributes of each element when the property is a list of
-// objects, or of the property itself when object is set.
-type hclField struct {
-	json   string
-	attr   string
-	nested []hclField
-	object bool
-}
-
-// hclAttributes renders the fields present in a JSON object as HCL attribute
-// values, skipping nulls. depth is the block nesting level the attributes are
-// written at, used to indent multi-line values.
-func hclAttributes(raw string, fields []hclField, depth int) (map[string]string, error) {
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
-		return nil, fmt.Errorf("parsing JSON object: %w", err)
-	}
-
-	attrs := make(map[string]string, len(fields))
-	for _, f := range fields {
-		v, ok := obj[f.json]
-		if !ok || string(v) == "null" {
-			continue
-		}
-		rendered, err := hclValue(v, f, depth)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", f.json, err)
-		}
-		attrs[f.attr] = rendered
-	}
-	return attrs, nil
-}
-
-func hclValue(raw json.RawMessage, f hclField, depth int) (string, error) {
-	switch {
-	case f.object:
-		attrs, err := hclAttributes(string(raw), f.nested, depth+1)
-		if err != nil {
-			return "", err
-		}
-		return hclObject(attrs, depth), nil
-	case f.nested != nil:
-		var elements []json.RawMessage
-		if err := json.Unmarshal(raw, &elements); err != nil {
-			return "", err
-		}
-		if len(elements) == 0 {
-			return "[]", nil
-		}
-		indent := strings.Repeat("  ", depth)
-		var b strings.Builder
-		b.WriteString("[\n")
-		for _, e := range elements {
-			attrs, err := hclAttributes(string(e), f.nested, depth+2)
-			if err != nil {
-				return "", err
-			}
-			b.WriteString(indent + "  " + hclObject(attrs, depth+1) + ",\n")
-		}
-		b.WriteString(indent + "]")
-		return b.String(), nil
-	case bytes.HasPrefix(bytes.TrimSpace(raw), []byte("[")):
-		var elements []json.RawMessage
-		if err := json.Unmarshal(raw, &elements); err != nil {
-			return "", err
-		}
-		rendered := make([]string, len(elements))
-		for i, e := range elements {
-			s, err := hclValue(e, hclField{}, depth)
-			if err != nil {
-				return "", err
-			}
-			rendered[i] = s
-		}
-		return "[" + strings.Join(rendered, ", ") + "]", nil
-	case bytes.HasPrefix(bytes.TrimSpace(raw), []byte(`"`)):
-		var s string
-		if err := json.Unmarshal(raw, &s); err != nil {
-			return "", err
-		}
-		return hclString(s), nil
-	default:
-		// Numbers and booleans read the same in HCL as in JSON.
-		return string(bytes.TrimSpace(raw)), nil
-	}
-}
 
 // hclObject renders attrs as an HCL object whose closing brace is indented
 // to depth.
@@ -110,11 +21,10 @@ func hclObject(attrs map[string]string, depth int) string {
 	return b.String()
 }
 
-// writeAttributes writes attrs sorted by name, aligning the equals signs the
-// way terraform fmt does: across each run of consecutive single-line values,
-// which a multi-line value ends without being aligned itself.
+// writeAttributes writes attrs sorted, aligning "=" like terraform fmt across
+// each run of single-line values.
 func writeAttributes(b *strings.Builder, attrs map[string]string, indent string) {
-	keys := sortedKeys(attrs)
+	keys := slices.Sorted(maps.Keys(attrs))
 	for start := 0; start < len(keys); {
 		end, width := start, 0
 		for ; end < len(keys) && !strings.Contains(attrs[keys[end]], "\n"); end++ {
@@ -131,9 +41,8 @@ func writeAttributes(b *strings.Builder, attrs map[string]string, indent string)
 	}
 }
 
-// hclString quotes s as an HCL string literal, escaping control characters
-// and the ${ and %{ template introducers, which HCL would otherwise
-// interpolate.
+// hclString quotes s as an HCL literal, escaping control characters and the
+// ${ / %{ introducers.
 func hclString(s string) string {
 	var b strings.Builder
 	b.WriteByte('"')
@@ -162,7 +71,6 @@ func hclString(s string) string {
 	return b.String()
 }
 
-// importBlock generates a Terraform import block.
 func importBlock(resourceType, name, id string) string {
 	return fmt.Sprintf(`import {
   to = %s.%s
@@ -171,21 +79,6 @@ func importBlock(resourceType, name, id string) string {
 `, resourceType, name, hclString(id))
 }
 
-// resourceBlock generates a Terraform resource block from a map of attributes.
 func resourceBlock(resourceType, name string, attrs map[string]string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "resource %s %s {\n", hclString(resourceType), hclString(name))
-	writeAttributes(&b, attrs, "  ")
-	b.WriteString("}\n")
-	return b.String()
-}
-
-// sortedKeys returns map keys in sorted order.
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+	return fmt.Sprintf("resource %s %s %s\n", hclString(resourceType), hclString(name), hclObject(attrs, 0))
 }

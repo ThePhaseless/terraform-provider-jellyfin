@@ -26,9 +26,8 @@ func requiredIdentifierValidators() []validator.String {
 	}
 }
 
-// Jellyfin keeps a library as a directory named after it and replaces these
-// characters with spaces, so a name containing one would come back as a
-// different library.
+// Jellyfin replaces these characters with spaces in the library's directory,
+// so the library would come back under another name.
 var libraryNameCharactersValidator = stringvalidator.RegexMatches(
 	regexp.MustCompile(`^[^"<>|:*?\\/\x00-\x1f]*$`),
 	`must not contain " < > | : * ? \ / or control characters`,
@@ -49,40 +48,40 @@ func libraryNameValidators() []validator.String {
 	}
 }
 
-// unsupportedLibraryOptionValidator rejects a value at plan time for an
-// attribute with no Jellyfin library option behind it. The server ignores the
-// key and reads it back as null, which Terraform reports only as an
-// inconsistent result after apply.
-type unsupportedLibraryOptionValidator struct{}
-
-func (unsupportedLibraryOptionValidator) Description(context.Context) string {
-	return "must not be set, because Jellyfin has no such library option"
+// unsetValidator rejects at plan time a value for an attribute no Jellyfin
+// setting is behind.
+type unsetValidator struct {
+	// summary heads the error, and reason says why the value cannot be set.
+	summary, reason string
 }
 
-func (v unsupportedLibraryOptionValidator) MarkdownDescription(ctx context.Context) string {
+func (v unsetValidator) Description(context.Context) string {
+	return "must not be set: " + v.reason
+}
+
+func (v unsetValidator) MarkdownDescription(ctx context.Context) string {
 	return v.Description(ctx)
 }
 
-func (unsupportedLibraryOptionValidator) check(p path.Path, value attr.Value, diags *diag.Diagnostics) {
+func (v unsetValidator) check(p path.Path, value attr.Value, diags *diag.Diagnostics) {
 	if value.IsNull() || value.IsUnknown() {
 		return
 	}
-	diags.AddAttributeError(p, "Unsupported library option",
-		"Jellyfin has no such library option, so the server would ignore this value. Remove it from the configuration.")
+	diags.AddAttributeError(p, v.summary, v.reason+". Remove it from the configuration.")
 }
 
-func (v unsupportedLibraryOptionValidator) ValidateBool(_ context.Context, req validator.BoolRequest, resp *validator.BoolResponse) {
+func (v unsetValidator) ValidateBool(_ context.Context, req validator.BoolRequest, resp *validator.BoolResponse) {
 	v.check(req.Path, req.ConfigValue, &resp.Diagnostics)
 }
 
-func (v unsupportedLibraryOptionValidator) ValidateInt64(_ context.Context, req validator.Int64Request, resp *validator.Int64Response) {
+func (v unsetValidator) ValidateInt64(_ context.Context, req validator.Int64Request, resp *validator.Int64Response) {
 	v.check(req.Path, req.ConfigValue, &resp.Diagnostics)
 }
 
-func (v unsupportedLibraryOptionValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+func (v unsetValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
 	v.check(req.Path, req.ConfigValue, &resp.Diagnostics)
 }
 
-func (v unsupportedLibraryOptionValidator) ValidateList(_ context.Context, req validator.ListRequest, resp *validator.ListResponse) {
+func (v unsetValidator) ValidateList(_ context.Context, req validator.ListRequest, resp *validator.ListResponse) {
 	v.check(req.Path, req.ConfigValue, &resp.Diagnostics)
 }

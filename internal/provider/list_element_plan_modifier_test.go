@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -45,18 +44,43 @@ func testHostList(t *testing.T, hosts ...attr.Value) types.List {
 	return list
 }
 
+type planModifyListCase struct {
+	state  types.List
+	config types.List
+	plan   types.List
+	want   types.List
+}
+
+func testPlanModifyList(t *testing.T, m planmodifier.List, tests map[string]planModifyListCase) {
+	t.Helper()
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			resp := planmodifier.ListResponse{PlanValue: test.plan}
+			m.PlanModifyList(t.Context(), planmodifier.ListRequest{
+				StateValue:  test.state,
+				ConfigValue: test.config,
+				PlanValue:   test.plan,
+			}, &resp)
+
+			if resp.Diagnostics.HasError() {
+				t.Fatalf("diagnostics: %v", resp.Diagnostics)
+			}
+			if !resp.PlanValue.Equal(test.want) {
+				t.Fatalf("plan = %s, want %s", resp.PlanValue, test.want)
+			}
+		})
+	}
+}
+
 func TestUseStateForUnknownByKey(t *testing.T) {
 	t.Parallel()
 
 	unknown := types.Int64Unknown()
 	omitted := types.Int64Null()
 	unknownURL := types.StringUnknown()
-	tests := map[string]struct {
-		state  types.List
-		config types.List
-		plan   types.List
-		want   types.List
-	}{
+	testPlanModifyList(t, useStateForUnknownByKey([]string{"url"}, []string{"type"}), map[string]planModifyListCase{
 		"appended element stays unknown": {
 			state:  testHostList(t, testHost(t, "a", "m3u", types.Int64Value(2))),
 			config: testHostList(t, testHost(t, "a", "m3u", omitted), testHost(t, "b", "hdhomerun", omitted)),
@@ -105,25 +129,54 @@ func TestUseStateForUnknownByKey(t *testing.T) {
 			plan:   testHostList(t, testHost(t, "a", "m3u", unknown), testHostURL(t, unknownURL, "m3u", unknown)),
 			want:   testHostList(t, testHost(t, "a", "m3u", unknown), testHostURL(t, unknownURL, "m3u", unknown)),
 		},
+	})
+}
+
+var testGroupType = types.ObjectType{AttrTypes: map[string]attr.Type{
+	"id":    types.StringType,
+	"hosts": types.ListType{ElemType: testHostType},
+}}
+
+// testGroups returns a list holding one group of hosts.
+func testGroups(t *testing.T, hosts ...attr.Value) types.List {
+	t.Helper()
+	group, d := types.ObjectValue(testGroupType.AttrTypes, map[string]attr.Value{
+		"id":    types.StringValue("g"),
+		"hosts": testHostList(t, hosts...),
+	})
+	if d.HasError() {
+		t.Fatalf("object: %v", d)
 	}
-
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			resp := planmodifier.ListResponse{PlanValue: test.plan}
-			useStateForUnknownByKey([]string{"url"}, []string{"type"}).PlanModifyList(context.Background(), planmodifier.ListRequest{
-				StateValue:  test.state,
-				ConfigValue: test.config,
-				PlanValue:   test.plan,
-			}, &resp)
-
-			if resp.Diagnostics.HasError() {
-				t.Fatalf("diagnostics: %v", resp.Diagnostics)
-			}
-			if !resp.PlanValue.Equal(test.want) {
-				t.Fatalf("plan = %s, want %s", resp.PlanValue, test.want)
-			}
-		})
+	list, d := types.ListValue(testGroupType, []attr.Value{group})
+	if d.HasError() {
+		t.Fatalf("list: %v", d)
 	}
+	return list
+}
+
+func TestUseStateForUnknownByKeyFillsNestedLists(t *testing.T) {
+	t.Parallel()
+
+	unknown := types.Int64Unknown()
+	omitted := types.Int64Null()
+	testPlanModifyList(t, useStateForUnknownByKey([]string{"id"}), map[string]planModifyListCase{
+		"reordered elements follow the values they configure": {
+			state:  testGroups(t, testHost(t, "a", "m3u", types.Int64Value(2)), testHost(t, "b", "m3u", types.Int64Value(3))),
+			config: testGroups(t, testHost(t, "b", "m3u", omitted), testHost(t, "a", "m3u", omitted)),
+			plan:   testGroups(t, testHost(t, "b", "m3u", unknown), testHost(t, "a", "m3u", unknown)),
+			want:   testGroups(t, testHost(t, "b", "m3u", types.Int64Value(3)), testHost(t, "a", "m3u", types.Int64Value(2))),
+		},
+		"element with no match stays unknown": {
+			state:  testGroups(t, testHost(t, "a", "m3u", types.Int64Value(2))),
+			config: testGroups(t, testHost(t, "new", "m3u", omitted)),
+			plan:   testGroups(t, testHost(t, "new", "m3u", unknown)),
+			want:   testGroups(t, testHost(t, "new", "m3u", unknown)),
+		},
+		"value unknown in config leaves every element unknown": {
+			state:  testGroups(t, testHost(t, "a", "m3u", types.Int64Value(2)), testHost(t, "b", "m3u", types.Int64Value(3))),
+			config: testGroups(t, testHost(t, "a", "m3u", omitted), testHostURL(t, types.StringUnknown(), "m3u", omitted)),
+			plan:   testGroups(t, testHost(t, "a", "m3u", unknown), testHostURL(t, types.StringUnknown(), "m3u", unknown)),
+			want:   testGroups(t, testHost(t, "a", "m3u", unknown), testHostURL(t, types.StringUnknown(), "m3u", unknown)),
+		},
+	})
 }

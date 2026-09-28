@@ -5,25 +5,23 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"sync"
 
-	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 var (
 	_ resource.Resource                = &MetadataConfigurationResource{}
 	_ resource.ResourceWithImportState = &MetadataConfigurationResource{}
+	_ resource.ResourceWithModifyPlan  = &MetadataConfigurationResource{}
+	_ wireBound                        = &MetadataConfigurationResource{}
 )
 
 // NewMetadataConfigurationResource creates a new metadata configuration resource.
@@ -42,6 +40,13 @@ type MetadataConfigurationResourceModel struct {
 	UseFileCreationTimeForDateAdded types.Bool   `tfsdk:"use_file_creation_time_for_date_added"`
 }
 
+var metadataWire = sync.OnceValues(func() (*wire.Binding, error) {
+	return wire.Bind(schemaOf(&MetadataConfigurationResource{}), "MetadataConfiguration",
+		wire.Identity("id"))
+})
+
+func (r *MetadataConfigurationResource) Wire() (*wire.Binding, error) { return metadataWire() }
+
 func (r *MetadataConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_metadata_configuration"
 }
@@ -59,56 +64,25 @@ func (r *MetadataConfigurationResource) Schema(_ context.Context, _ resource.Sch
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"use_file_creation_time_for_date_added": schema.BoolAttribute{Description: "Whether to use file creation time for date added.", MarkdownDescription: "Whether to use file creation time for date added.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
+			"use_file_creation_time_for_date_added": optionalBool("Whether to use file creation time for date added."),
 		},
 	}
 }
 
 func (r *MetadataConfigurationResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
-	}
-
-	c, ok := req.ProviderData.(*client.Client)
-	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Resource Configure Type",
-			fmt.Sprintf("Expected *client.Client, got: %T.", req.ProviderData),
-		)
-		return
-	}
-
-	r.client = c
+	r.client = configuredClient(req.ProviderData, "Resource", &resp.Diagnostics)
 }
 
 func (r *MetadataConfigurationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data MetadataConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *MetadataConfigurationResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var data MetadataConfigurationResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.read(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().read(ctx, req.State, &resp.State, &resp.Diagnostics)
 }
 
 func (r *MetadataConfigurationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data MetadataConfigurationResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.apply(ctx, &data, &resp.Diagnostics, &resp.State)
+	r.singleton().write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *MetadataConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
@@ -116,71 +90,21 @@ func (r *MetadataConfigurationResource) Delete(_ context.Context, _ resource.Del
 }
 
 func (r *MetadataConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Singleton resource — the import ID is not used. Read will populate all fields.
-	// Set only the id: the framework types every other attribute from the
-	// schema, and the Read that follows an import fills them. Writing a
-	// zero-valued model here left list attributes without an element type.
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("metadata"))...)
+	r.singleton().setID(ctx, &resp.State, &resp.Diagnostics)
 }
 
-func (r *MetadataConfigurationResource) apply(ctx context.Context, data *MetadataConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
-	current, err := r.client.GetMetadataConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read current metadata configuration", err.Error())
-		return
+// ModifyPlan gates each configured field on the Jellyfin version it needs, so
+// a field a later pin adds is checked without a change here.
+func (r *MetadataConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if !req.Plan.Raw.IsNull() {
+		checkServerHasFields(ctx, r.client, metadataWire, req.Config, &resp.Diagnostics)
 	}
-
-	base, err := parseJSONObject(current.RawJSON)
-	if err != nil {
-		diags.AddError("Failed to parse current metadata configuration", err.Error())
-		return
-	}
-
-	overlayMetadataConfiguration(ctx, base, data)
-
-	payload, err := json.Marshal(base)
-	if err != nil {
-		diags.AddError("Failed to serialize metadata configuration", err.Error())
-		return
-	}
-
-	if err := r.client.UpdateMetadataConfiguration(ctx, &client.MetadataConfiguration{RawJSON: string(payload)}); err != nil {
-		diags.AddError("Failed to update metadata configuration", err.Error())
-		return
-	}
-
-	updated, err := r.client.GetMetadataConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read metadata configuration after update", err.Error())
-		return
-	}
-
-	flattenMetadataConfiguration(ctx, updated.RawJSON, data, diags)
-	data.ID = types.StringValue("metadata")
-	diags.Append(state.Set(ctx, data)...)
 }
 
-func (r *MetadataConfigurationResource) read(ctx context.Context, data *MetadataConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
-	current, err := r.client.GetMetadataConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read metadata configuration", err.Error())
-		return
+func (r *MetadataConfigurationResource) singleton() singleton[MetadataConfigurationResourceModel] {
+	return singleton[MetadataConfigurationResourceModel]{
+		id:   "metadata",
+		bind: metadataWire,
+		doc:  document{what: "metadata configuration", get: r.client.GetMetadataConfiguration, put: r.client.UpdateMetadataConfiguration},
 	}
-
-	flattenMetadataConfiguration(ctx, current.RawJSON, data, diags)
-	data.ID = types.StringValue("metadata")
-	diags.Append(state.Set(ctx, data)...)
-}
-
-func overlayMetadataConfiguration(_ context.Context, m map[string]json.RawMessage, data *MetadataConfigurationResourceModel) {
-	putJSONBool(m, "UseFileCreationTimeForDateAdded", data.UseFileCreationTimeForDateAdded)
-}
-
-func flattenMetadataConfiguration(_ context.Context, raw string, data *MetadataConfigurationResourceModel, diags *diag.Diagnostics) {
-	m, err := parseJSONObject(raw)
-	if err != nil {
-		diags.AddError("Failed to parse metadata configuration", err.Error())
-		return
-	}
-	data.UseFileCreationTimeForDateAdded = getJSONBool(m, "UseFileCreationTimeForDateAdded")
 }

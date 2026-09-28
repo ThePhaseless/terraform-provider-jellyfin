@@ -23,7 +23,6 @@ resource "jellyfin_branding_configuration" "test" {
 `,
 				ExpectError: regexp.MustCompile(`Unsupported branding option`),
 			},
-			// Create and Read.
 			{
 				Config: `
 resource "jellyfin_branding_configuration" "test" {
@@ -39,14 +38,12 @@ resource "jellyfin_branding_configuration" "test" {
 					resource.TestCheckNoResourceAttr("jellyfin_branding_configuration.test", "splashscreen_location"),
 				),
 			},
-			// ImportState.
 			{
 				ResourceName:      "jellyfin_branding_configuration.test",
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateId:     "branding",
 			},
-			// Update.
 			{
 				Config: `
 resource "jellyfin_branding_configuration" "test" {

@@ -12,20 +12,26 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/provider"
 )
 
-var sanitizeRe = regexp.MustCompile(`[^a-zA-Z0-9]+`)
-
 func main() {
-	endpoint := flag.String("endpoint", os.Getenv("JELLYFIN_ENDPOINT"), "Jellyfin server URL (or JELLYFIN_ENDPOINT env)")
-	apiKey := flag.String("api-key", os.Getenv("JELLYFIN_API_KEY"), "Jellyfin API key (or JELLYFIN_API_KEY env)")
-	username := flag.String("username", os.Getenv("JELLYFIN_USERNAME"), "Jellyfin username (or JELLYFIN_USERNAME env)")
-	password := flag.String("password", os.Getenv("JELLYFIN_PASSWORD"), "Jellyfin password (or JELLYFIN_PASSWORD env)")
+	// The environment fills in a flag only after parsing: as a flag default,
+	// the usage text that -h or a mistyped flag prints would show the secrets.
+	endpoint := flag.String("endpoint", "", "Jellyfin server URL (or JELLYFIN_ENDPOINT env)")
+	apiKey := flag.String("api-key", "", "Jellyfin API key (or JELLYFIN_API_KEY env)")
+	username := flag.String("username", "", "Jellyfin username (or JELLYFIN_USERNAME env)")
+	password := flag.String("password", "", "Jellyfin password (or JELLYFIN_PASSWORD env)")
 	outputDir := flag.String("output", ".", "Output directory for generated Terraform files")
 	flag.Parse()
+	fromEnv(flag.CommandLine, "endpoint", "JELLYFIN_ENDPOINT")
+	fromEnv(flag.CommandLine, "api-key", "JELLYFIN_API_KEY")
+	fromEnv(flag.CommandLine, "username", "JELLYFIN_USERNAME")
+	fromEnv(flag.CommandLine, "password", "JELLYFIN_PASSWORD")
 
 	if *endpoint == "" {
 		fmt.Fprintln(os.Stderr, "Error: --endpoint or JELLYFIN_ENDPOINT is required")
@@ -36,7 +42,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	c, err := importClient(context.Background(), *endpoint, *apiKey, *username, *password)
+	ctx := context.Background()
+	c, err := importClient(ctx, *endpoint, *apiKey, *username, *password)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error configuring Jellyfin client: %v\n", err)
 		os.Exit(1)
@@ -47,19 +54,29 @@ func main() {
 		os.Exit(1)
 	}
 
-	g := &generator{
-		client:    c,
-		ctx:       context.Background(),
-		outputDir: *outputDir,
-		usedNames: make(map[string]bool),
-	}
-
-	if err := g.Generate(); err != nil {
+	g := &generator{client: c, outputDir: *outputDir}
+	if err := g.Generate(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
 	fmt.Println("Import files generated successfully in", *outputDir)
+}
+
+// fromEnv sets the flag name from the environment variable env when the
+// command line leaves it out, as a default would, so a flag set to empty, such
+// as -api-key= to sign in with a password instead, stays empty.
+func fromEnv(fs *flag.FlagSet, name, env string) {
+	value, ok := os.LookupEnv(env)
+	if !ok {
+		return
+	}
+	explicit := false
+	fs.Visit(func(f *flag.Flag) { explicit = explicit || f.Name == name })
+	if !explicit {
+		// A string flag takes any value.
+		_ = fs.Set(name, value)
+	}
 }
 
 func importClient(ctx context.Context, endpoint, apiKey, username, password string) (*client.Client, error) {
@@ -84,17 +101,9 @@ func importClient(ctx context.Context, endpoint, apiKey, username, password stri
 
 type generator struct {
 	client    *client.Client
-	ctx       context.Context
 	outputDir string
 	usedNames map[string]bool // resource addresses already handed out
 	warnings  io.Writer
-}
-
-func (g *generator) context() context.Context {
-	if g.ctx != nil {
-		return g.ctx
-	}
-	return context.Background()
 }
 
 func (g *generator) warnf(format string, args ...any) {
@@ -107,9 +116,10 @@ func (g *generator) warnf(format string, args ...any) {
 
 // uniqueName returns a Terraform resource name that no earlier call returned
 // for resourceType, appending the lowest numeric suffix that is still free.
-// A suffixed name has to be checked as well, because another name can
-// sanitize to it.
 func (g *generator) uniqueName(resourceType, baseName string) string {
+	if g.usedNames == nil {
+		g.usedNames = make(map[string]bool)
+	}
 	name := baseName
 	for i := 1; g.usedNames[resourceType+"."+name]; i++ {
 		name = fmt.Sprintf("%s_%d", baseName, i)
@@ -119,74 +129,42 @@ func (g *generator) uniqueName(resourceType, baseName string) string {
 }
 
 // Generate generates all Terraform files.
-func (g *generator) Generate() error {
-	var imports []string
-	var resources []string
-
-	// Users
-	userImports, userResources, err := g.generateUsers()
-	if err != nil {
-		return fmt.Errorf("generating users: %w", err)
+func (g *generator) Generate(ctx context.Context) error {
+	sections := []struct {
+		name          string
+		generate      func(context.Context) ([]string, []string, error)
+		importsTokens bool
+	}{
+		{"users", g.generateUsers, false},
+		{"libraries", g.generateLibraries, false},
+		{"API keys", g.generateAPIKeys, true},
+		{"plugin repositories", g.generatePluginRepositories, false},
+		{"plugins", g.generatePlugins, false},
+		{"scheduled tasks", g.generateScheduledTasks, false},
+		{"configurations", g.generateSingletonConfigs, false},
 	}
-	imports = append(imports, userImports...)
-	resources = append(resources, userResources...)
 
-	// Libraries
-	libImports, libResources, err := g.generateLibraries()
-	if err != nil {
-		return fmt.Errorf("generating libraries: %w", err)
+	var imports, resources []string
+	tokensImported := false
+	for _, s := range sections {
+		sectionImports, sectionResources, err := s.generate(ctx)
+		if err != nil {
+			return fmt.Errorf("generating %s: %w", s.name, err)
+		}
+		tokensImported = tokensImported || s.importsTokens && len(sectionImports) > 0
+		imports = append(imports, sectionImports...)
+		resources = append(resources, sectionResources...)
 	}
-	imports = append(imports, libImports...)
-	resources = append(resources, libResources...)
 
-	// API Keys
-	keyImports, keyResources, err := g.generateAPIKeys()
-	if err != nil {
-		return fmt.Errorf("generating API keys: %w", err)
-	}
-	imports = append(imports, keyImports...)
-	resources = append(resources, keyResources...)
-
-	// Plugin Repositories
-	repoImports, repoResources, err := g.generatePluginRepositories()
-	if err != nil {
-		return fmt.Errorf("generating plugin repositories: %w", err)
-	}
-	imports = append(imports, repoImports...)
-	resources = append(resources, repoResources...)
-
-	// Plugins
-	pluginImports, pluginResources, err := g.generatePlugins()
-	if err != nil {
-		return fmt.Errorf("generating plugins: %w", err)
-	}
-	imports = append(imports, pluginImports...)
-	resources = append(resources, pluginResources...)
-
-	// Scheduled Tasks
-	taskImports, taskResources, err := g.generateScheduledTasks()
-	if err != nil {
-		return fmt.Errorf("generating scheduled tasks: %w", err)
-	}
-	imports = append(imports, taskImports...)
-	resources = append(resources, taskResources...)
-
-	// Singleton configurations
-	singletonImports, singletonResources, err := g.generateSingletonConfigs()
-	if err != nil {
-		return fmt.Errorf("generating configurations: %w", err)
-	}
-	imports = append(imports, singletonImports...)
-	resources = append(resources, singletonResources...)
-
-	// Write imports.tf
 	if len(imports) > 0 {
 		if err := g.writeFile("imports.tf", strings.Join(imports, "\n")); err != nil {
 			return fmt.Errorf("writing imports.tf: %w", err)
 		}
+		if tokensImported {
+			g.warnf("imports.tf holds the access token of each API key as its import ID; keep it out of version control, and remove those import blocks once terraform apply has imported the keys")
+		}
 	}
 
-	// Write resources.tf
 	if len(resources) > 0 {
 		content := terraformBlock + "\n" + strings.Join(resources, "\n")
 		if err := g.writeFile("resources.tf", content); err != nil {
@@ -198,6 +176,8 @@ func (g *generator) Generate() error {
 	return nil
 }
 
+const providerSource = "ThePhaseless/jellyfin"
+
 // terraformBlock names the provider's registry address, without which
 // terraform init looks for hashicorp/jellyfin.
 const terraformBlock = `terraform {
@@ -208,8 +188,6 @@ const terraformBlock = `terraform {
   }
 }
 `
-
-const providerSource = "ThePhaseless/jellyfin"
 
 // warnIfOtherConfiguration points out that Terraform rejects a second
 // required_providers entry for jellyfin, which configuration already in the
@@ -227,8 +205,8 @@ func (g *generator) warnIfOtherConfiguration() {
 	}
 }
 
-func (g *generator) generateUsers() ([]string, []string, error) {
-	users, err := g.client.GetUsers(g.context())
+func (g *generator) generateUsers(ctx context.Context) ([]string, []string, error) {
+	users, err := g.client.GetUsers(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -240,9 +218,9 @@ func (g *generator) generateUsers() ([]string, []string, error) {
 
 		attrs := map[string]string{
 			"name":               hclString(user.Name),
-			"is_administrator":   fmt.Sprintf("%t", user.Policy.IsAdministrator),
-			"is_disabled":        fmt.Sprintf("%t", user.Policy.IsDisabled),
-			"enable_all_folders": fmt.Sprintf("%t", user.Policy.EnableAllFolders),
+			"is_administrator":   strconv.FormatBool(user.Policy.IsAdministrator),
+			"is_disabled":        strconv.FormatBool(user.Policy.IsDisabled),
+			"enable_all_folders": strconv.FormatBool(user.Policy.EnableAllFolders),
 		}
 		resources = append(resources, resourceBlock("jellyfin_user", name, attrs))
 	}
@@ -250,36 +228,16 @@ func (g *generator) generateUsers() ([]string, []string, error) {
 	return imports, resources, nil
 }
 
-// libraryCollectionTypes are the collection types jellyfin_library accepts.
-var libraryCollectionTypes = map[string]bool{
-	"movies":      true,
-	"tvshows":     true,
-	"music":       true,
-	"musicvideos": true,
-	"books":       true,
-	"homevideos":  true,
-	"boxsets":     true,
-	"mixed":       true,
-}
-
-func (g *generator) generateLibraries() ([]string, []string, error) {
-	folders, err := g.client.GetVirtualFolders(g.context())
+func (g *generator) generateLibraries(ctx context.Context) ([]string, []string, error) {
+	folders, err := g.client.GetVirtualFolders(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	var imports, resources []string
 	for _, folder := range folders {
-		// Jellyfin's web UI creates a mixed library without a collection type;
-		// the provider reads that as mixed and rejects "".
-		collectionType := folder.CollectionType
-		if collectionType == "" {
-			collectionType = "mixed"
-		}
-		// collection_type is checked against a fixed list and replaces the
-		// library when it changes, so for any other type no configuration both
-		// passes validation and matches the imported state.
-		if !libraryCollectionTypes[collectionType] {
+		collectionType, accepted := provider.LibraryCollectionType(folder.CollectionType)
+		if !accepted {
 			g.warnf("skipping library %q: jellyfin_library does not accept its collection type %q", folder.Name, folder.CollectionType)
 			continue
 		}
@@ -303,8 +261,8 @@ func (g *generator) generateLibraries() ([]string, []string, error) {
 	return imports, resources, nil
 }
 
-func (g *generator) generateAPIKeys() ([]string, []string, error) {
-	keys, err := g.client.GetAPIKeys(g.context())
+func (g *generator) generateAPIKeys(ctx context.Context) ([]string, []string, error) {
+	keys, err := g.client.GetAPIKeys(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -323,21 +281,30 @@ func (g *generator) generateAPIKeys() ([]string, []string, error) {
 	return imports, resources, nil
 }
 
-func (g *generator) generatePluginRepositories() ([]string, []string, error) {
-	repos, err := g.client.GetPluginRepositories(g.context())
+func (g *generator) generatePluginRepositories(ctx context.Context) ([]string, []string, error) {
+	repos, err := g.client.GetPluginRepositories(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	named := map[string]int{}
+	for _, repo := range repos {
+		named[repo.Name]++
+	}
+
 	var imports, resources []string
 	for _, repo := range repos {
+		if named[repo.Name] > 1 {
+			g.warnf("skipping plugin repository %q at %s: %d repositories have that name, and jellyfin_plugin_repository imports by name; rename them to import them", repo.Name, repo.URL, named[repo.Name])
+			continue
+		}
 		name := g.uniqueName("jellyfin_plugin_repository", sanitizeName(repo.Name))
 		imports = append(imports, importBlock("jellyfin_plugin_repository", name, repo.Name))
 
 		attrs := map[string]string{
 			"name":    hclString(repo.Name),
 			"url":     hclString(repo.URL),
-			"enabled": fmt.Sprintf("%t", repo.Enabled),
+			"enabled": strconv.FormatBool(repo.Enabled),
 		}
 		resources = append(resources, resourceBlock("jellyfin_plugin_repository", name, attrs))
 	}
@@ -345,14 +312,14 @@ func (g *generator) generatePluginRepositories() ([]string, []string, error) {
 	return imports, resources, nil
 }
 
-func (g *generator) generatePlugins() ([]string, []string, error) {
-	plugins, err := g.client.GetInstalledPlugins(g.context())
+func (g *generator) generatePlugins(ctx context.Context) ([]string, []string, error) {
+	listed, err := g.client.GetInstalledPlugins(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
+	plugins := provider.ImportablePlugins(listed)
 
-	// Try to resolve repository URLs from available packages.
-	repoURLs := g.resolvePluginRepoURLs(plugins)
+	repoURLs := g.resolvePluginRepoURLs(ctx, plugins)
 
 	var imports, resources []string
 	for _, plugin := range plugins {
@@ -378,35 +345,29 @@ func (g *generator) generatePlugins() ([]string, []string, error) {
 // jellyfin_plugin's Read does, so that repository_url matches the imported
 // state: only the first package with the plugin's name counts, and only its
 // entry for the installed version. Any other URL would plan a replacement.
-func (g *generator) resolvePluginRepoURLs(plugins []client.InstalledPlugin) map[string]string {
+func (g *generator) resolvePluginRepoURLs(ctx context.Context, plugins []client.InstalledPlugin) map[string]string {
 	result := make(map[string]string)
-	packages, err := g.client.GetAvailablePackages(g.context())
+	packages, err := g.client.GetAvailablePackages(ctx)
 	if err != nil {
 		return result
 	}
-
 	for _, p := range plugins {
-		for _, pkg := range packages {
-			if pkg.Name != p.Name {
-				continue
-			}
-			for _, v := range pkg.Versions {
-				if v.Version == p.Version && v.RepositoryURL != "" {
-					result[p.ID] = v.RepositoryURL
-					break
-				}
-			}
-			break
+		if repositoryURL := provider.PluginRepositoryURL(packages, p.Name, p.Version); repositoryURL != "" {
+			result[p.ID] = repositoryURL
 		}
 	}
-
 	return result
 }
 
-func (g *generator) generateScheduledTasks() ([]string, []string, error) {
-	tasks, err := g.client.GetScheduledTasks(g.context())
+func (g *generator) generateScheduledTasks(ctx context.Context) ([]string, []string, error) {
+	tasks, err := g.client.GetScheduledTasks(ctx)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	tasksWithKey := map[string]int{}
+	for _, task := range tasks {
+		tasksWithKey[task.Key]++
 	}
 
 	var imports, resources []string
@@ -415,20 +376,27 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 			continue
 		}
 
-		name := g.uniqueName("jellyfin_scheduled_task", sanitizeName(task.Name))
-		imports = append(imports, importBlock("jellyfin_scheduled_task", name, task.ID))
-
-		// triggers is required, and the Read stores an empty list for none.
-		if task.Triggers == nil {
-			task.Triggers = []json.RawMessage{}
+		ref, keySelectsTask := task.ID, task.Key != "" && tasksWithKey[task.Key] == 1
+		if keySelectsTask {
+			ref = task.Key
 		}
+		name := g.uniqueName("jellyfin_scheduled_task", sanitizeName(task.Name))
+		imports = append(imports, importBlock("jellyfin_scheduled_task", name, ref))
+
 		raw, err := json.Marshal(task)
 		if err != nil {
 			return nil, nil, fmt.Errorf("encoding task %s: %w", task.ID, err)
 		}
-		attrs, err := hclAttributes(string(raw), scheduledTaskFields, 1)
+		// Every trigger attribute the server returns is written out, because
+		// the resource removes unset trigger attributes from the server on
+		// apply.
+		attrs, err := importedAttributes(ctx, g.client, "jellyfin_scheduled_task", ref, string(raw))
 		if err != nil {
-			return nil, nil, fmt.Errorf("parsing triggers for task %s: %w", task.ID, err)
+			return nil, nil, fmt.Errorf("formatting task %s: %w", task.ID, err)
+		}
+		if !keySelectsTask {
+			delete(attrs, "key")
+			attrs["task_id"] = hclString(task.ID)
 		}
 		resources = append(resources, resourceBlock("jellyfin_scheduled_task", name, attrs))
 	}
@@ -436,81 +404,30 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 	return imports, resources, nil
 }
 
-// Every trigger attribute the server returns is written out because the
-// resource removes unset trigger attributes from the server on apply.
-var scheduledTaskFields = []hclField{
-	{json: "Id", attr: "task_id"},
-	{json: "Triggers", attr: "triggers", nested: []hclField{
-		{json: "Type", attr: "type"},
-		{json: "TimeOfDayTicks", attr: "time_of_day_ticks"},
-		{json: "IntervalTicks", attr: "interval_ticks"},
-		{json: "DayOfWeek", attr: "day_of_week"},
-		{json: "MaxRuntimeTicks", attr: "max_runtime_ticks"},
-	}},
-}
-
-func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
-	ctx := g.context()
+func (g *generator) generateSingletonConfigs(ctx context.Context) ([]string, []string, error) {
 	singletons := []struct {
-		name   string
-		fields []hclField
-		read   func() (string, error)
+		name string
+		read func(context.Context) (string, error)
 	}{
-		{"system", systemFields, func() (string, error) {
-			c, err := g.client.GetSystemConfiguration(ctx)
-			if err != nil {
-				return "", err
-			}
-			return c.RawJSON, nil
-		}},
-		{"encoding", encodingFields, func() (string, error) {
-			c, err := g.client.GetEncodingOptions(ctx)
-			if err != nil {
-				return "", err
-			}
-			return c.RawJSON, nil
-		}},
-		{"networking", networkingFields, func() (string, error) {
-			c, err := g.client.GetNetworkConfiguration(ctx)
-			if err != nil {
-				return "", err
-			}
-			return c.RawJSON, nil
-		}},
-		{"branding", brandingFields, func() (string, error) {
-			c, err := g.client.GetBrandingConfiguration(ctx)
-			if err != nil {
-				return "", err
-			}
-			return c.RawJSON, nil
-		}},
-		{"livetv", livetvFields, func() (string, error) {
-			c, err := g.client.GetLiveTVConfiguration(ctx)
-			if err != nil {
-				return "", err
-			}
-			return c.RawJSON, nil
-		}},
-		{"metadata", metadataFields, func() (string, error) {
-			c, err := g.client.GetMetadataConfiguration(ctx)
-			if err != nil {
-				return "", err
-			}
-			return c.RawJSON, nil
-		}},
+		{"system", g.client.GetSystemConfiguration},
+		{"encoding", g.client.GetEncodingOptions},
+		{"networking", g.client.GetNetworkConfiguration},
+		{"branding", g.client.GetBrandingConfiguration},
+		{"livetv", g.client.GetLiveTVConfiguration},
+		{"metadata", g.client.GetMetadataConfiguration},
 	}
 
 	var imports, resources []string
 	for _, s := range singletons {
-		raw, err := s.read()
+		raw, err := s.read(ctx)
 		if err != nil {
 			return nil, nil, fmt.Errorf("getting %s configuration: %w", s.name, err)
 		}
-		attrs, err := hclAttributes(raw, s.fields, 1)
+		resourceType := "jellyfin_" + s.name + "_configuration"
+		attrs, err := importedAttributes(ctx, g.client, resourceType, s.name, raw)
 		if err != nil {
 			return nil, nil, fmt.Errorf("formatting %s configuration: %w", s.name, err)
 		}
-		resourceType := "jellyfin_" + s.name + "_configuration"
 		imports = append(imports, importBlock(resourceType, "this", s.name))
 		resources = append(resources, resourceBlock(resourceType, "this", attrs))
 	}
@@ -523,6 +440,8 @@ func (g *generator) writeFile(name, content string) error {
 	return os.WriteFile(p, []byte(content+"\n"), 0o600)
 }
 
+var sanitizeRe = regexp.MustCompile(`[^a-zA-Z0-9]+`)
+
 // sanitizeName converts a human-readable name to a valid Terraform identifier.
 func sanitizeName(name string) string {
 	result := sanitizeRe.ReplaceAllString(strings.ToLower(strings.TrimSpace(name)), "_")
@@ -530,8 +449,8 @@ func sanitizeName(name string) string {
 	if result == "" {
 		result = "unnamed"
 	}
-	// Ensure it starts with a letter.
-	if result[0] >= '0' && result[0] <= '9' {
+	startsWithDigit := result[0] >= '0' && result[0] <= '9'
+	if startsWithDigit {
 		result = "r_" + result
 	}
 	return result

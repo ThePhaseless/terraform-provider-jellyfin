@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,15 +18,20 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 const (
-	jellyfinAPISchemaGolden     = "testdata/jellyfin_api_schema.golden"
-	securityPluginPayloadGolden = "testdata/security_plugin_config_schema.golden"
+	jellyfinAPISchemaGolden      = "../wire/schema/jellyfin_api_schema.golden"
+	jellyfinAPISchemaFloorGolden = "../wire/schema/jellyfin_api_schema_floor.golden"
+	securityPluginPayloadGolden  = "../wire/schema/security_plugin_config_schema.golden"
+	supportedJellyfinEnvFile     = "internal/provider/supported_jellyfin_version.env"
+	floorJellyfinEnvFile         = "internal/wire/schema/floor.env"
 )
 
 const (
@@ -39,8 +43,12 @@ const (
 // maintainer: what the lines record, which acceptance test regenerates them
 // and with what environment, and what has to change along with them.
 type schemaGuard struct {
-	golden   string
-	test     string
+	golden string
+	test   string
+	// envFile is the docker compose env file that picks the Jellyfin release
+	// the golden records.
+	envFile string
+	// ciStep is empty for a golden CI does not check.
 	ciStep   string
 	env      string
 	records  string
@@ -48,23 +56,45 @@ type schemaGuard struct {
 }
 
 var jellyfinAPISchemaGuard = schemaGuard{
-	golden: jellyfinAPISchemaGolden,
-	test:   "TestAccJellyfinAPISchemaGuard",
-	ciStep: "Run acceptance tests",
+	golden:  jellyfinAPISchemaGolden,
+	test:    "TestAccJellyfinAPISchemaGuard",
+	envFile: supportedJellyfinEnvFile,
+	ciStep:  "Run acceptance tests",
 	records: `Each line is an endpoint internal/client calls ("op", or "undocumented" when
 the server's OpenAPI document does not describe it) or a property of a schema
 those endpoints send or return ("schema"), as that document describes it. The
 golden changes when a Jellyfin release changes one of those, or when
 internal/client starts or stops calling an endpoint.`,
-	followUp: `A changed line can break a resource even though the test passes again, so fix
-the affected resources in the same change.`,
+	followUp: `The provider reads this golden at run time, through internal/wire, for the JSON
+key of each attribute, so a changed line can change what it sends although the
+test passes again. Run TestUnitWireBindings, review the diff of
+internal/provider/testdata/wire_bindings.golden it reports, and fix the
+affected resources in the same change.`,
+}
+
+var jellyfinAPISchemaFloorGuard = schemaGuard{
+	golden:  jellyfinAPISchemaFloorGolden,
+	test:    "TestAccJellyfinAPISchemaFloorGuard",
+	envFile: floorJellyfinEnvFile,
+	env:     "SCHEMA_GUARD_FLOOR=1",
+	records: `The lines of jellyfin_api_schema.golden, reduced the same way from the OpenAPI
+document of the older Jellyfin release that ` + floorJellyfinEnvFile + `
+names. A field the pinned golden has and this one lacks needs the release
+floor.env names as NEXT_JELLYFIN_VERSION, so internal/wire rejects it on older
+servers. CI runs only the supported release and does not check this golden;
+the test runs only with SCHEMA_GUARD_FLOOR=1, against a server of the floor
+release.`,
+	followUp: `A property the diff adds or removes moves the Jellyfin version its attribute
+needs: run TestUnitWireBindings and review the since= changes in
+internal/provider/testdata/wire_bindings.golden.`,
 }
 
 var securityPluginPayloadGuard = schemaGuard{
-	golden: securityPluginPayloadGolden,
-	test:   "TestAccSecurityPluginConfigSchemaGuard",
-	ciStep: "Run restart acceptance tests (isolated)",
-	env:    "JELLYFIN_RESTART_ACC=1",
+	golden:  securityPluginPayloadGolden,
+	test:    "TestAccSecurityPluginConfigSchemaGuard",
+	envFile: supportedJellyfinEnvFile,
+	ciStep:  "Run restart acceptance tests (isolated)",
+	env:     "JELLYFIN_RESTART_ACC=1",
 	records: `Each line is a key of the configuration that the JellyfinSecurity build pinned
 in internal/provider/supported_security_plugin_version.env serves, with its JSON
 type. The test first writes ` + strconv.Quote(payloadListPlaceholder) + ` into every list the plugin serves empty, so a
@@ -75,14 +105,15 @@ list in the probe in testAccSecurityPluginPayloadShape fixes it. The golden
 changes when a new pin adds, removes or retypes a key. The test installs the
 plugin and restarts the server to load it, which it does only with
 JELLYFIN_RESTART_ACC=1, so CI runs it in a step of its own.`,
-	followUp: `jellyfin_security_plugin_configuration maps each key by hand, so update it in
-the same change: TestUnitJellyfinSecurityWritesBackExactlyTheServedKeys fails
-until the resource writes back exactly the keys the golden lists, less those
-securityPluginUnmanagedKeys excuses.`,
+	followUp: `jellyfin_security_plugin_configuration reads this golden at run time, through
+internal/wire, for the JSON key of each attribute, so a changed line can change
+what it sends although the test passes again. Run TestUnitWireBindings, review
+the diff of internal/provider/testdata/wire_bindings.golden it reports, where a
+key no attribute claims shows as kept, and fix the resource in the same change.
+TestUnitJellyfinSecurityWriteKeepsTheServedShape fails while a rebuilt OIDC
+provider, user email or role mapping drops a key the golden lists.`,
 }
 
-// The spec types /System/Configuration/{key} as an opaque blob, so the schema
-// behind each key the client reads or writes has to be named by hand.
 var namedConfigurationSchemas = map[string]string{
 	"branding": "BrandingOptionsDto",
 	"encoding": "EncodingOptions",
@@ -91,9 +122,6 @@ var namedConfigurationSchemas = map[string]string{
 	"network":  "NetworkConfiguration",
 }
 
-// The provider reads only AccessToken from AuthenticationResult; expanding its
-// SessionInfo would drag the whole playback model (BaseItemDto,
-// MediaSourceInfo, DeviceProfile, ...) into the guard.
 var unexpandedSchemas = map[string]bool{
 	"SessionInfoDto": true,
 }
@@ -118,6 +146,11 @@ type apiCall struct {
 	path   string
 }
 
+// namedConfigurationKey assumes the path matches namedConfigurationPath.
+func (c apiCall) namedConfigurationKey() string {
+	return strings.ToLower(c.path[strings.LastIndex(c.path, "/")+1:])
+}
+
 type openAPIContent map[string]struct {
 	Schema map[string]json.RawMessage `json:"schema"`
 }
@@ -134,9 +167,29 @@ type openAPIOperation struct {
 
 func TestAccJellyfinAPISchemaGuard(t *testing.T) {
 	testAccPreCheck(t)
+	checkSchemaGolden(t, jellyfinAPISchemaGuard, testAccReducedAPISchema(t, testAccClient(t)))
+}
+
+func TestAccJellyfinAPISchemaFloorGuard(t *testing.T) {
+	if os.Getenv("SCHEMA_GUARD_FLOOR") != "1" {
+		t.Skip("set SCHEMA_GUARD_FLOOR=1 to check the floor golden against a server of the release " + floorJellyfinEnvFile + " names")
+	}
+	testAccPreCheck(t)
 	c := testAccClient(t)
 
-	spec, err := c.GetOpenAPISpec(context.Background())
+	info, err := c.GetPublicSystemInfo(t.Context())
+	if err != nil {
+		t.Fatalf("reading the Jellyfin version: %v", err)
+	}
+	if info.Version != wire.FloorVersion() {
+		t.Fatalf("the server runs Jellyfin %s, but %s names %s, the release the floor golden records\n\n%s", info.Version, floorJellyfinEnvFile, wire.FloorVersion(), jellyfinAPISchemaFloorGuard.regenerateHelp())
+	}
+	checkSchemaGolden(t, jellyfinAPISchemaFloorGuard, testAccReducedAPISchema(t, c))
+}
+
+func testAccReducedAPISchema(t *testing.T, c *client.Client) []string {
+	t.Helper()
+	spec, err := c.GetOpenAPISpec(t.Context())
 	if err != nil {
 		t.Fatalf("getting OpenAPI spec: %v", err)
 	}
@@ -150,13 +203,11 @@ func TestAccJellyfinAPISchemaGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reducing OpenAPI spec: %v", err)
 	}
-
-	checkSchemaGolden(t, jellyfinAPISchemaGuard, lines)
+	return lines
 }
 
 // reduceOpenAPISpec keeps only the operations the client calls and the schemas
-// they reach, so a Jellyfin release trips the guard only when it changes
-// something the provider depends on.
+// they reach.
 func reduceOpenAPISpec(spec string, calls []apiCall) ([]string, error) {
 	var doc struct {
 		Paths      map[string]map[string]json.RawMessage `json:"paths"`
@@ -178,7 +229,7 @@ func reduceOpenAPISpec(spec string, calls []apiCall) ([]string, error) {
 		}
 
 		if tmpl == namedConfigurationPath {
-			key := strings.ToLower(call.path[strings.LastIndex(call.path, "/")+1:])
+			key := call.namedConfigurationKey()
 			name, ok := namedConfigurationSchemas[key]
 			if !ok {
 				return nil, fmt.Errorf("%s %s: add the schema of named configuration %q to namedConfigurationSchemas", call.method, call.path, key)
@@ -199,8 +250,8 @@ func reduceOpenAPISpec(spec string, calls []apiCall) ([]string, error) {
 	}
 	out = append(out, schemaLines...)
 
-	sort.Strings(out)
-	return dedupStrings(out), nil
+	slices.Sort(out)
+	return slices.Compact(out), nil
 }
 
 // matchOperation follows ASP.NET Core routing, which serves Jellyfin: literal
@@ -276,7 +327,7 @@ func goldenClientDrift(golden []string, calls []apiCall) []string {
 				continue
 			}
 			entry = "op " + call.method + " " + tmpl
-			key := strings.ToLower(call.path[strings.LastIndex(call.path, "/")+1:])
+			key := call.namedConfigurationKey()
 			if name, ok := namedConfigurationSchemas[key]; ok && tmpl == namedConfigurationPath && !goldenHasSchema(golden, name) {
 				drift = append(drift, fmt.Sprintf("  + internal/client uses named configuration %q, whose schema %s the golden does not list", key, name))
 			}
@@ -305,12 +356,12 @@ func operationLine(method, tmpl string, rawOp json.RawMessage, refs map[string]b
 
 	var paramParts []string
 	for _, param := range op.Parameters {
-		name := jsonString(param, "name")
-		in := jsonString(param, "in")
-		required := jsonBool(param, "required")
+		name := jsonField[string](param, "name")
+		in := jsonField[string](param, "in")
+		required := jsonField[bool](param, "required")
 		paramParts = append(paramParts, fmt.Sprintf("%s:%s:required=%t", name, in, required))
 	}
-	sort.Strings(paramParts)
+	slices.Sort(paramParts)
 
 	line := fmt.Sprintf("op %s %s", method, tmpl)
 	if len(paramParts) > 0 {
@@ -325,16 +376,9 @@ func operationLine(method, tmpl string, rawOp json.RawMessage, refs map[string]b
 		line += " | body=" + sig
 	}
 
-	var codes []string
-	for code := range op.Responses {
-		if strings.HasPrefix(code, "2") {
-			codes = append(codes, code)
-		}
-	}
-	sort.Strings(codes)
-	for _, code := range codes {
+	for _, code := range slices.Sorted(maps.Keys(op.Responses)) {
 		resp, ok := op.Responses[code].Content["application/json"]
-		if !ok {
+		if !strings.HasPrefix(code, "2") || !ok {
 			continue
 		}
 		sig, err := typeSignature(resp.Schema, refs)
@@ -350,11 +394,7 @@ func operationLine(method, tmpl string, rawOp json.RawMessage, refs map[string]b
 
 func schemaClosure(schemas map[string]json.RawMessage, roots map[string]bool) ([]string, error) {
 	var out []string
-	var queue []string
-	for name := range roots {
-		queue = append(queue, name)
-	}
-
+	queue := slices.Collect(maps.Keys(roots))
 	seen := map[string]bool{}
 	for len(queue) > 0 {
 		name := queue[0]
@@ -380,20 +420,15 @@ func schemaClosure(schemas map[string]json.RawMessage, roots map[string]bool) ([
 			return nil, fmt.Errorf("signature for %s: %w", name, err)
 		}
 		out = append(out, lines...)
-
-		for ref := range refs {
-			queue = append(queue, ref)
-		}
+		queue = slices.AppendSeq(queue, maps.Keys(refs))
 	}
 	return out, nil
 }
 
-// schemaLines puts each property of an object schema on a line of its own, so
-// a changed field is one short line in the golden diff rather than an edit
-// inside a line of several kilobytes.
+// schemaLines puts each property of an object schema on a line of its own.
 func schemaLines(name string, s map[string]json.RawMessage, refs map[string]bool) ([]string, error) {
 	rawProps, ok := s["properties"]
-	if !ok || jsonString(s, "type") != "object" {
+	if !ok || jsonField[string](s, "type") != "object" {
 		sig, err := typeSignature(s, refs)
 		if err != nil {
 			return nil, err
@@ -433,7 +468,7 @@ func schemaLines(name string, s map[string]json.RawMessage, refs map[string]bool
 // typeSignature renders s with each $ref as "#Name" and records the name in
 // refs; the referenced schema gets its own line, so a change shows up once.
 func typeSignature(s map[string]json.RawMessage, refs map[string]bool) (string, error) {
-	if ref := jsonString(s, "$ref"); ref != "" {
+	if ref := jsonField[string](s, "$ref"); ref != "" {
 		name := ref[strings.LastIndex(ref, "/")+1:]
 		refs[name] = true
 		return "#" + name, nil
@@ -464,8 +499,8 @@ func typeSignature(s map[string]json.RawMessage, refs map[string]bool) (string, 
 		return strings.Join(parts, ","), nil
 	}
 
-	typ := jsonString(s, "type")
-	format := jsonString(s, "format")
+	typ := jsonField[string](s, "type")
+	format := jsonField[string](s, "format")
 
 	switch typ {
 	case "object":
@@ -475,12 +510,7 @@ func typeSignature(s map[string]json.RawMessage, refs map[string]bool) (string, 
 			if err := json.Unmarshal(rawProps, &props); err != nil {
 				return "", err
 			}
-			var keys []string
-			for k := range props {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
+			for _, k := range slices.Sorted(maps.Keys(props)) {
 				var prop map[string]json.RawMessage
 				if err := json.Unmarshal(props[k], &prop); err != nil {
 					return "", err
@@ -530,14 +560,14 @@ func typeSignature(s map[string]json.RawMessage, refs map[string]bool) (string, 
 			for _, v := range values {
 				names = append(names, fmt.Sprint(v))
 			}
-			sort.Strings(names)
+			slices.Sort(names)
 			sig += " enum(" + strings.Join(names, "|") + ")"
 		}
 		return sig, nil
 	case "boolean":
 		return "boolean", nil
 	case "":
-		if jsonBool(s, "nullable") {
+		if jsonField[bool](s, "nullable") {
 			return "null", nil
 		}
 		return "any", nil
@@ -547,7 +577,7 @@ func typeSignature(s map[string]json.RawMessage, refs map[string]bool) (string, 
 }
 
 // clientAPICalls lists the requests internal/client makes, read from its
-// source so the guard follows the client without a hand-kept endpoint list.
+// source.
 func clientAPICalls(dir string) ([]apiCall, error) {
 	names, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
@@ -633,17 +663,11 @@ func packageAPICalls(fset *token.FileSet, files []*ast.File) ([]apiCall, error) 
 			}
 			calls = append(calls, fnCalls...)
 			key := info.Defs[fn.Name]
-			for _, site := range fnSites {
-				if !slices.Contains(f.sites[key], site) {
-					f.sites[key] = append(f.sites[key], site)
-					changed = true
-				}
+			if sites, added := appendMissing(f.sites[key], fnSites); added {
+				f.sites[key], changed = sites, true
 			}
-			for _, i := range fnEmbeds {
-				if !slices.Contains(f.embeds[key], i) {
-					f.embeds[key] = append(f.embeds[key], i)
-					changed = true
-				}
+			if embeds, added := appendMissing(f.embeds[key], fnEmbeds); added {
+				f.embeds[key], changed = embeds, true
 			}
 		}
 		if changed {
@@ -664,6 +688,17 @@ func packageAPICalls(fset *token.FileSet, files []*ast.File) ([]apiCall, error) 
 		}
 		return calls, nil
 	}
+}
+
+// appendMissing reports whether it appended any.
+func appendMissing[T comparable](list, items []T) ([]T, bool) {
+	n := len(list)
+	for _, item := range items {
+		if !slices.Contains(list, item) {
+			list = append(list, item)
+		}
+	}
+	return list, len(list) > n
 }
 
 // requestSite describes a function that sends a request: the method is fixed
@@ -758,19 +793,10 @@ func (f *requestFinder) requestsIn(fn *ast.FuncDecl) ([]apiCall, []requestSite, 
 	var calls []apiCall
 	var sites []requestSite
 	var embeds []int
-	var firstErr error
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
-		if firstErr != nil {
-			return false
-		}
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
+	visit := func(call *ast.CallExpr) error {
 		key, callee, err := f.callSites(call)
 		if err != nil {
-			firstErr = fmt.Errorf("%s: %w", f.fset.Position(call.Pos()), err)
-			return false
+			return err
 		}
 		if len(callee) > 0 {
 			f.reached[key] = true
@@ -778,8 +804,7 @@ func (f *requestFinder) requestsIn(fn *ast.FuncDecl) ([]apiCall, []requestSite, 
 		for _, site := range callee {
 			siteCalls, forwarded, embedded, err := r.request(call, site)
 			if err != nil {
-				firstErr = fmt.Errorf("%s: %w", f.fset.Position(call.Pos()), err)
-				return false
+				return err
 			}
 			calls = append(calls, siteCalls...)
 			sites = append(sites, forwarded...)
@@ -788,12 +813,20 @@ func (f *requestFinder) requestsIn(fn *ast.FuncDecl) ([]apiCall, []requestSite, 
 		for _, i := range f.embeds[key] {
 			embedded, err := r.embeddedArg(call, key, i)
 			if err != nil {
-				firstErr = fmt.Errorf("%s: %w", f.fset.Position(call.Pos()), err)
-				return false
+				return err
 			}
 			embeds = append(embeds, embedded...)
 		}
-		return true
+		return nil
+	}
+	var firstErr error
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok && firstErr == nil {
+			if err := visit(call); err != nil {
+				firstErr = fmt.Errorf("%s: %w", f.fset.Position(call.Pos()), err)
+			}
+		}
+		return firstErr == nil
 	})
 	return calls, sites, embeds, firstErr
 }
@@ -1259,35 +1292,21 @@ func isIdent(expr ast.Expr, name string) bool {
 	return ok && id.Name == name
 }
 
-func jsonString(m map[string]json.RawMessage, key string) string {
-	raw, ok := m[key]
-	if !ok {
-		return ""
+// jsonField returns the zero value when m lacks key or holds another type.
+func jsonField[T any](m map[string]json.RawMessage, key string) T {
+	var v T
+	if err := json.Unmarshal(m[key], &v); err != nil {
+		var zero T
+		return zero
 	}
-	var s string
-	if err := json.Unmarshal(raw, &s); err != nil {
-		return ""
-	}
-	return s
-}
-
-func jsonBool(m map[string]json.RawMessage, key string) bool {
-	raw, ok := m[key]
-	if !ok {
-		return false
-	}
-	var b bool
-	if err := json.Unmarshal(raw, &b); err != nil {
-		return false
-	}
-	return b
+	return v
 }
 
 func checkSchemaGolden(t *testing.T, guard schemaGuard, actual []string) {
 	t.Helper()
 
-	sort.Strings(actual)
-	actual = dedupStrings(actual)
+	slices.Sort(actual)
+	actual = slices.Compact(actual)
 
 	if os.Getenv("SCHEMA_GUARD_UPDATE") == "1" {
 		if err := os.MkdirAll(filepath.Dir(guard.golden), 0755); err != nil {
@@ -1306,51 +1325,43 @@ func checkSchemaGolden(t *testing.T, guard schemaGuard, actual []string) {
 	}
 
 	want := strings.Split(strings.TrimSpace(string(wantBytes)), "\n")
-	wantSet := map[string]bool{}
-	for _, line := range want {
-		wantSet[line] = true
-	}
-	actualSet := map[string]bool{}
-	for _, line := range actual {
-		actualSet[line] = true
+	missing := linesNotIn(want, actual)
+	unexpected := linesNotIn(actual, want)
+	if len(missing) == 0 && len(unexpected) == 0 {
+		return
 	}
 
-	var missing []string
-	for _, line := range want {
-		if !actualSet[line] {
-			missing = append(missing, line)
+	var msg strings.Builder
+	msg.WriteString("schema guard mismatch against " + guard.golden + ":\n")
+	if len(missing) > 0 {
+		msg.WriteString("\nin the golden, not served now:\n")
+		for _, line := range missing {
+			msg.WriteString("  - " + line + "\n")
 		}
 	}
-	var unexpected []string
-	for _, line := range actual {
-		if !wantSet[line] {
-			unexpected = append(unexpected, line)
+	if len(unexpected) > 0 {
+		msg.WriteString("\nserved now, not in the golden:\n")
+		for _, line := range unexpected {
+			msg.WriteString("  + " + line + "\n")
 		}
 	}
+	msg.WriteString("\n")
+	msg.WriteString(guard.regenerateHelp())
+	t.Fatal(msg.String())
+}
 
-	if len(missing) > 0 || len(unexpected) > 0 {
-		var msg strings.Builder
-		msg.WriteString("schema guard mismatch against " + guard.golden + ":\n")
-		if len(missing) > 0 {
-			msg.WriteString("\nin the golden, not served now:\n")
-			for _, line := range missing {
-				msg.WriteString("  - ")
-				msg.WriteString(line)
-				msg.WriteString("\n")
-			}
-		}
-		if len(unexpected) > 0 {
-			msg.WriteString("\nserved now, not in the golden:\n")
-			for _, line := range unexpected {
-				msg.WriteString("  + ")
-				msg.WriteString(line)
-				msg.WriteString("\n")
-			}
-		}
-		msg.WriteString("\n")
-		msg.WriteString(guard.regenerateHelp())
-		t.Fatal(msg.String())
+func linesNotIn(lines, other []string) []string {
+	have := map[string]bool{}
+	for _, line := range other {
+		have[line] = true
 	}
+	var out []string
+	for _, line := range lines {
+		if !have[line] {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 func (g schemaGuard) regenerateHelp() string {
@@ -1358,28 +1369,30 @@ func (g schemaGuard) regenerateHelp() string {
 	if g.env != "" {
 		env += " " + g.env
 	}
+	ci := "CI does not check this golden."
+	if g.ciStep != "" {
+		ci = "CI checks the golden in this step of .github/workflows/test.yml:\n\n  " + g.ciStep
+	}
 	return fmt.Sprintf(`%[1]s
 
-CI checks the golden in this step of .github/workflows/test.yml:
-
-  %[3]s
+%[3]s
 
 To regenerate it, run from the repository root against a fresh server of the
-supported Jellyfin version (down -v drops the volumes a previous run left
-behind):
+Jellyfin release %[7]s names (down -v drops the volumes
+a previous run left behind):
 
-  docker compose --env-file internal/provider/supported_jellyfin_version.env down -v
-  docker compose --env-file internal/provider/supported_jellyfin_version.env up -d
+  docker compose --env-file %[7]s down -v
+  docker compose --env-file %[7]s up -d
   eval "$(./scripts/setup_jellyfin.sh | grep '^export ')"
   %[4]s \
     go test -count=1 -run '^%[2]s$' ./internal/provider/
 
 A maintainer must review the resulting diff before it is committed:
 
-  git diff internal/provider/%[5]s
+  git diff %[5]s
 
 %[6]s
-`, g.records, g.test, g.ciStep, env, g.golden, g.followUp)
+`, g.records, g.test, ci, env, filepath.ToSlash(filepath.Join("internal", "provider", g.golden)), g.followUp, g.envFile)
 }
 
 func dedupStrings(in []string) []string {
@@ -1511,7 +1524,7 @@ func TestUnitReduceOpenAPISpec(t *testing.T) {
 		"undocumented POST /Users/{}",
 	}
 
-	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+	if !slices.Equal(lines, want) {
 		t.Fatalf("unexpected lines:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
 	}
 }
@@ -1690,7 +1703,7 @@ func (c *Client) createKey(ctx context.Context, app string) error {
 		{http.MethodGet, "/Items/{}"},
 		{http.MethodPost, "/Auth/Keys"},
 	}
-	if fmt.Sprint(got) != fmt.Sprint(want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("unexpected calls:\n%v\nwant:\n%v", got, want)
 	}
 }
@@ -1965,7 +1978,7 @@ func TestUnitSchemaGuardsRunInTheWorkflowStepTheyName(t *testing.T) {
 		} else if !runs {
 			t.Errorf("%s: no go test command in step %q runs it in ./internal/provider/", g.test, g.ciStep)
 		}
-		for _, kv := range strings.Fields("TF_ACC=1 " + g.env) {
+		for kv := range strings.FieldsSeq("TF_ACC=1 " + g.env) {
 			key, value, _ := strings.Cut(kv, "=")
 			if !strings.Contains(step, fmt.Sprintf("%s: %q", key, value)) {
 				t.Errorf("%s: step %q does not set %s", g.test, g.ciStep, kv)
@@ -2048,7 +2061,7 @@ type goTestCommand struct {
 // "=" or as the next word.
 func goTestCommands(script string) []goTestCommand {
 	var cmds []goTestCommand
-	for _, line := range strings.Split(strings.ReplaceAll(script, "\\\n", " "), "\n") {
+	for line := range strings.SplitSeq(strings.ReplaceAll(script, "\\\n", " "), "\n") {
 		words := shellWords(line)
 		for i := 0; i+1 < len(words); i++ {
 			if words[i] != "go" || words[i+1] != "test" {

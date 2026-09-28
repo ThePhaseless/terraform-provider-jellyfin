@@ -30,14 +30,16 @@ resource "jellyfin_library" "movies" {
     save_local_metadata                  = true
     season_zero_display_name             = "Specials"
     disabled                             = false
+    # Subtitle fetchers come from plugins, such as Open Subtitles. List the
+    # ones to enable, in priority order; the others are disabled.
+    subtitle_fetchers = []
 
     type_options = [
       {
-        type                   = "Movie"
-        metadata_fetchers      = ["TheMovieDb"]
-        metadata_fetcher_order = ["TheMovieDb"]
-        image_fetchers         = ["TheMovieDb"]
-        image_fetcher_order    = ["TheMovieDb"]
+        type = "Movie"
+        # The enabled fetchers, in priority order.
+        metadata_fetchers = ["TheMovieDb", "The Open Movie Database"]
+        image_fetchers    = ["TheMovieDb"]
         image_options = [
           {
             type      = "Backdrop"
@@ -58,7 +60,7 @@ resource "jellyfin_library" "movies" {
 
 - `collection_type` (String) The collection type: one of `movies`, `tvshows`, `music`, `musicvideos`, `homevideos`, `boxsets`, `books`, `mixed`. A library without a collection type, which is how Jellyfin's web UI creates a Mixed Movies and Shows library, reads as `mixed`: Jellyfin treats the two the same.
 - `name` (String) The library name.
-- `paths` (List of String) Paths of the library's media folders. Jellyfin looks them up on the server, so when it runs in a container they must be paths inside the container.
+- `paths` (List of String) Paths of the library's media folders. Jellyfin looks them up on the server, so when it runs in a container they must be paths inside the container. Changing the paths replaces the library; changing only their order does not.
 
 ### Optional
 
@@ -77,10 +79,10 @@ Optional:
 - `cache_images_in_library` (Boolean, Deprecated) Whether images are cached in the library. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `chapter_image_interval_seconds` (Number, Deprecated) Chapter image interval in seconds. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `disabled` (Boolean) Whether the library is disabled, the inverse of Jellyfin's `Enabled` option.
-- `disabled_image_fetchers` (List of String, Deprecated) Disabled image fetchers. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
-- `disabled_metadata_fetchers` (List of String, Deprecated) Disabled metadata fetchers. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `disabled_image_fetchers` (List of String, Deprecated) Disabled image fetchers for the whole library; Jellyfin only has them per item type, where `image_fetchers` in `type_options` enables the fetchers it lists. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `disabled_metadata_fetchers` (List of String, Deprecated) Disabled metadata fetchers for the whole library; Jellyfin only has them per item type, where `metadata_fetchers` in `type_options` enables the fetchers it lists. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `disabled_metadata_savers` (List of String, Deprecated) Disabled metadata savers. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
-- `disabled_subtitle_fetchers` (List of String) Disabled subtitle fetchers.
+- `disabled_subtitle_fetchers` (List of String, Deprecated) Disabled subtitle fetchers. Deprecated: list the enabled subtitle fetchers in priority order in `subtitle_fetchers` instead, which disables the rest. It will be removed in a future release.
 - `download_images_in_advance` (Boolean, Deprecated) Whether images are downloaded in advance. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `enable_automatic_series_grouping` (Boolean) Whether automatic series grouping is enabled.
 - `enable_chapter_image_extraction` (Boolean) Whether chapter image extraction is enabled.
@@ -91,18 +93,19 @@ Optional:
 - `enable_realtime_monitor` (Boolean) Whether realtime monitoring is enabled.
 - `extract_chapters_during_library_scan` (Boolean) Whether chapter images are extracted during the library scan.
 - `extract_media_information_during_library_scan` (Boolean, Deprecated) Whether media information is extracted during library scan. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
-- `image_fetcher_order` (List of String, Deprecated) Image fetcher order for the whole library; Jellyfin only has it per item type, as `image_fetcher_order` in `type_options`. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `image_fetcher_order` (List of String, Deprecated) Image fetcher order for the whole library; Jellyfin only has it per item type, which `image_fetchers` in `type_options` sets. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `import_missing_episodes` (Boolean, Deprecated) Whether missing episodes are imported. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `local_metadata_reader_order` (List of String) Local metadata reader order.
 - `metadata_country_code` (String) Metadata country code.
-- `metadata_fetcher_order` (List of String, Deprecated) Metadata fetcher order for the whole library; Jellyfin only has it per item type, as `metadata_fetcher_order` in `type_options`. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `metadata_fetcher_order` (List of String, Deprecated) Metadata fetcher order for the whole library; Jellyfin only has it per item type, which `metadata_fetchers` in `type_options` sets. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `metadata_refresh_mode` (String, Deprecated) Metadata refresh mode. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `path_infos` (Attributes List) Path information entries. (see [below for nested schema](#nestedatt--library_options--path_infos))
 - `preferred_metadata_language` (String) Preferred metadata language.
 - `save_local_metadata` (Boolean) Whether local metadata is saved.
 - `save_local_thumbnail_sets` (Boolean, Deprecated) Whether local thumbnail sets are saved. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `season_zero_display_name` (String) Season zero display name.
-- `subtitle_fetcher_order` (List of String) Subtitle fetcher order.
+- `subtitle_fetcher_order` (List of String, Deprecated) Subtitle fetcher order. Deprecated: list the enabled subtitle fetchers in priority order in `subtitle_fetchers` instead, which disables the rest. It will be removed in a future release.
+- `subtitle_fetchers` (List of String) Enabled subtitle fetchers, in priority order: Jellyfin asks the first one first and disables every other subtitle fetcher it offers. Subtitle fetchers come from plugins, such as Open Subtitles, and each name must match one the server offers exactly. Jellyfin enables a subtitle fetcher installed later, which then shows up as a change to this list. Conflicts with `disabled_subtitle_fetchers` and `subtitle_fetcher_order`, which it replaces.
 - `type_options` (Attributes List) Type-specific options. The list replaces the server's list; each entry is applied over the server's entry with the same `type`, so attributes left unset keep the server's values. (see [below for nested schema](#nestedatt--library_options--type_options))
 
 <a id="nestedatt--library_options--path_infos"></a>
@@ -121,13 +124,13 @@ Optional:
 
 Optional:
 
-- `image_fetcher_order` (List of String) Image fetcher order for this type.
-- `image_fetchers` (List of String) Image fetchers for this type.
+- `image_fetcher_order` (List of String, Deprecated) Image fetcher order for this type. Deprecated: list the enabled image fetchers in priority order in `image_fetchers` instead, which then sets the order. Set, it still overrides that order; removed, the order it set stays until `image_fetchers` changes. It will be removed in a future release.
+- `image_fetchers` (List of String) Enabled image fetchers for this type, in priority order: Jellyfin asks the first one first. Unless `image_fetcher_order` is set, changing the list also sets Jellyfin's image fetcher order: these names, then the other names the server's order held. The list does not read that order back, so while it stays as it is, Jellyfin keeps the order it has, including one set by `image_fetcher_order` or outside Terraform.
 - `image_options` (Attributes List) Image options for this type. Each entry is applied over the server's entry with the same image `type`. (see [below for nested schema](#nestedatt--library_options--type_options--image_options))
-- `metadata_fetcher_order` (List of String) Metadata fetcher order for this type.
-- `metadata_fetchers` (List of String) Metadata fetchers for this type.
-- `similar_item_provider_order` (List of String) Similar item provider order for this type. Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error.
-- `similar_item_providers` (List of String) Similar item providers for this type. Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error.
+- `metadata_fetcher_order` (List of String, Deprecated) Metadata fetcher order for this type. Deprecated: list the enabled metadata fetchers in priority order in `metadata_fetchers` instead, which then sets the order. Set, it still overrides that order; removed, the order it set stays until `metadata_fetchers` changes. It will be removed in a future release.
+- `metadata_fetchers` (List of String) Enabled metadata fetchers for this type, in priority order: Jellyfin asks the first one first. Unless `metadata_fetcher_order` is set, changing the list also sets Jellyfin's metadata fetcher order: these names, then the other names the server's order held. The list does not read that order back, so while it stays as it is, Jellyfin keeps the order it has, including one set by `metadata_fetcher_order` or outside Terraform.
+- `similar_item_provider_order` (List of String, Deprecated) Similar item provider order for this type. Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error. Deprecated: list the enabled similar item providers in priority order in `similar_item_providers` instead, which then sets the order. Set, it still overrides that order; removed, the order it set stays until `similar_item_providers` changes. It will be removed in a future release.
+- `similar_item_providers` (List of String) Enabled similar item providers for this type, in priority order; Jellyfin always uses its local ones, such as Local Genre/Tag, which the list only ranks. Unless `similar_item_provider_order` is set, changing the list also sets Jellyfin's similar item provider order: these names, then the other names the server's order held. The list does not read that order back, so while it stays as it is, Jellyfin keeps the order it has, including one set by `similar_item_provider_order` or outside Terraform. Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error.
 - `type` (String) Item type.
 
 <a id="nestedatt--library_options--type_options--image_options"></a>
@@ -146,5 +149,5 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-terraform import jellyfin_library.example <library-name>
+terraform import jellyfin_library.movies "<library-name>"
 ```

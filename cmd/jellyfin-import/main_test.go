@@ -7,12 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -43,6 +45,13 @@ func TestSanitizeName(t *testing.T) {
 		{"---", "unnamed"},
 		{"a-b_c.d", "a_b_c_d"},
 		{"UPPER CASE", "upper_case"},
+		{"a", "a"},
+		{"1", "r_1"},
+		{"_leading", "leading"},
+		{"trailing_", "trailing"},
+		{"multi___underscores", "multi_underscores"},
+		{"café", "caf"},
+		{"hello.world", "hello_world"},
 	}
 
 	for _, tt := range tests {
@@ -85,37 +94,25 @@ func TestResourceBlock(t *testing.T) {
 	}
 }
 
-func TestSortedKeys(t *testing.T) {
-	m := map[string]string{"c": "3", "a": "1", "b": "2"}
-	keys := sortedKeys(m)
-	expected := []string{"a", "b", "c"}
-	for i, k := range keys {
-		if k != expected[i] {
-			t.Errorf("sortedKeys()[%d] = %q, want %q", i, k, expected[i])
-		}
-	}
-}
-
 // writeJSON encodes v as JSON into w, logging any error via t.
-func writeJSON(t *testing.T, w http.ResponseWriter, v interface{}) {
+func writeJSON(t *testing.T, w http.ResponseWriter, v any) {
 	t.Helper()
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		t.Errorf("failed to encode JSON response: %v", err)
 	}
 }
 
-// setupTestServer creates a mock Jellyfin server for testing.
 func setupTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/Users", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"Id":   "user-id-1",
 				"Name": "admin",
-				"Policy": map[string]interface{}{
+				"Policy": map[string]any{
 					"IsAdministrator":  true,
 					"IsDisabled":       false,
 					"EnableAllFolders": true,
@@ -124,7 +121,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 			{
 				"Id":   "user-id-2",
 				"Name": "viewer",
-				"Policy": map[string]interface{}{
+				"Policy": map[string]any{
 					"IsAdministrator":  false,
 					"IsDisabled":       false,
 					"EnableAllFolders": false,
@@ -134,7 +131,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"Name":           "Movies",
 				"CollectionType": "movies",
@@ -145,8 +142,8 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/Auth/Keys", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
-			"Items": []map[string]interface{}{
+		writeJSON(t, w, map[string]any{
+			"Items": []map[string]any{
 				{
 					"AccessToken": "test-token-123",
 					"AppName":     "MyApp",
@@ -156,7 +153,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/Repositories", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"Name":    "Jellyfin Stable",
 				"Url":     "https://repo.jellyfin.org/files/plugin/manifest.json",
@@ -166,7 +163,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"Name":    "MusicBrainz",
 				"Version": "14.0.0.0",
@@ -176,10 +173,10 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/Packages", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"name": "MusicBrainz",
-				"versions": []map[string]interface{}{
+				"versions": []map[string]any{
 					{
 						"version":        "14.0.0.0",
 						"repositoryUrl":  "https://repo.jellyfin.org/files/plugin/manifest.json",
@@ -191,12 +188,13 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/ScheduledTasks", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"Name":     "Scan Media Library",
 				"Id":       "task-id-1",
+				"Key":      "RefreshLibrary",
 				"IsHidden": false,
-				"Triggers": []map[string]interface{}{
+				"Triggers": []map[string]any{
 					{
 						"Type":          "IntervalTrigger",
 						"IntervalTicks": 432000000000,
@@ -206,23 +204,25 @@ func setupTestServer(t *testing.T) *httptest.Server {
 			{
 				"Name":     "Hidden Task",
 				"Id":       "task-id-2",
+				"Key":      "RefreshGuide",
 				"IsHidden": true,
-				"Triggers": []map[string]interface{}{},
+				"Triggers": []map[string]any{},
 			},
 		})
 	})
 
 	mux.HandleFunc("/System/Configuration", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
+		writeJSON(t, w, map[string]any{
 			"ServerName":                    "Test Server",
 			"IsStartupWizardCompleted":      true,
 			"EnableNormalizedItemByNameIds": true,
 			"CachePath":                     nil,
 			"SortRemoveWords":               []string{"the", "a"},
-			"MetadataOptions": []map[string]interface{}{
+			"MetadataOptions": []map[string]any{
 				{"ItemType": "Movie", "DisabledMetadataFetchers": []string{"OMDb"}, "ImageFetcherOrder": nil},
+				{"ItemType": "Person", "DisabledMetadataFetchers": []string{"TheMovieDb"}, "MetadataFetcherOrder": []string{}},
 			},
-			"TrickplayOptions": map[string]interface{}{
+			"TrickplayOptions": map[string]any{
 				"Interval":         10000,
 				"ProcessPriority":  "BelowNormal",
 				"WidthResolutions": []int{320},
@@ -230,34 +230,48 @@ func setupTestServer(t *testing.T) *httptest.Server {
 		})
 	})
 
+	mux.HandleFunc("/Libraries/AvailableOptions", func(w http.ResponseWriter, r *http.Request) {
+		typeOptions := []map[string]any{}
+		if r.URL.Query().Get("libraryContentType") == "movies" {
+			typeOptions = append(typeOptions, map[string]any{
+				"Type":             "Movie",
+				"MetadataFetchers": []map[string]any{{"Name": "TheMovieDb"}, {"Name": "OMDb"}},
+				"ImageFetchers":    []map[string]any{{"Name": "TheMovieDb"}},
+			})
+		}
+		writeJSON(t, w, map[string]any{"TypeOptions": typeOptions})
+	})
+
 	mux.HandleFunc("/System/Configuration/encoding", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
+		writeJSON(t, w, map[string]any{
 			"EncodingThreadCount": -1,
+			"DownMixAudioBoost":   2.5,
+			"TonemappingPeak":     100,
 		})
 	})
 
 	mux.HandleFunc("/System/Configuration/network", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
+		writeJSON(t, w, map[string]any{
 			"BaseUrl":     "",
 			"EnableHttps": false,
 		})
 	})
 
 	mux.HandleFunc("/System/Configuration/branding", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
+		writeJSON(t, w, map[string]any{
 			"SplashscreenEnabled": false,
 			"LoginDisclaimer":     "Hi ${user}\n100%{x}",
 		})
 	})
 
 	mux.HandleFunc("/System/Configuration/livetv", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
+		writeJSON(t, w, map[string]any{
 			"EnableRecordingSubfolders": false,
 		})
 	})
 
 	mux.HandleFunc("/System/Configuration/metadata", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
+		writeJSON(t, w, map[string]any{
 			"UseFileCreationTimeForDateAdded": true,
 		})
 	})
@@ -269,13 +283,9 @@ func TestGenerateUsers(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	imports, resources, err := g.generateUsers()
+	imports, resources, err := g.generateUsers(t.Context())
 	if err != nil {
 		t.Fatalf("generateUsers() error: %v", err)
 	}
@@ -287,7 +297,6 @@ func TestGenerateUsers(t *testing.T) {
 		t.Errorf("expected 2 resource blocks, got %d", len(resources))
 	}
 
-	// Check admin user import
 	if !strings.Contains(imports[0], "jellyfin_user.admin") {
 		t.Errorf("expected import to contain jellyfin_user.admin, got: %s", imports[0])
 	}
@@ -295,7 +304,6 @@ func TestGenerateUsers(t *testing.T) {
 		t.Errorf("expected import ID user-id-1, got: %s", imports[0])
 	}
 
-	// Check admin user resource
 	if !strings.Contains(resources[0], "is_administrator   = true") {
 		t.Errorf("expected admin to be administrator: %s", resources[0])
 	}
@@ -305,13 +313,9 @@ func TestGenerateLibraries(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	imports, resources, err := g.generateLibraries()
+	imports, resources, err := g.generateLibraries(t.Context())
 	if err != nil {
 		t.Fatalf("generateLibraries() error: %v", err)
 	}
@@ -333,7 +337,7 @@ func TestGenerateLibraries(t *testing.T) {
 
 func TestGenerateLibrariesWritesMixedForMissingCollectionType(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"Name":      "Mixed",
 				"Locations": []string{"/media/mixed"},
@@ -343,13 +347,9 @@ func TestGenerateLibrariesWritesMixedForMissingCollectionType(t *testing.T) {
 	}))
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	_, resources, err := g.generateLibraries()
+	_, resources, err := g.generateLibraries(t.Context())
 	if err != nil {
 		t.Fatalf("generateLibraries() error: %v", err)
 	}
@@ -362,13 +362,9 @@ func TestGenerateAPIKeys(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	imports, resources, err := g.generateAPIKeys()
+	imports, resources, err := g.generateAPIKeys(t.Context())
 	if err != nil {
 		t.Fatalf("generateAPIKeys() error: %v", err)
 	}
@@ -388,18 +384,13 @@ func TestGenerateScheduledTasks(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	imports, resources, err := g.generateScheduledTasks()
+	imports, resources, err := g.generateScheduledTasks(t.Context())
 	if err != nil {
 		t.Fatalf("generateScheduledTasks() error: %v", err)
 	}
 
-	// Hidden tasks should be skipped
 	if len(imports) != 1 {
 		t.Errorf("expected 1 import block (hidden tasks skipped), got %d", len(imports))
 	}
@@ -407,12 +398,12 @@ func TestGenerateScheduledTasks(t *testing.T) {
 		t.Errorf("expected 1 resource block, got %d", len(resources))
 	}
 
-	if !strings.Contains(imports[0], "task-id-1") {
-		t.Errorf("expected task-id-1 in import: %s", imports[0])
+	if !strings.Contains(imports[0], `id = "RefreshLibrary"`) {
+		t.Errorf("expected the key RefreshLibrary in import: %s", imports[0])
 	}
 
 	want := `resource "jellyfin_scheduled_task" "scan_media_library" {
-  task_id = "task-id-1"
+  key = "RefreshLibrary"
   triggers = [
     {
       interval_ticks = 432000000000
@@ -436,7 +427,7 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 		"no triggers": {
 			triggers: `[]`,
 			want: `resource "jellyfin_scheduled_task" "task" {
-  task_id  = "task-id"
+  key      = "Task"
   triggers = []
 }
 `,
@@ -444,7 +435,7 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 		"null triggers": {
 			triggers: `null`,
 			want: `resource "jellyfin_scheduled_task" "task" {
-  task_id  = "task-id"
+  key      = "Task"
   triggers = []
 }
 `,
@@ -452,7 +443,7 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 		"interval trigger without day_of_week": {
 			triggers: `[{"Type":"IntervalTrigger","IntervalTicks":864000000000}]`,
 			want: `resource "jellyfin_scheduled_task" "task" {
-  task_id = "task-id"
+  key = "Task"
   triggers = [
     {
       interval_ticks = 864000000000
@@ -465,7 +456,7 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 		"daily trigger keeps max_runtime_ticks": {
 			triggers: `[{"Type":"DailyTrigger","TimeOfDayTicks":72000000000,"MaxRuntimeTicks":144000000000}]`,
 			want: `resource "jellyfin_scheduled_task" "task" {
-  task_id = "task-id"
+  key = "Task"
   triggers = [
     {
       max_runtime_ticks = 144000000000
@@ -482,7 +473,7 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 				{"Type":"StartupTrigger"}
 			]`,
 			want: `resource "jellyfin_scheduled_task" "task" {
-  task_id = "task-id"
+  key = "Task"
   triggers = [
     {
       day_of_week       = "Tuesday"
@@ -499,7 +490,7 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 		"explicit nulls and zero ticks": {
 			triggers: `[{"Type":"IntervalTrigger","IntervalTicks":0,"TimeOfDayTicks":null,"DayOfWeek":null,"MaxRuntimeTicks":0}]`,
 			want: `resource "jellyfin_scheduled_task" "task" {
-  task_id = "task-id"
+  key = "Task"
   triggers = [
     {
       interval_ticks    = 0
@@ -517,15 +508,12 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 			t.Parallel()
 
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				fmt.Fprintf(w, `[{"Name": "Task", "Id": "task-id", "Triggers": %s}]`, tc.triggers)
+				fmt.Fprintf(w, `[{"Name": "Task", "Id": "task-id", "Key": "Task", "Triggers": %s}]`, tc.triggers)
 			}))
 			defer server.Close()
 
-			g := &generator{
-				client:    client.NewClient(server.URL, "test-key"),
-				usedNames: make(map[string]bool),
-			}
-			_, resources, err := g.generateScheduledTasks()
+			g := &generator{client: client.NewClient(server.URL, "test-key")}
+			_, resources, err := g.generateScheduledTasks(t.Context())
 			if err != nil {
 				t.Fatalf("generateScheduledTasks() error: %v", err)
 			}
@@ -539,17 +527,67 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 	}
 }
 
+func TestGenerateScheduledTasksWritesTaskIDWhenNoKeySelectsTheTask(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `[
+			{"Name": "No Key", "Id": "id-no-key", "Key": "", "Triggers": []},
+			{"Name": "Shared A", "Id": "id-shared-a", "Key": "Shared", "Triggers": []},
+			{"Name": "Shared B", "Id": "id-shared-b", "Key": "Shared", "Triggers": []},
+			{"Name": "Own Key", "Id": "id-own-key", "Key": "Own", "Triggers": []}
+		]`)
+	}))
+	defer server.Close()
+
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
+	imports, resources, err := g.generateScheduledTasks(t.Context())
+	if err != nil {
+		t.Fatalf("generateScheduledTasks() error: %v", err)
+	}
+
+	want := []struct{ importID, resource string }{
+		{"id-no-key", `resource "jellyfin_scheduled_task" "no_key" {
+  task_id  = "id-no-key"
+  triggers = []
+}
+`},
+		{"id-shared-a", `resource "jellyfin_scheduled_task" "shared_a" {
+  task_id  = "id-shared-a"
+  triggers = []
+}
+`},
+		{"id-shared-b", `resource "jellyfin_scheduled_task" "shared_b" {
+  task_id  = "id-shared-b"
+  triggers = []
+}
+`},
+		{"Own", `resource "jellyfin_scheduled_task" "own_key" {
+  key      = "Own"
+  triggers = []
+}
+`},
+	}
+	if len(imports) != len(want) || len(resources) != len(want) {
+		t.Fatalf("got %d import and %d resource blocks, want %d of each", len(imports), len(resources), len(want))
+	}
+	for i, w := range want {
+		if !strings.Contains(imports[i], fmt.Sprintf("id = %q", w.importID)) {
+			t.Errorf("import block %d = %s, want the id %q", i, imports[i], w.importID)
+		}
+		if resources[i] != w.resource {
+			t.Errorf("resource block %d =\n%s\nwant\n%s", i, resources[i], w.resource)
+		}
+	}
+}
+
 func TestGenerateSingletonConfigs(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	imports, resources, err := g.generateSingletonConfigs()
+	imports, resources, err := g.generateSingletonConfigs(t.Context())
 	if err != nil {
 		t.Fatalf("generateSingletonConfigs() error: %v", err)
 	}
@@ -570,8 +608,13 @@ func TestGenerateSingletonConfigs(t *testing.T) {
   enable_normalized_item_by_name_ids = true
   metadata_options = [
     {
-      disabled_metadata_fetchers = ["OMDb"]
-      item_type                  = "Movie"
+      item_type         = "Movie"
+      metadata_fetchers = ["TheMovieDb"]
+    },
+    {
+      disabled_metadata_fetchers = ["TheMovieDb"]
+      item_type                  = "Person"
+      metadata_fetcher_order     = []
     },
   ]
   server_name       = "Test Server"
@@ -584,7 +627,9 @@ func TestGenerateSingletonConfigs(t *testing.T) {
 }
 `,
 		`resource "jellyfin_encoding_configuration" "this" {
+  down_mix_audio_boost  = 2.5
   encoding_thread_count = -1
+  tonemapping_peak      = 100
 }
 `,
 		`resource "jellyfin_networking_configuration" "this" {
@@ -620,13 +665,9 @@ func TestGeneratePlugins(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	imports, resources, err := g.generatePlugins()
+	imports, resources, err := g.generatePlugins(t.Context())
 	if err != nil {
 		t.Fatalf("generatePlugins() error: %v", err)
 	}
@@ -649,13 +690,9 @@ func TestGeneratePluginRepositories(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	imports, resources, err := g.generatePluginRepositories()
+	imports, resources, err := g.generatePluginRepositories(t.Context())
 	if err != nil {
 		t.Fatalf("generatePluginRepositories() error: %v", err)
 	}
@@ -677,30 +714,18 @@ func TestFullGenerate(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: outputDir,
-		usedNames: make(map[string]bool),
 		warnings:  &warnings,
 	}
 
-	if err := g.Generate(); err != nil {
+	if err := g.Generate(t.Context()); err != nil {
 		t.Fatalf("Generate() error: %v", err)
 	}
-	if warnings.Len() > 0 {
-		t.Errorf("expected no warnings for an empty output directory, got %q", warnings.String())
+	// The server has an API key, whose token is its import ID.
+	if got := warnings.String(); strings.Count(got, "Warning:") != 1 || !strings.Contains(got, "access token of each API key") {
+		t.Errorf("expected only the API key token warning for an empty output directory, got %q", got)
 	}
 
-	// Check that files were created
-	importsPath := filepath.Join(outputDir, "imports.tf")
-	if _, err := os.Stat(importsPath); os.IsNotExist(err) {
-		t.Error("imports.tf was not created")
-	}
-
-	resourcesPath := filepath.Join(outputDir, "resources.tf")
-	if _, err := os.Stat(resourcesPath); os.IsNotExist(err) {
-		t.Error("resources.tf was not created")
-	}
-
-	// Verify imports.tf content
-	importsContent, err := os.ReadFile(importsPath)
+	importsContent, err := os.ReadFile(filepath.Join(outputDir, "imports.tf"))
 	if err != nil {
 		t.Fatalf("Failed to read imports.tf: %v", err)
 	}
@@ -727,8 +752,7 @@ func TestFullGenerate(t *testing.T) {
 		}
 	}
 
-	// Verify resources.tf content
-	resourcesContent, err := os.ReadFile(resourcesPath)
+	resourcesContent, err := os.ReadFile(filepath.Join(outputDir, "resources.tf"))
 	if err != nil {
 		t.Fatalf("Failed to read resources.tf: %v", err)
 	}
@@ -780,11 +804,10 @@ func TestGenerateWarnsAboutOtherConfigurationInOutputDir(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: outputDir,
-		usedNames: make(map[string]bool),
 		warnings:  &warnings,
 	}
 
-	if err := g.Generate(); err != nil {
+	if err := g.Generate(t.Context()); err != nil {
 		t.Fatalf("Generate() error: %v", err)
 	}
 	if !strings.Contains(warnings.String(), "required_providers") {
@@ -793,7 +816,6 @@ func TestGenerateWarnsAboutOtherConfigurationInOutputDir(t *testing.T) {
 }
 
 func TestGenerateWithServerError(t *testing.T) {
-	// Server that returns errors
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprint(w, "Internal Server Error")
@@ -803,65 +825,32 @@ func TestGenerateWithServerError(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
 	}
 
-	err := g.Generate()
+	err := g.Generate(t.Context())
 	if err == nil {
 		t.Error("expected error from Generate(), got nil")
 	}
 }
 
-func TestSanitizeNameEdgeCases(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"a", "a"},
-		{"1", "r_1"},
-		{"_leading", "leading"},
-		{"trailing_", "trailing"},
-		{"multi___underscores", "multi_underscores"},
-		{"café", "caf"},
-		{"hello.world", "hello_world"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			t.Parallel()
-
-			result := sanitizeName(tt.input)
-			if result != tt.expected {
-				t.Errorf("sanitizeName(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestUniqueName(t *testing.T) {
-	g := &generator{usedNames: make(map[string]bool)}
+	g := &generator{}
 
-	// First use: no suffix
 	name1 := g.uniqueName("jellyfin_user", "admin")
 	if name1 != "admin" {
 		t.Errorf("first uniqueName() = %q, want %q", name1, "admin")
 	}
 
-	// Second use of same type+name: gets suffix _1
 	name2 := g.uniqueName("jellyfin_user", "admin")
 	if name2 != "admin_1" {
 		t.Errorf("second uniqueName() = %q, want %q", name2, "admin_1")
 	}
 
-	// Third use: suffix _2
 	name3 := g.uniqueName("jellyfin_user", "admin")
 	if name3 != "admin_2" {
 		t.Errorf("third uniqueName() = %q, want %q", name3, "admin_2")
 	}
 
-	// Different resource type: no suffix
 	name4 := g.uniqueName("jellyfin_library", "admin")
 	if name4 != "admin" {
 		t.Errorf("different type uniqueName() = %q, want %q", name4, "admin")
@@ -889,7 +878,7 @@ func TestUniqueNameSkipsSuffixedNamesAlreadyTaken(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			g := &generator{usedNames: make(map[string]bool)}
+			g := &generator{}
 			for i, base := range tc.bases {
 				if got := g.uniqueName("jellyfin_library", base); got != tc.want[i] {
 					t.Errorf("uniqueName(%q) call %d = %q, want %q", base, i+1, got, tc.want[i])
@@ -902,7 +891,7 @@ func TestUniqueNameSkipsSuffixedNamesAlreadyTaken(t *testing.T) {
 func TestGenerateLibrariesGivesEachLibraryItsOwnAddress(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{"Name": "Films!", "CollectionType": "movies", "Locations": []string{"/media/movies"}},
 			{"Name": "Films 1", "CollectionType": "movies", "Locations": []string{"/media/movies"}},
 			{"Name": "Films", "CollectionType": "movies", "Locations": []string{"/media/movies"}},
@@ -911,11 +900,8 @@ func TestGenerateLibrariesGivesEachLibraryItsOwnAddress(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		usedNames: make(map[string]bool),
-	}
-	imports, _, err := g.generateLibraries()
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
+	imports, _, err := g.generateLibraries(t.Context())
 	if err != nil {
 		t.Fatalf("generateLibraries() error: %v", err)
 	}
@@ -932,10 +918,9 @@ func TestGenerateLibrariesGivesEachLibraryItsOwnAddress(t *testing.T) {
 }
 
 func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
-	// Server that has /Plugins but returns 500 for /Packages
 	mux := http.NewServeMux()
 	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"Name":    "TestPlugin",
 				"Version": "1.0.0",
@@ -950,13 +935,9 @@ func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	imports, resources, err := g.generatePlugins()
+	imports, resources, err := g.generatePlugins(t.Context())
 	if err != nil {
 		t.Fatalf("generatePlugins() should not fail when /Packages is unavailable: %v", err)
 	}
@@ -973,17 +954,17 @@ func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
 func TestGeneratePluginsResolvesOnlyTheInstalledVersion(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{"Name": "Bundled", "Version": "12.1.0.0", "Id": "bundled-id"},
 			{"Name": "Listed", "Version": "2.0.0.0", "Id": "listed-id"},
 		})
 	})
 	mux.HandleFunc("/Packages", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
-			{"name": "Bundled", "versions": []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
+			{"name": "Bundled", "versions": []map[string]any{
 				{"version": "11.0.0.0", "repositoryUrl": "https://repo.example/bundled.json"},
 			}},
-			{"name": "Listed", "versions": []map[string]interface{}{
+			{"name": "Listed", "versions": []map[string]any{
 				{"version": "3.0.0.0", "repositoryUrl": "https://repo.example/newer.json"},
 				{"version": "2.0.0.0", "repositoryUrl": "https://repo.example/listed.json"},
 			}},
@@ -992,13 +973,9 @@ func TestGeneratePluginsResolvesOnlyTheInstalledVersion(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	_, resources, err := g.generatePlugins()
+	_, resources, err := g.generatePlugins(t.Context())
 	if err != nil {
 		t.Fatalf("generatePlugins() error: %v", err)
 	}
@@ -1017,7 +994,7 @@ func TestGeneratePluginsResolvesOnlyTheInstalledVersion(t *testing.T) {
 func TestGenerateLibrariesSkipsCollectionTypesTheProviderRejects(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{"Name": "Lists", "CollectionType": "playlists", "Locations": []string{"/media/lists"}},
 			{"Name": "Films ${x}", "CollectionType": "movies", "Locations": []string{"/media/films"}},
 		})
@@ -1026,14 +1003,9 @@ func TestGenerateLibrariesSkipsCollectionTypesTheProviderRejects(t *testing.T) {
 	defer server.Close()
 
 	var warnings strings.Builder
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-		warnings:  &warnings,
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key"), warnings: &warnings}
 
-	imports, resources, err := g.generateLibraries()
+	imports, resources, err := g.generateLibraries(t.Context())
 	if err != nil {
 		t.Fatalf("generateLibraries() error: %v", err)
 	}
@@ -1057,7 +1029,7 @@ func TestGenerateLibrariesSkipsCollectionTypesTheProviderRejects(t *testing.T) {
 func TestImportClientUsesAPIKeyWhenProvided(t *testing.T) {
 	t.Parallel()
 
-	c, err := importClient(context.Background(), "http://example.test", "api-key", "", "")
+	c, err := importClient(t.Context(), "http://example.test", "api-key", "", "")
 	if err != nil {
 		t.Fatalf("importClient() error = %v", err)
 	}
@@ -1084,7 +1056,7 @@ func TestImportClientAuthenticatesWithCredentials(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c, err := importClient(context.Background(), server.URL, "", "admin", "Admin123!")
+	c, err := importClient(t.Context(), server.URL, "", "admin", "Admin123!")
 	if err != nil {
 		t.Fatalf("importClient() error = %v", err)
 	}
@@ -1093,31 +1065,55 @@ func TestImportClientAuthenticatesWithCredentials(t *testing.T) {
 	}
 }
 
-func TestImportClientRequiresUsernameWhenAPIKeyMissing(t *testing.T) {
+func TestImportClientRequiresCredentialsWhenAPIKeyMissing(t *testing.T) {
 	t.Parallel()
 
-	_, err := importClient(context.Background(), "http://example.test", "", "", "Admin123!")
-	if err == nil {
-		t.Fatal("importClient() error = nil, want missing username error")
+	tests := map[string]struct {
+		username, password, wantErr string
+	}{
+		"username": {"", "Admin123!", "missing Jellyfin username"},
+		"password": {"admin", "", "missing Jellyfin password"},
 	}
-	if !strings.Contains(err.Error(), "missing Jellyfin username") {
-		t.Fatalf("importClient() error = %v, want missing username error", err)
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := importClient(t.Context(), "http://example.test", "", tc.username, tc.password)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("importClient() error = %v, want %s error", err, tc.wantErr)
+			}
+		})
 	}
 }
 
-func TestImportClientRequiresPasswordWhenAPIKeyMissing(t *testing.T) {
-	t.Parallel()
+func TestFromEnvFillsOnlyFlagsTheCommandLineLeavesOut(t *testing.T) {
+	t.Setenv("JELLYFIN_API_KEY", "key-from-env")
+	t.Setenv("JELLYFIN_ENDPOINT", "http://env.test")
 
-	_, err := importClient(context.Background(), "http://example.test", "", "admin", "")
-	if err == nil {
-		t.Fatal("importClient() error = nil, want missing password error")
+	fs := flag.NewFlagSet("jellyfin-import", flag.ContinueOnError)
+	endpoint := fs.String("endpoint", "", "")
+	apiKey := fs.String("api-key", "", "")
+	username := fs.String("username", "", "")
+	if err := fs.Parse([]string{"-api-key=", "-username=admin"}); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "missing Jellyfin password") {
-		t.Fatalf("importClient() error = %v, want missing password error", err)
+	fromEnv(fs, "endpoint", "JELLYFIN_ENDPOINT")
+	fromEnv(fs, "api-key", "JELLYFIN_API_KEY")
+	fromEnv(fs, "username", "JELLYFIN_USERNAME")
+
+	if *endpoint != "http://env.test" {
+		t.Errorf("endpoint = %q, want the environment's", *endpoint)
+	}
+	if *apiKey != "" {
+		t.Errorf("api-key set to empty = %q, want it kept empty", *apiKey)
+	}
+	if *username != "admin" {
+		t.Errorf("username = %q, want the command line's", *username)
 	}
 }
 
-func testAccImportClient(t *testing.T) *client.Client {
+func testAccImportClient(ctx context.Context, t *testing.T) *client.Client {
 	t.Helper()
 
 	endpoint := os.Getenv("JELLYFIN_ENDPOINT")
@@ -1131,9 +1127,9 @@ func testAccImportClient(t *testing.T) *client.Client {
 		}
 		skip("JELLYFIN_ENDPOINT and either JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD must be set for acceptance tests")
 	}
-	testAccBootstrap(t, endpoint)
+	testAccBootstrap(ctx, t, endpoint)
 
-	c, err := importClient(context.Background(), endpoint, apiKey, username, password)
+	c, err := importClient(ctx, endpoint, apiKey, username, password)
 	if err != nil {
 		t.Fatalf("failed to configure Jellyfin import acceptance test client: %v", err)
 	}
@@ -1143,10 +1139,10 @@ func testAccImportClient(t *testing.T) *client.Client {
 // testAccBootstrap completes a fresh server's startup wizard the way a first
 // terraform run does, by configuring the provider. Until then Jellyfin has no
 // user for the importer to log in as.
-func testAccBootstrap(t *testing.T, endpoint string) {
+func testAccBootstrap(ctx context.Context, t *testing.T, endpoint string) {
 	t.Helper()
 
-	info, err := client.NewClient(endpoint, "").GetPublicSystemInfo(context.Background())
+	info, err := client.NewClient(endpoint, "").GetPublicSystemInfo(ctx)
 	if err != nil {
 		t.Fatalf("reading Jellyfin startup status: %v", err)
 	}
@@ -1183,25 +1179,22 @@ func terraformFmtCheck(t *testing.T, dir string) {
 	}
 }
 
-// seedFixtures gives the server what the importer has to handle for the
-// generated files to validate, and puts the server back when the test ends:
-// strings that HCL would interpolate or reject unless escaped, API keys whose
-// names sanitize to the same resource name or to its suffixed form, and a
-// music videos library and one without a collection type, which the importer
-// writes as mixed.
+// seedFixtures gives the server the cases the importer must handle for the
+// generated files to validate, and restores the server when the test ends.
 func seedFixtures(t *testing.T, c *client.Client) {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	const tricky = `import-e2e ${a} %{b} "q" \ $${c} %%{d} ${`
 
-	var restore []func(*client.Client) error
+	var restore []func(context.Context, *client.Client) error
 	t.Cleanup(func() {
 		// The provider logs in under the same device ID during the plan, and
 		// Jellyfin then revokes the session token c holds.
-		fresh := testAccImportClient(t)
-		for i := len(restore) - 1; i >= 0; i-- {
-			if err := restore[i](fresh); err != nil {
+		ctx := context.WithoutCancel(t.Context())
+		fresh := testAccImportClient(ctx, t)
+		for _, undo := range slices.Backward(restore) {
+			if err := undo(ctx, fresh); err != nil {
 				t.Error(err)
 			}
 		}
@@ -1211,10 +1204,10 @@ func seedFixtures(t *testing.T, c *client.Client) {
 	if err != nil {
 		t.Fatalf("reading branding configuration: %v", err)
 	}
-	restore = append(restore, func(c *client.Client) error {
-		return c.UpdateBrandingConfiguration(ctx, &client.BrandingConfiguration{RawJSON: branding.RawJSON})
+	restore = append(restore, func(ctx context.Context, c *client.Client) error {
+		return c.UpdateBrandingConfiguration(ctx, branding)
 	})
-	seeded, err := json.Marshal(map[string]interface{}{
+	seeded, err := json.Marshal(map[string]any{
 		"LoginDisclaimer":     tricky + "\nsecond line\twith a tab and \x01",
 		"CustomCss":           "body {\n  color: red;\n}\n/* ${x} %{y} */\n",
 		"SplashscreenEnabled": false,
@@ -1222,15 +1215,44 @@ func seedFixtures(t *testing.T, c *client.Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.UpdateBrandingConfiguration(ctx, &client.BrandingConfiguration{RawJSON: string(seeded)}); err != nil {
+	if err := c.UpdateBrandingConfiguration(ctx, string(seeded)); err != nil {
 		t.Fatalf("seeding branding configuration: %v", err)
+	}
+
+	system, err := c.GetSystemConfiguration(ctx)
+	if err != nil {
+		t.Fatalf("reading system configuration: %v", err)
+	}
+	restore = append(restore, func(ctx context.Context, c *client.Client) error {
+		return c.UpdateSystemConfiguration(ctx, system)
+	})
+	var systemDoc map[string]any
+	if err := json.Unmarshal([]byte(system), &systemDoc); err != nil {
+		t.Fatalf("parsing system configuration: %v", err)
+	}
+	options, _ := systemDoc["MetadataOptions"].([]any)
+	systemDoc["MetadataOptions"] = append(options, map[string]any{
+		"ItemType":                 "Person",
+		"DisabledMetadataSavers":   []string{},
+		"LocalMetadataReaderOrder": []string{},
+		"DisabledMetadataFetchers": []string{"TheMovieDb"},
+		"MetadataFetcherOrder":     []string{},
+		"DisabledImageFetchers":    []string{"TheMovieDb"},
+		"ImageFetcherOrder":        []string{},
+	})
+	seededSystem, err := json.Marshal(systemDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.UpdateSystemConfiguration(ctx, string(seededSystem)); err != nil {
+		t.Fatalf("seeding system configuration: %v", err)
 	}
 
 	keysBefore, err := c.GetAPIKeys(ctx)
 	if err != nil {
 		t.Fatalf("reading API keys: %v", err)
 	}
-	restore = append(restore, func(c *client.Client) error {
+	restore = append(restore, func(ctx context.Context, c *client.Client) error {
 		keys, err := c.GetAPIKeys(ctx)
 		if err != nil {
 			return err
@@ -1253,7 +1275,7 @@ func seedFixtures(t *testing.T, c *client.Client) {
 	if err != nil {
 		t.Fatalf("reading plugin repositories: %v", err)
 	}
-	restore = append(restore, func(c *client.Client) error {
+	restore = append(restore, func(ctx context.Context, c *client.Client) error {
 		return c.SetPluginRepositories(ctx, repos)
 	})
 	// Disabled, so Jellyfin never fetches the unreachable URL.
@@ -1278,7 +1300,7 @@ func seedFixtures(t *testing.T, c *client.Client) {
 		if err := c.AddVirtualFolder(ctx, lib.name, lib.collectionType, []string{"/media/movies"}, &client.LibraryOptions{RawJSON: "{}"}); err != nil {
 			t.Fatalf("seeding library %q: %v", lib.name, err)
 		}
-		restore = append(restore, func(c *client.Client) error {
+		restore = append(restore, func(ctx context.Context, c *client.Client) error {
 			return c.RemoveVirtualFolder(ctx, lib.name)
 		})
 	}
@@ -1288,27 +1310,25 @@ func seedFixtures(t *testing.T, c *client.Client) {
 // checks the generated files with terraform fmt and plans them, as written,
 // with Terraform and this provider: the plan must import every resource
 // without changes, and each imported resource's configuration must set every
-// value its imported state holds.
+// value its imported state holds, apart from the attributes rendered leaves
+// out.
 // Set JELLYFIN_ENDPOINT and either JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD to enable this test.
 func TestAccImportToolE2E(t *testing.T) {
 	outputDir := t.TempDir()
-	c := testAccImportClient(t)
+	c := testAccImportClient(t.Context(), t)
 	seedFixtures(t, c)
 
 	var warnings strings.Builder
 	g := &generator{
 		client:    c,
 		outputDir: outputDir,
-		usedNames: make(map[string]bool),
 		warnings:  &warnings,
 	}
 
-	// Run the full generation.
-	if err := g.Generate(); err != nil {
+	if err := g.Generate(t.Context()); err != nil {
 		t.Fatalf("Generate() against live Jellyfin failed: %v", err)
 	}
 
-	// Verify imports.tf was created and has content.
 	importsPath := filepath.Join(outputDir, "imports.tf")
 	importsContent, err := os.ReadFile(importsPath)
 	if err != nil {
@@ -1318,7 +1338,6 @@ func TestAccImportToolE2E(t *testing.T) {
 		t.Fatal("imports.tf is empty")
 	}
 
-	// Verify resources.tf was created and has content.
 	resourcesPath := filepath.Join(outputDir, "resources.tf")
 	resourcesContent, err := os.ReadFile(resourcesPath)
 	if err != nil {
@@ -1339,7 +1358,6 @@ func TestAccImportToolE2E(t *testing.T) {
 		t.Error("resources.tf should contain at least one jellyfin_user resource block")
 	}
 
-	// Singleton configs should always be present.
 	singletonTypes := []string{
 		"jellyfin_system_configuration",
 		"jellyfin_encoding_configuration",
@@ -1357,7 +1375,10 @@ func TestAccImportToolE2E(t *testing.T) {
 		}
 	}
 
-	// All import blocks should have 'to' and 'id' fields.
+	if !regexp.MustCompile(`disabled_metadata_fetchers\s+=\s+\["TheMovieDb"\]`).MatchString(resourcesStr) {
+		t.Error("resources.tf should keep the disabled metadata fetchers of the seeded Person metadata options")
+	}
+
 	importBlocks := strings.Count(importsStr, "import {")
 	toFields := strings.Count(importsStr, "to = ")
 	idFields := strings.Count(importsStr, "id = ")
@@ -1365,7 +1386,6 @@ func TestAccImportToolE2E(t *testing.T) {
 		t.Errorf("import block count mismatch: blocks=%d, to=%d, id=%d", importBlocks, toFields, idFields)
 	}
 
-	// All resource blocks should have opening and closing braces.
 	resourceBlocks := strings.Count(resourcesStr, "resource \"")
 	if resourceBlocks == 0 {
 		t.Error("resources.tf should contain at least one resource block")
@@ -1394,16 +1414,12 @@ func TestAccImportToolE2E(t *testing.T) {
 // TestAccImportToolIndividualGenerators tests each generator function against a real
 // Jellyfin instance to verify they produce valid output.
 func TestAccImportToolIndividualGenerators(t *testing.T) {
-	c := testAccImportClient(t)
+	c := testAccImportClient(t.Context(), t)
 
 	t.Run("Users", func(t *testing.T) {
-		g := &generator{
-			client:    c,
-			outputDir: t.TempDir(),
-			usedNames: make(map[string]bool),
-		}
+		g := &generator{client: c}
 
-		imports, resources, err := g.generateUsers()
+		imports, resources, err := g.generateUsers(t.Context())
 		if err != nil {
 			t.Fatalf("generateUsers() error: %v", err)
 		}
@@ -1416,7 +1432,6 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 			t.Error("expected at least 1 user resource block")
 		}
 
-		// Verify structure of first user.
 		if len(imports) > 0 && !strings.Contains(imports[0], "jellyfin_user.") {
 			t.Errorf("import block should reference jellyfin_user: %s", imports[0])
 		}
@@ -1426,13 +1441,9 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 	})
 
 	t.Run("ScheduledTasks", func(t *testing.T) {
-		g := &generator{
-			client:    c,
-			outputDir: t.TempDir(),
-			usedNames: make(map[string]bool),
-		}
+		g := &generator{client: c}
 
-		imports, resources, err := g.generateScheduledTasks()
+		imports, resources, err := g.generateScheduledTasks(t.Context())
 		if err != nil {
 			t.Fatalf("generateScheduledTasks() error: %v", err)
 		}
@@ -1447,13 +1458,9 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 	})
 
 	t.Run("SingletonConfigs", func(t *testing.T) {
-		g := &generator{
-			client:    c,
-			outputDir: t.TempDir(),
-			usedNames: make(map[string]bool),
-		}
+		g := &generator{client: c}
 
-		imports, resources, err := g.generateSingletonConfigs()
+		imports, resources, err := g.generateSingletonConfigs(t.Context())
 		if err != nil {
 			t.Fatalf("generateSingletonConfigs() error: %v", err)
 		}
@@ -1465,20 +1472,15 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 			t.Errorf("expected 6 singleton config resources, got %d", len(resources))
 		}
 
-		// System config should have server_name.
 		if len(resources) > 0 && !strings.Contains(resources[0], "server_name") {
 			t.Errorf("system config should contain server_name: %s", resources[0])
 		}
 	})
 
 	t.Run("APIKeys", func(t *testing.T) {
-		g := &generator{
-			client:    c,
-			outputDir: t.TempDir(),
-			usedNames: make(map[string]bool),
-		}
+		g := &generator{client: c}
 
-		imports, resources, err := g.generateAPIKeys()
+		imports, resources, err := g.generateAPIKeys(t.Context())
 		if err != nil {
 			t.Fatalf("generateAPIKeys() error: %v", err)
 		}
@@ -1491,45 +1493,78 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		}
 	})
 
-	t.Run("Libraries", func(t *testing.T) {
-		g := &generator{
-			client:    c,
-			outputDir: t.TempDir(),
-			usedNames: make(map[string]bool),
-		}
+	// Libraries, plugin repositories and plugins may or may not exist on a
+	// fresh instance, so these only have to generate without an error.
+	for _, tc := range []struct {
+		name     string
+		generate func(*generator, context.Context) ([]string, []string, error)
+	}{
+		{"Libraries", (*generator).generateLibraries},
+		{"PluginRepositories", (*generator).generatePluginRepositories},
+		{"Plugins", (*generator).generatePlugins},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := tc.generate(&generator{client: c}, t.Context()); err != nil {
+				t.Fatalf("generate%s() error: %v", tc.name, err)
+			}
+		})
+	}
+}
 
-		// Libraries may or may not exist on a fresh instance - just verify no error.
-		_, _, err := g.generateLibraries()
-		if err != nil {
-			t.Fatalf("generateLibraries() error: %v", err)
-		}
+// Jellyfin lists each version of a plugin it holds, and a plugin it deletes at
+// the next restart, under the plugin's ID; the import reads one entry per ID.
+func TestGeneratePluginsImportsEachPluginOnce(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]any{
+			{"Id": "foo-id", "Name": "Foo", "Version": "1.0.0.0", "Status": "Superseded"},
+			{"Id": "foo-id", "Name": "Foo", "Version": "2.0.0.0", "Status": "Restart"},
+			{"Id": "bar-id", "Name": "Bar", "Version": "3.0.0.0", "Status": "Deleted"},
+		})
 	})
-
-	t.Run("PluginRepositories", func(t *testing.T) {
-		g := &generator{
-			client:    c,
-			outputDir: t.TempDir(),
-			usedNames: make(map[string]bool),
-		}
-
-		// Plugin repos may or may not exist - just verify no error.
-		_, _, err := g.generatePluginRepositories()
-		if err != nil {
-			t.Fatalf("generatePluginRepositories() error: %v", err)
-		}
+	mux.HandleFunc("/Packages", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []any{})
 	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
 
-	t.Run("Plugins", func(t *testing.T) {
-		g := &generator{
-			client:    c,
-			outputDir: t.TempDir(),
-			usedNames: make(map[string]bool),
-		}
+	g := &generator{client: client.NewClient(server.URL, "k")}
+	imports, resources, err := g.generatePlugins(t.Context())
+	if err != nil {
+		t.Fatalf("generatePlugins() error: %v", err)
+	}
+	if len(imports) != 1 || !strings.Contains(imports[0], `id = "foo-id"`) {
+		t.Fatalf("imports = %q, want Foo alone", imports)
+	}
+	if !strings.Contains(resources[0], `version = "2.0.0.0"`) {
+		t.Errorf("resource = %s, want the version the import reads", resources[0])
+	}
+}
 
-		// Plugins may or may not exist - just verify no error.
-		_, _, err := g.generatePlugins()
-		if err != nil {
-			t.Fatalf("generatePlugins() error: %v", err)
-		}
+// jellyfin_plugin_repository imports by name, which cannot tell apart two
+// repositories with the same name.
+func TestGeneratePluginRepositoriesSkipsSharedNames(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Repositories", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]any{
+			{"Name": "Repo", "Url": "https://a", "Enabled": true},
+			{"Name": "Repo", "Url": "https://b", "Enabled": true},
+			{"Name": "Other", "Url": "https://c", "Enabled": true},
+		})
 	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	var warnings strings.Builder
+	g := &generator{client: client.NewClient(server.URL, "k"), warnings: &warnings}
+	imports, _, err := g.generatePluginRepositories(t.Context())
+	if err != nil {
+		t.Fatalf("generatePluginRepositories() error: %v", err)
+	}
+	if len(imports) != 1 || !strings.Contains(imports[0], `id = "Other"`) {
+		t.Errorf("imports = %q, want Other alone", imports)
+	}
+	if strings.Count(warnings.String(), "skipping plugin repository") != 2 {
+		t.Errorf("warnings = %q, want one for each repository named Repo", warnings.String())
+	}
 }
