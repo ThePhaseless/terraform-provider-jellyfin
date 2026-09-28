@@ -7,8 +7,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sync"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -18,6 +20,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -93,7 +96,7 @@ func (r *NetworkingConfigurationResource) Schema(_ context.Context, _ resource.S
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"base_url":                               schema.StringAttribute{Description: "The base URL.", MarkdownDescription: "The base URL.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
+			"base_url":                               schema.StringAttribute{Description: "The base URL, such as /jellyfin: empty, or a path that starts with / and does not end with one, as Jellyfin stores it.", MarkdownDescription: "The base URL, such as `/jellyfin`: empty, or a path that starts with `/` and does not end with one, as Jellyfin stores it.", Optional: true, Computed: true, Validators: []validator.String{baseURLValidator}, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 			"enable_https":                           schema.BoolAttribute{Description: "Whether HTTPS is enabled.", MarkdownDescription: "Whether HTTPS is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 			"require_https":                          schema.BoolAttribute{Description: "Whether HTTPS is required.", MarkdownDescription: "Whether HTTPS is required.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 			"certificate_path":                       schema.StringAttribute{Description: "Path to the TLS certificate.", MarkdownDescription: "Path to the TLS certificate.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
@@ -119,6 +122,12 @@ func (r *NetworkingConfigurationResource) Schema(_ context.Context, _ resource.S
 		},
 	}
 }
+
+// Jellyfin stores a base URL with a leading / added and a trailing one
+// removed, and a blank one as empty, so any other value would read back
+// otherwise than configured.
+var baseURLValidator = stringvalidator.RegexMatches(regexp.MustCompile(`^(/.*[^/])?$`),
+	"must be empty, or start with / and not end with /, such as /jellyfin")
 
 func (r *NetworkingConfigurationResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if req.ProviderData == nil {

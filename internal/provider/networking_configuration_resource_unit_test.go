@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 )
 
 func TestUnitNetworkingConfigurationRoundTrip(t *testing.T) {
@@ -23,4 +25,22 @@ func TestUnitNetworkingConfigurationRoundTrip(t *testing.T) {
 		t.Fatalf("write: %v", d)
 	}
 	checkSameJSON(t, base, fixture)
+}
+
+// Jellyfin stores a base URL with a leading / and without a trailing one.
+func TestUnitNetworkingBaseURLTakesOnlyWhatJellyfinStores(t *testing.T) {
+	a, ok := schemaOf(&NetworkingConfigurationResource{}).Attributes["base_url"].(schema.StringAttribute)
+	if !ok {
+		t.Fatal("base_url is not a string attribute")
+	}
+	testUnitAssertStringValidation(t, a, map[string]bool{
+		"":            false,
+		"/jellyfin":   false,
+		"/a/b":        false,
+		"jellyfin":    true,
+		"/jellyfin/":  true,
+		"/":           true,
+		" ":           true,
+		"/jelly fin ": false,
+	})
 }

@@ -46,7 +46,7 @@ resource "jellyfin_networking_configuration" "example" {
 ### Optional
 
 - `auto_discovery` (Boolean) Whether auto discovery is enabled.
-- `base_url` (String) The base URL.
+- `base_url` (String) The base URL, such as `/jellyfin`: empty, or a path that starts with `/` and does not end with one, as Jellyfin stores it.
 - `certificate_password` (String, Sensitive) Password for the TLS certificate.
 - `certificate_path` (String) Path to the TLS certificate.
 - `enable_https` (Boolean) Whether HTTPS is enabled.
