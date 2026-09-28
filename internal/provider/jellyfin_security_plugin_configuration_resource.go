@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sync"
 	"time"
 
@@ -492,7 +493,8 @@ func (r *JellyfinSecurityPluginConfigurationResource) Create(ctx context.Context
 		return
 	}
 
-	if err := r.requireJellyfinSecurityPluginInstalled(ctx, &resp.Diagnostics); err != nil {
+	version, ok := r.requireInstalled(ctx, &resp.Diagnostics)
+	if !ok {
 		return
 	}
 
@@ -501,7 +503,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) Create(ctx context.Context
 		return
 	}
 
-	r.checkJellyfinSecurityVersionWarning(ctx, &resp.Diagnostics)
+	warnIfNewerThanSupported(version, &resp.Diagnostics)
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -516,7 +518,9 @@ func (r *JellyfinSecurityPluginConfigurationResource) Read(ctx context.Context, 
 		return
 	}
 
-	r.checkJellyfinSecurityVersionWarning(ctx, &resp.Diagnostics)
+	if _, version, err := r.securityPlugin(ctx); err == nil {
+		warnIfNewerThanSupported(version, &resp.Diagnostics)
+	}
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -526,7 +530,8 @@ func (r *JellyfinSecurityPluginConfigurationResource) Update(ctx context.Context
 		return
 	}
 
-	if err := r.requireJellyfinSecurityPluginInstalled(ctx, &resp.Diagnostics); err != nil {
+	version, ok := r.requireInstalled(ctx, &resp.Diagnostics)
+	if !ok {
 		return
 	}
 
@@ -535,7 +540,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) Update(ctx context.Context
 		return
 	}
 
-	r.checkJellyfinSecurityVersionWarning(ctx, &resp.Diagnostics)
+	warnIfNewerThanSupported(version, &resp.Diagnostics)
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
@@ -546,40 +551,44 @@ func (r *JellyfinSecurityPluginConfigurationResource) ImportState(ctx context.Co
 	resource.ImportStatePassthroughID(ctx, path.Root("plugin_id"), req, resp)
 }
 
-func (r *JellyfinSecurityPluginConfigurationResource) requireJellyfinSecurityPluginInstalled(ctx context.Context, diags *diag.Diagnostics) error {
-	installed, err := r.client.GetInstalledPlugins(ctx)
+// securityPlugin reports whether GET /Plugins lists the JellyfinSecurity
+// plugin, and the version of it that jellyfin_plugin reads, which leaves out
+// a version Jellyfin deletes at the next restart.
+func (r *JellyfinSecurityPluginConfigurationResource) securityPlugin(ctx context.Context) (installed bool, version string, err error) {
+	plugins, err := r.client.GetInstalledPlugins(ctx)
 	if err != nil {
-		diags.AddError("Failed to check installed plugins", err.Error())
-		return err
+		return false, "", err
 	}
-
-	canonical := normalizeGUID(jellyfinSecurityPluginID)
-	for _, p := range installed {
-		if normalizeGUID(p.ID) == canonical {
-			return nil
-		}
+	installed = slices.ContainsFunc(plugins, func(p client.InstalledPlugin) bool {
+		return normalizeGUID(p.ID) == normalizeGUID(jellyfinSecurityPluginID)
+	})
+	if p, found := selectInstalledPlugin(plugins, jellyfinSecurityPluginID, "", ""); found {
+		version = p.Version
 	}
-
-	diags.AddError(
-		"JellyfinSecurity plugin not installed",
-		fmt.Sprintf("JellyfinSecurity plugin %s is not installed on the server. Register the plugin repository and install the plugin before managing its configuration, for example with the jellyfin_plugin_repository and jellyfin_plugin resources.", jellyfinSecurityPluginID),
-	)
-	return fmt.Errorf("JellyfinSecurity plugin not installed")
+	return installed, version, nil
 }
 
-func (r *JellyfinSecurityPluginConfigurationResource) checkJellyfinSecurityVersionWarning(ctx context.Context, diags *diag.Diagnostics) {
-	installed, err := r.client.GetInstalledPlugins(ctx)
-	if err != nil {
-		return
+// requireInstalled reports, unless the JellyfinSecurity plugin is installed,
+// why its configuration cannot be written, and otherwise returns its version.
+func (r *JellyfinSecurityPluginConfigurationResource) requireInstalled(ctx context.Context, diags *diag.Diagnostics) (version string, ok bool) {
+	installed, version, err := r.securityPlugin(ctx)
+	switch {
+	case err != nil:
+		diags.AddError("Failed to check installed plugins", err.Error())
+		return "", false
+	case !installed:
+		diags.AddError(
+			"JellyfinSecurity plugin not installed",
+			fmt.Sprintf("JellyfinSecurity plugin %s is not installed on the server. Register the plugin repository and install the plugin before managing its configuration, for example with the jellyfin_plugin_repository and jellyfin_plugin resources.", jellyfinSecurityPluginID),
+		)
+		return "", false
 	}
-	canonical := normalizeGUID(jellyfinSecurityPluginID)
-	for _, p := range installed {
-		if normalizeGUID(p.ID) == canonical {
-			if detail, ok := versionNewerWarning("JellyfinSecurity plugin", pluginRelease(p.Version), pluginRelease(supportedSecurityPluginVersion())); ok {
-				diags.AddWarning("JellyfinSecurity plugin version newer than supported", detail)
-			}
-			return
-		}
+	return version, true
+}
+
+func warnIfNewerThanSupported(version string, diags *diag.Diagnostics) {
+	if detail, ok := versionNewerWarning("JellyfinSecurity plugin", pluginRelease(version), pluginRelease(supportedSecurityPluginVersion())); ok {
+		diags.AddWarning("JellyfinSecurity plugin version newer than supported", detail)
 	}
 }
 
