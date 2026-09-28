@@ -129,3 +129,38 @@ func (vf *VirtualFolder) GetLibraryOptions() *LibraryOptions {
 		RawJSON: strings.TrimSpace(string(vf.LibraryOptions)),
 	}
 }
+
+// AvailableLibraryOptions is what Jellyfin offers a library of one content
+// type: the providers it can enable, per list and per item type.
+type AvailableLibraryOptions struct {
+	SubtitleFetchers []AvailableOption          `json:"SubtitleFetchers"`
+	TypeOptions      []AvailableLibraryTypeInfo `json:"TypeOptions"`
+}
+
+// AvailableLibraryTypeInfo is what Jellyfin offers for one item type.
+type AvailableLibraryTypeInfo struct {
+	Type             string            `json:"Type"`
+	MetadataFetchers []AvailableOption `json:"MetadataFetchers"`
+	ImageFetchers    []AvailableOption `json:"ImageFetchers"`
+}
+
+// AvailableOption names one provider Jellyfin offers.
+type AvailableOption struct {
+	Name string `json:"Name"`
+}
+
+// GetAvailableLibraryOptions lists what Jellyfin offers a library of
+// contentType. Jellyfin answers a content type it does not know, such as
+// mixed, as it does a library without one.
+func (c *Client) GetAvailableLibraryOptions(ctx context.Context, contentType string) (*AvailableLibraryOptions, error) {
+	params := url.Values{}
+	params.Set("libraryContentType", contentType)
+
+	var opts AvailableLibraryOptions
+	if err := c.get(ctx, "/Libraries/AvailableOptions?"+params.Encode(), func(reader io.Reader) error {
+		return json.NewDecoder(reader).Decode(&opts)
+	}); err != nil {
+		return nil, fmt.Errorf("getting the library options Jellyfin offers for %q: %w", contentType, err)
+	}
+	return &opts, nil
+}
