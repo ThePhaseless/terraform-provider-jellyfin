@@ -287,8 +287,8 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: metadataOptionsAttributes,
 				},
-				Description:         "Metadata options.",
-				MarkdownDescription: "Metadata options.",
+				Description:         "Metadata options, one entry per item type. The list replaces the server's list, so an item type it leaves out loses its entry, and Jellyfin then uses its defaults for that type, which enable every fetcher.",
+				MarkdownDescription: "Metadata options, one entry per item type. The list replaces the server's list, so an item type it leaves out loses its entry, and Jellyfin then uses its defaults for that type, which enable every fetcher.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.List{

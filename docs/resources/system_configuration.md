@@ -17,6 +17,8 @@ resource "jellyfin_system_configuration" "example" {
   server_name = "My Jellyfin Server"
   cache_path  = "/cache"
 
+  # The list replaces the server's metadata options, so an item type it
+  # leaves out loses its entry and falls back to Jellyfin's defaults.
   metadata_options = [
     {
       item_type = "Movie"
@@ -73,7 +75,7 @@ resource "jellyfin_system_configuration" "example" {
 - `max_audiobook_resume` (Number) Maximum audiobook resume.
 - `max_resume_pct` (Number) Maximum resume percentage.
 - `metadata_country_code` (String) Metadata country code.
-- `metadata_options` (Attributes List) Metadata options. (see [below for nested schema](#nestedatt--metadata_options))
+- `metadata_options` (Attributes List) Metadata options, one entry per item type. The list replaces the server's list, so an item type it leaves out loses its entry, and Jellyfin then uses its defaults for that type, which enable every fetcher. (see [below for nested schema](#nestedatt--metadata_options))
 - `metadata_path` (String) Metadata path.
 - `min_audiobook_resume` (Number) Minimum audiobook resume.
 - `min_resume_duration_seconds` (Number) Minimum resume duration seconds.

@@ -2,6 +2,8 @@ resource "jellyfin_system_configuration" "example" {
   server_name = "My Jellyfin Server"
   cache_path  = "/cache"
 
+  # The list replaces the server's metadata options, so an item type it
+  # leaves out loses its entry and falls back to Jellyfin's defaults.
   metadata_options = [
     {
       item_type = "Movie"
