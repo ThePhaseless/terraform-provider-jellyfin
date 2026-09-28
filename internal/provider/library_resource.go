@@ -526,13 +526,15 @@ func typeOptionsAttributes() map[string]schema.Attribute {
 const similarItemsNote = "Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error."
 
 // Jellyfin enables what the list names but ranks by the order key alone, with
-// the names it leaves out last, so the list sets the order too.
+// the names it leaves out last, so the list sets the order too. The list reads
+// back the enabled key alone: reading the order into it would plan a change
+// for every configuration that keeps the two keys in different orders.
 func ordersNote(kind, orderAttr string) string {
-	return fmt.Sprintf("Unless `%s` is set, writing it also sets Jellyfin's %s order: these names, then the other names the server's order held.", orderAttr, kind)
+	return fmt.Sprintf("Unless `%[1]s` is set, changing the list also sets Jellyfin's %[2]s order: these names, then the other names the server's order held. The list does not read that order back, so while it stays as it is, Jellyfin keeps the order it has, including one set by `%[1]s` or outside Terraform.", orderAttr, kind)
 }
 
 func orderDeprecation(replacement, kinds string) string {
-	return fmt.Sprintf("Deprecated: list the enabled %s in priority order in `%s` instead, which then sets the order. Set, it still overrides that order. It will be removed in a future release.", kinds, replacement)
+	return fmt.Sprintf("Deprecated: list the enabled %[1]s in priority order in `%[2]s` instead, which then sets the order. Set, it still overrides that order; removed, the order it set stays until `%[2]s` changes. It will be removed in a future release.", kinds, replacement)
 }
 
 const subtitleFetchersDescription = "Enabled subtitle fetchers, in priority order: Jellyfin asks the first one first and disables every other subtitle fetcher it offers. Subtitle fetchers come from plugins, such as Open Subtitles, and each name must match one the server offers exactly. Jellyfin enables a subtitle fetcher installed later, which then shows up as a change to this list. Conflicts with `disabled_subtitle_fetchers` and `subtitle_fetcher_order`, which it replaces."
