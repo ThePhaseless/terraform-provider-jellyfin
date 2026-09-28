@@ -70,6 +70,10 @@ var libraryWire = sync.OnceValues(func() (*wire.Binding, error) {
 		wire.Legacy("library_options.path_infos.network_path", "NetworkPath", "10.10", networkPathRemovedMessage),
 		wire.MergeByKey("library_options.type_options", "type"),
 		wire.MergeByKey("library_options.type_options.image_options", "type"),
+		wire.Orders("library_options.type_options.metadata_fetchers", "metadata_fetcher_order"),
+		wire.Orders("library_options.type_options.image_fetchers", "image_fetcher_order"),
+		wire.Orders("library_options.type_options.similar_item_providers", "similar_item_provider_order"),
+		wire.Complement("library_options.subtitle_fetchers", "subtitle_fetcher_order", "disabled_subtitle_fetchers", "SubtitleFetchers", ""),
 		wire.VersionMessage("library_options.type_options.similar_item_providers", similarItemsVersionMessage),
 		wire.VersionMessage("library_options.type_options.similar_item_provider_order", similarItemsVersionMessage),
 		wire.VersionMessage("library_options.path_infos.network_path", networkPathVersionMessage),
@@ -136,6 +140,7 @@ type LibraryOptionsModel struct {
 	MetadataFetcherOrder                     types.List   `tfsdk:"metadata_fetcher_order"`
 	DisabledImageFetchers                    types.List   `tfsdk:"disabled_image_fetchers"`
 	ImageFetcherOrder                        types.List   `tfsdk:"image_fetcher_order"`
+	SubtitleFetchers                         types.List   `tfsdk:"subtitle_fetchers"`
 	DisabledSubtitleFetchers                 types.List   `tfsdk:"disabled_subtitle_fetchers"`
 	SubtitleFetcherOrder                     types.List   `tfsdk:"subtitle_fetcher_order"`
 	SaveLocalMetadata                        types.Bool   `tfsdk:"save_local_metadata"`
@@ -374,8 +379,9 @@ func libraryOptionsAttributes() map[string]schema.Attribute {
 		"metadata_fetcher_order":           unsupportedStringList("Metadata fetcher order for the whole library; Jellyfin only has it per item type, as `metadata_fetcher_order` in `type_options`."),
 		"disabled_image_fetchers":          unsupportedStringList("Disabled image fetchers."),
 		"image_fetcher_order":              unsupportedStringList("Image fetcher order for the whole library; Jellyfin only has it per item type, as `image_fetcher_order` in `type_options`."),
-		"disabled_subtitle_fetchers":       optionalStringList("Disabled subtitle fetchers."),
-		"subtitle_fetcher_order":           optionalStringList("Subtitle fetcher order."),
+		"subtitle_fetchers":                combinedStringList(subtitleFetchersDescription, "disabled_subtitle_fetchers", "subtitle_fetcher_order"),
+		"disabled_subtitle_fetchers":       replacedBy(optionalStringList("Disabled subtitle fetchers."), subtitleFetchersDeprecation, "subtitle_fetchers"),
+		"subtitle_fetcher_order":           replacedBy(optionalStringList("Subtitle fetcher order."), subtitleFetchersDeprecation, "subtitle_fetchers"),
 		"save_local_metadata":              optionalBool("Whether local metadata is saved."),
 		"save_local_thumbnail_sets":        unsupportedBool("Whether local thumbnail sets are saved."),
 		"import_missing_episodes":          unsupportedBool("Whether missing episodes are imported."),
@@ -489,11 +495,16 @@ func typeOptionsAttributes() map[string]schema.Attribute {
 			},
 		}
 	}
+	deprecatedOrder := func(desc, deprecation string) schema.ListAttribute {
+		a := optionalStringList(desc + " " + deprecation)
+		a.DeprecationMessage = deprecation
+		return a
+	}
 	return map[string]schema.Attribute{
 		"type":                   optionalString("Item type."),
-		"metadata_fetchers":      optionalStringList("Metadata fetchers for this type."),
-		"metadata_fetcher_order": optionalStringList("Metadata fetcher order for this type."),
-		"image_fetchers":         optionalStringList("Image fetchers for this type."),
+		"metadata_fetchers":      optionalStringList("Enabled metadata fetchers for this type, in priority order: Jellyfin asks the first one first. " + ordersNote("metadata fetcher", "metadata_fetcher_order")),
+		"metadata_fetcher_order": deprecatedOrder("Metadata fetcher order for this type.", orderDeprecation("metadata_fetchers", "metadata fetchers")),
+		"image_fetchers":         optionalStringList("Enabled image fetchers for this type, in priority order: Jellyfin asks the first one first. " + ordersNote("image fetcher", "image_fetcher_order")),
 		"image_options": schema.ListNestedAttribute{
 			NestedObject: schema.NestedAttributeObject{
 				Attributes: imageOptionsAttributes(),
@@ -506,11 +517,27 @@ func typeOptionsAttributes() map[string]schema.Attribute {
 				listplanmodifier.UseStateForUnknown(),
 			},
 		},
-		"image_fetcher_order":         optionalStringList("Image fetcher order for this type."),
-		"similar_item_providers":      optionalStringList("Similar item providers for this type. Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error."),
-		"similar_item_provider_order": optionalStringList("Similar item provider order for this type. Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error."),
+		"image_fetcher_order":         deprecatedOrder("Image fetcher order for this type.", orderDeprecation("image_fetchers", "image fetchers")),
+		"similar_item_providers":      optionalStringList("Enabled similar item providers for this type, in priority order; Jellyfin always uses its local ones, such as Local Genre/Tag, which the list only ranks. " + ordersNote("similar item provider", "similar_item_provider_order") + " " + similarItemsNote),
+		"similar_item_provider_order": deprecatedOrder("Similar item provider order for this type. "+similarItemsNote, orderDeprecation("similar_item_providers", "similar item providers")),
 	}
 }
+
+const similarItemsNote = "Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error."
+
+// Jellyfin enables what the list names but ranks by the order key alone, with
+// the names it leaves out last, so the list sets the order too.
+func ordersNote(kind, orderAttr string) string {
+	return fmt.Sprintf("Unless `%s` is set, writing it also sets Jellyfin's %s order: these names, then the other names the server's order held.", orderAttr, kind)
+}
+
+func orderDeprecation(replacement, kinds string) string {
+	return fmt.Sprintf("Deprecated: list the enabled %s in priority order in `%s` instead, which then sets the order. Set, it still overrides that order. It will be removed in a future release.", kinds, replacement)
+}
+
+const subtitleFetchersDescription = "Enabled subtitle fetchers, in priority order: Jellyfin asks the first one first and disables every other subtitle fetcher it offers. Subtitle fetchers come from plugins, such as Open Subtitles, and each name must match one the server offers exactly. Jellyfin enables a subtitle fetcher installed later, which then shows up as a change to this list. Conflicts with `disabled_subtitle_fetchers` and `subtitle_fetcher_order`, which it replaces."
+
+const subtitleFetchersDeprecation = "Deprecated: list the enabled subtitle fetchers in priority order in `subtitle_fetchers` instead, which disables the rest. It will be removed in a future release."
 
 // Jellyfin parses an image option's type case-insensitively but returns it in
 // this spelling, so any other spelling would read back as a different value.
@@ -627,6 +654,7 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 		resp.Diagnostics.AddError("Failed to read library after creation", err.Error())
 		return
 	}
+	ctx = wire.WithAvailable(ctx, newOfferedProviders(r.client).forLibrary(folder.CollectionType))
 
 	// Track the library before its options are applied: a failure below then
 	// leaves it in state as tainted, to be replaced, rather than on the server
@@ -704,6 +732,7 @@ func (r *LibraryResource) Read(ctx context.Context, req resource.ReadRequest, re
 		resp.Diagnostics.AddError("Failed to read library", err.Error())
 		return
 	}
+	ctx = wire.WithAvailable(ctx, newOfferedProviders(r.client).forLibrary(folder.CollectionType))
 
 	data.CollectionType = flattenCollectionType(folder.CollectionType)
 	data.ItemID = types.StringValue(folder.ItemID)
@@ -755,6 +784,7 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 		resp.Diagnostics.AddError("Failed to read library for update", err.Error())
 		return
 	}
+	ctx = wire.WithAvailable(ctx, newOfferedProviders(r.client).forLibrary(folder.CollectionType))
 
 	base, err := parseJSONObject(folder.GetLibraryOptions().RawJSON)
 	if err != nil {
@@ -906,11 +936,11 @@ func planTypeOptionsByType(ctx context.Context, config, plan, state types.List) 
 	for i := range p {
 		prior, found := entryWithType(s, c[i].Type, func(e TypeOptionsModel) types.String { return e.Type })
 		p[i].MetadataFetchers = unsetFromPrior(c[i].MetadataFetchers, p[i].MetadataFetchers, prior.MetadataFetchers, found, unknownList)
-		p[i].MetadataFetcherOrder = unsetFromPrior(c[i].MetadataFetcherOrder, p[i].MetadataFetcherOrder, prior.MetadataFetcherOrder, found, unknownList)
+		p[i].MetadataFetcherOrder = orderFromPrior(c[i].MetadataFetchers, prior.MetadataFetchers, c[i].MetadataFetcherOrder, p[i].MetadataFetcherOrder, prior.MetadataFetcherOrder, found)
 		p[i].ImageFetchers = unsetFromPrior(c[i].ImageFetchers, p[i].ImageFetchers, prior.ImageFetchers, found, unknownList)
-		p[i].ImageFetcherOrder = unsetFromPrior(c[i].ImageFetcherOrder, p[i].ImageFetcherOrder, prior.ImageFetcherOrder, found, unknownList)
+		p[i].ImageFetcherOrder = orderFromPrior(c[i].ImageFetchers, prior.ImageFetchers, c[i].ImageFetcherOrder, p[i].ImageFetcherOrder, prior.ImageFetcherOrder, found)
 		p[i].SimilarItemProviders = unsetFromPrior(c[i].SimilarItemProviders, p[i].SimilarItemProviders, prior.SimilarItemProviders, found, unknownList)
-		p[i].SimilarItemProviderOrder = unsetFromPrior(c[i].SimilarItemProviderOrder, p[i].SimilarItemProviderOrder, prior.SimilarItemProviderOrder, found, unknownList)
+		p[i].SimilarItemProviderOrder = orderFromPrior(c[i].SimilarItemProviders, prior.SimilarItemProviders, c[i].SimilarItemProviderOrder, p[i].SimilarItemProviderOrder, prior.SimilarItemProviderOrder, found)
 
 		if c[i].ImageOptions.IsNull() {
 			p[i].ImageOptions = unsetFromPrior(c[i].ImageOptions, p[i].ImageOptions, prior.ImageOptions, found, types.ListUnknown(p[i].ImageOptions.ElementType(ctx)))
@@ -966,6 +996,16 @@ func entryWithType[T any](entries []T, typ types.String, typeOf func(T) types.St
 		}
 	}
 	return zero, false
+}
+
+// orderFromPrior plans an unset order attribute unknown while its list
+// attribute is configured to other names than the prior entry's, as the list
+// then writes the order.
+func orderFromPrior(configuredList, priorList, configured, planned, prior types.List, found bool) types.List {
+	if configured.IsNull() && !configuredList.IsNull() && (!found || !configuredList.Equal(priorList)) {
+		return types.ListUnknown(types.StringType)
+	}
+	return unsetFromPrior(configured, planned, prior, found, types.ListUnknown(types.StringType))
 }
 
 // unsetFromPrior plans an unset attribute unknown when there is no prior entry

@@ -15,14 +15,16 @@ resource "jellyfin_library" "movies" {
     save_local_metadata                  = true
     season_zero_display_name             = "Specials"
     disabled                             = false
+    # Subtitle fetchers come from plugins, such as Open Subtitles. List the
+    # ones to enable, in priority order; the others are disabled.
+    subtitle_fetchers = []
 
     type_options = [
       {
-        type                   = "Movie"
-        metadata_fetchers      = ["TheMovieDb"]
-        metadata_fetcher_order = ["TheMovieDb"]
-        image_fetchers         = ["TheMovieDb"]
-        image_fetcher_order    = ["TheMovieDb"]
+        type = "Movie"
+        # The enabled fetchers, in priority order.
+        metadata_fetchers = ["TheMovieDb", "The Open Movie Database"]
+        image_fetchers    = ["TheMovieDb"]
         image_options = [
           {
             type      = "Backdrop"

@@ -6,9 +6,14 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -22,6 +27,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
@@ -191,6 +197,211 @@ func TestUnitPlanTypeOptionsByTypeUsesPriorEntryOfSameType(t *testing.T) {
 	}
 	if !images[1].MinWidth.IsUnknown() {
 		t.Errorf("logo min_width = %v, want unknown without a prior logo entry", images[1].MinWidth)
+	}
+}
+
+func TestUnitPlanTypeOptionsByTypePlansTheOrderOfAChangedListUnknown(t *testing.T) {
+	ctx := context.Background()
+
+	prior := testUnitTypeOptions("Movie")
+	prior.MetadataFetchers = testUnitStringList(t, "TheMovieDb")
+	prior.MetadataFetcherOrder = testUnitStringList(t, "TheMovieDb", "The Open Movie Database")
+	prior.ImageFetchers = testUnitStringList(t, "TheMovieDb")
+	prior.ImageFetcherOrder = testUnitStringList(t, "TheMovieDb", "Screen Grabber")
+	prior.SimilarItemProviders = testUnitStringList(t, "Local Genre/Tag")
+	prior.SimilarItemProviderOrder = testUnitStringList(t, "Local Genre/Tag")
+	state := testUnitList(t, typeOptionsObjectType(), []TypeOptionsModel{prior})
+
+	configured := testUnitTypeOptions("Movie")
+	configured.MetadataFetchers = testUnitStringList(t, "The Open Movie Database", "TheMovieDb")
+	configured.ImageFetchers = testUnitStringList(t, "TheMovieDb")
+	configured.SimilarItemProviders = testUnitStringList(t, "TheMovieDb")
+	configured.SimilarItemProviderOrder = testUnitStringList(t, "TheMovieDb", "Local Genre/Tag")
+	config := testUnitList(t, typeOptionsObjectType(), []TypeOptionsModel{configured})
+
+	planned := configured
+	planned.MetadataFetcherOrder = prior.MetadataFetcherOrder
+	planned.ImageFetcherOrder = prior.ImageFetcherOrder
+	planned.ImageOptions = types.ListUnknown(imageOptionsObjectType())
+	plan := testUnitList(t, typeOptionsObjectType(), []TypeOptionsModel{planned})
+
+	got, diags := planTypeOptionsByType(ctx, config, plan, state)
+	if diags.HasError() {
+		t.Fatalf("plan: %v", diags)
+	}
+	var entries []TypeOptionsModel
+	if d := got.ElementsAs(ctx, &entries, false); d.HasError() {
+		t.Fatalf("elements: %v", d)
+	}
+	if !entries[0].MetadataFetcherOrder.IsUnknown() {
+		t.Errorf("metadata_fetcher_order = %v, want unknown while metadata_fetchers changes", entries[0].MetadataFetcherOrder)
+	}
+	if !entries[0].ImageFetcherOrder.Equal(prior.ImageFetcherOrder) {
+		t.Errorf("image_fetcher_order = %v, want the prior order while image_fetchers stays", entries[0].ImageFetcherOrder)
+	}
+	if !entries[0].SimilarItemProviderOrder.Equal(configured.SimilarItemProviderOrder) {
+		t.Errorf("similar_item_provider_order = %v, want the configured order", entries[0].SimilarItemProviderOrder)
+	}
+}
+
+func TestUnitUnknownWhileSharedKeyChanges(t *testing.T) {
+	ctx := context.Background()
+	listType := types.ListType{ElemType: types.StringType}.TerraformType(ctx)
+	s := schema.Schema{Attributes: map[string]schema.Attribute{
+		"entries": schema.ListNestedAttribute{Optional: true, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
+			"enabled": schema.ListAttribute{ElementType: types.StringType, Optional: true, Computed: true},
+			"order":   schema.ListAttribute{ElementType: types.StringType, Optional: true, Computed: true},
+		}}},
+	}}
+	entryType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{"enabled": listType, "order": listType}}
+	entries := func(orders ...tftypes.Value) tftypes.Value {
+		elems := make([]tftypes.Value, len(orders))
+		for i, o := range orders {
+			elems[i] = tftypes.NewValue(entryType, map[string]tftypes.Value{"enabled": tftypes.NewValue(listType, nil), "order": o})
+		}
+		return tftypes.NewValue(s.Type().TerraformType(ctx), map[string]tftypes.Value{"entries": tftypes.NewValue(tftypes.List{ElementType: entryType}, elems)})
+	}
+	order := func(values ...string) tftypes.Value {
+		if values == nil {
+			return tftypes.NewValue(listType, nil)
+		}
+		elems := make([]tftypes.Value, len(values))
+		for i, v := range values {
+			elems[i] = tftypes.NewValue(tftypes.String, v)
+		}
+		return tftypes.NewValue(listType, elems)
+	}
+	modify := func(config, state tftypes.Value, index int, configured types.List) types.List {
+		t.Helper()
+		req := planmodifier.ListRequest{
+			Path:        path.Root("entries").AtListIndex(index).AtName("enabled"),
+			Config:      tfsdk.Config{Schema: s, Raw: config},
+			State:       tfsdk.State{Schema: s, Raw: state},
+			ConfigValue: configured,
+			PlanValue:   testUnitStringList(t, "A"),
+		}
+		if !configured.IsNull() {
+			req.PlanValue = configured
+		}
+		resp := planmodifier.ListResponse{PlanValue: req.PlanValue}
+		unknownWhileSharedKeyChanges("order").PlanModifyList(ctx, req, &resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatal(resp.Diagnostics)
+		}
+		return resp.PlanValue
+	}
+
+	unset := types.ListNull(types.StringType)
+	for name, c := range map[string]struct {
+		config, state tftypes.Value
+		index         int
+		unknown       bool
+	}{
+		"the order changes":          {config: entries(order("B")), state: entries(order("A")), unknown: true},
+		"the order stays":            {config: entries(order("A")), state: entries(order("A"))},
+		"the order is unset":         {config: entries(order()), state: entries(order("A"))},
+		"a new entry sets the order": {config: entries(order("A"), order("B")), state: entries(order("A")), index: 1, unknown: true},
+		"the resource is new":        {config: entries(order("B")), state: tftypes.NewValue(s.Type().TerraformType(ctx), nil)},
+	} {
+		if got := modify(c.config, c.state, c.index, unset); got.IsUnknown() != c.unknown {
+			t.Errorf("%s: planned %v, want unknown: %t", name, got, c.unknown)
+		}
+	}
+	configured := testUnitStringList(t, "C")
+	if got := modify(entries(order("B")), entries(order("A")), 0, configured); !got.Equal(configured) {
+		t.Errorf("a configured value is planned %v", got)
+	}
+}
+
+func TestUnitLibraryUpdateWritesTheKeysItsListsShare(t *testing.T) {
+	ctx := context.Background()
+	const served = `{"Name": "Movies", "ItemId": "item", "CollectionType": "movies", "Locations": ["/media"],
+		"LibraryOptions": {"TypeOptions": [{"Type": "Movie", "MetadataFetchers": ["A"], "MetadataFetcherOrder": ["B", "A"]}]}}`
+	var mu sync.Mutex
+	var posted json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Library/VirtualFolders":
+			folder := map[string]json.RawMessage{}
+			if err := json.Unmarshal([]byte(served), &folder); err != nil {
+				t.Error(err)
+			}
+			if posted != nil {
+				folder["LibraryOptions"] = posted
+			}
+			_ = json.NewEncoder(w).Encode([]any{folder})
+		case r.Method == http.MethodPost && r.URL.Path == "/Library/VirtualFolders/LibraryOptions":
+			var body struct{ LibraryOptions json.RawMessage }
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			posted = body.LibraryOptions
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/Libraries/AvailableOptions" && r.URL.Query().Get("libraryContentType") == "movies":
+			_, _ = io.WriteString(w, `{"SubtitleFetchers": [{"Name": "A"}, {"Name": "B"}, {"Name": "C"}]}`)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	r := NewLibraryResource()
+	configure(t, r, client.NewClient(srv.URL, "k"))
+	options := path.Root("library_options")
+	movie := options.AtName("type_options").AtListIndex(0)
+	state := planRead(t, r, served)
+	plan := planRead(t, r, served,
+		planValue{options.AtName("subtitle_fetchers"), testUnitStringList(t, "B", "A")},
+		planValue{options.AtName("disabled_subtitle_fetchers"), types.ListUnknown(types.StringType)},
+		planValue{options.AtName("subtitle_fetcher_order"), types.ListUnknown(types.StringType)},
+		planValue{movie.AtName("metadata_fetchers"), testUnitStringList(t, "C")},
+		planValue{movie.AtName("metadata_fetcher_order"), types.ListUnknown(types.StringType)},
+	)
+	resp := resource.UpdateResponse{State: tfsdk.State(state)}
+	r.Update(ctx, resource.UpdateRequest{Plan: plan, State: tfsdk.State(state)}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("apply: %v", resp.Diagnostics)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	checkSameJSON(t, jsonAt(t, posted, "SubtitleFetcherOrder"), `["B","A","C"]`)
+	checkSameJSON(t, jsonAt(t, posted, "DisabledSubtitleFetchers"), `["C"]`)
+	checkSameJSON(t, jsonAt(t, posted, "TypeOptions", 0, "MetadataFetchers"), `["C"]`)
+	checkSameJSON(t, jsonAt(t, posted, "TypeOptions", 0, "MetadataFetcherOrder"), `["C","B","A"]`)
+
+	for at, want := range map[string]types.List{
+		"subtitle_fetchers":          testUnitStringList(t, "B", "A"),
+		"disabled_subtitle_fetchers": testUnitStringList(t, "C"),
+	} {
+		var got types.List
+		if d := resp.State.GetAttribute(ctx, options.AtName(at), &got); d.HasError() || !got.Equal(want) {
+			t.Errorf("%s = %v after apply (%v), want %v", at, got, d, want)
+		}
+	}
+	var order types.List
+	if d := resp.State.GetAttribute(ctx, movie.AtName("metadata_fetcher_order"), &order); d.HasError() || !order.Equal(testUnitStringList(t, "C", "B", "A")) {
+		t.Errorf("metadata_fetcher_order = %v after apply (%v), want the written order", order, d)
+	}
+}
+
+func TestUnitReplacedLibraryListsNameTheirReplacement(t *testing.T) {
+	for _, c := range []struct {
+		attrs       map[string]schema.Attribute
+		name, names string
+	}{
+		{libraryOptionsAttributes(), "disabled_subtitle_fetchers", "`subtitle_fetchers`"},
+		{libraryOptionsAttributes(), "subtitle_fetcher_order", "`subtitle_fetchers`"},
+		{typeOptionsAttributes(), "metadata_fetcher_order", "`metadata_fetchers`"},
+		{typeOptionsAttributes(), "image_fetcher_order", "`image_fetchers`"},
+		{typeOptionsAttributes(), "similar_item_provider_order", "`similar_item_providers`"},
+	} {
+		if msg := c.attrs[c.name].GetDeprecationMessage(); !strings.Contains(msg, c.names) {
+			t.Errorf("%s is deprecated with %q, which does not name %s", c.name, msg, c.names)
+		}
 	}
 }
 
@@ -543,10 +754,21 @@ func testUnitLibraryRead(t *testing.T, b *wire.Binding, options string) LibraryR
 		Paths:          testUnitStringList(t, "/media"),
 		ItemID:         types.StringValue("item"),
 	}
-	if d := b.FlattenInto(context.Background(), options, &data); d.HasError() {
+	if d := b.FlattenInto(testUnitOfferingSubtitleFetchers(), options, &data); d.HasError() {
 		t.Fatalf("read: %v", d)
 	}
 	return data
+}
+
+// testUnitOfferingSubtitleFetchers returns a context whose server offers the
+// subtitle fetchers named.
+func testUnitOfferingSubtitleFetchers(offered ...string) context.Context {
+	return wire.WithAvailable(context.Background(), func(_ context.Context, list, scope string) ([]string, error) {
+		if list != "SubtitleFetchers" || scope != "" {
+			return nil, fmt.Errorf("asked for %s of %q", list, scope)
+		}
+		return offered, nil
+	})
 }
 
 func typeOptionsObjectType() types.ObjectType { return testUnitObjectType(typeOptionsAttributes()) }

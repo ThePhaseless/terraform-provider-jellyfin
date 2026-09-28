@@ -242,6 +242,8 @@ resource "jellyfin_library" "test" {
     extract_chapters_during_library_scan = true
     disabled                             = false
     path_infos                           = [{ path = "/media/movies" }]
+    disabled_subtitle_fetchers           = ["Open Subtitles"]
+    subtitle_fetcher_order               = ["Open Subtitles", "Podnapisi"]
     type_options = [
       {
         type                   = "Movie"

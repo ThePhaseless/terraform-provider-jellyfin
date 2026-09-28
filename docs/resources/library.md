@@ -30,14 +30,16 @@ resource "jellyfin_library" "movies" {
     save_local_metadata                  = true
     season_zero_display_name             = "Specials"
     disabled                             = false
+    # Subtitle fetchers come from plugins, such as Open Subtitles. List the
+    # ones to enable, in priority order; the others are disabled.
+    subtitle_fetchers = []
 
     type_options = [
       {
-        type                   = "Movie"
-        metadata_fetchers      = ["TheMovieDb"]
-        metadata_fetcher_order = ["TheMovieDb"]
-        image_fetchers         = ["TheMovieDb"]
-        image_fetcher_order    = ["TheMovieDb"]
+        type = "Movie"
+        # The enabled fetchers, in priority order.
+        metadata_fetchers = ["TheMovieDb", "The Open Movie Database"]
+        image_fetchers    = ["TheMovieDb"]
         image_options = [
           {
             type      = "Backdrop"
@@ -80,7 +82,7 @@ Optional:
 - `disabled_image_fetchers` (List of String, Deprecated) Disabled image fetchers. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `disabled_metadata_fetchers` (List of String, Deprecated) Disabled metadata fetchers. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `disabled_metadata_savers` (List of String, Deprecated) Disabled metadata savers. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
-- `disabled_subtitle_fetchers` (List of String) Disabled subtitle fetchers.
+- `disabled_subtitle_fetchers` (List of String, Deprecated) Disabled subtitle fetchers. Deprecated: list the enabled subtitle fetchers in priority order in `subtitle_fetchers` instead, which disables the rest. It will be removed in a future release.
 - `download_images_in_advance` (Boolean, Deprecated) Whether images are downloaded in advance. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `enable_automatic_series_grouping` (Boolean) Whether automatic series grouping is enabled.
 - `enable_chapter_image_extraction` (Boolean) Whether chapter image extraction is enabled.
@@ -102,7 +104,8 @@ Optional:
 - `save_local_metadata` (Boolean) Whether local metadata is saved.
 - `save_local_thumbnail_sets` (Boolean, Deprecated) Whether local thumbnail sets are saved. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `season_zero_display_name` (String) Season zero display name.
-- `subtitle_fetcher_order` (List of String) Subtitle fetcher order.
+- `subtitle_fetcher_order` (List of String, Deprecated) Subtitle fetcher order. Deprecated: list the enabled subtitle fetchers in priority order in `subtitle_fetchers` instead, which disables the rest. It will be removed in a future release.
+- `subtitle_fetchers` (List of String) Enabled subtitle fetchers, in priority order: Jellyfin asks the first one first and disables every other subtitle fetcher it offers. Subtitle fetchers come from plugins, such as Open Subtitles, and each name must match one the server offers exactly. Jellyfin enables a subtitle fetcher installed later, which then shows up as a change to this list. Conflicts with `disabled_subtitle_fetchers` and `subtitle_fetcher_order`, which it replaces.
 - `type_options` (Attributes List) Type-specific options. The list replaces the server's list; each entry is applied over the server's entry with the same `type`, so attributes left unset keep the server's values. (see [below for nested schema](#nestedatt--library_options--type_options))
 
 <a id="nestedatt--library_options--path_infos"></a>
@@ -121,13 +124,13 @@ Optional:
 
 Optional:
 
-- `image_fetcher_order` (List of String) Image fetcher order for this type.
-- `image_fetchers` (List of String) Image fetchers for this type.
+- `image_fetcher_order` (List of String, Deprecated) Image fetcher order for this type. Deprecated: list the enabled image fetchers in priority order in `image_fetchers` instead, which then sets the order. Set, it still overrides that order. It will be removed in a future release.
+- `image_fetchers` (List of String) Enabled image fetchers for this type, in priority order: Jellyfin asks the first one first. Unless `image_fetcher_order` is set, writing it also sets Jellyfin's image fetcher order: these names, then the other names the server's order held.
 - `image_options` (Attributes List) Image options for this type. Each entry is applied over the server's entry with the same image `type`. (see [below for nested schema](#nestedatt--library_options--type_options--image_options))
-- `metadata_fetcher_order` (List of String) Metadata fetcher order for this type.
-- `metadata_fetchers` (List of String) Metadata fetchers for this type.
-- `similar_item_provider_order` (List of String) Similar item provider order for this type. Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error.
-- `similar_item_providers` (List of String) Similar item providers for this type. Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error.
+- `metadata_fetcher_order` (List of String, Deprecated) Metadata fetcher order for this type. Deprecated: list the enabled metadata fetchers in priority order in `metadata_fetchers` instead, which then sets the order. Set, it still overrides that order. It will be removed in a future release.
+- `metadata_fetchers` (List of String) Enabled metadata fetchers for this type, in priority order: Jellyfin asks the first one first. Unless `metadata_fetcher_order` is set, writing it also sets Jellyfin's metadata fetcher order: these names, then the other names the server's order held.
+- `similar_item_provider_order` (List of String, Deprecated) Similar item provider order for this type. Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error. Deprecated: list the enabled similar item providers in priority order in `similar_item_providers` instead, which then sets the order. Set, it still overrides that order. It will be removed in a future release.
+- `similar_item_providers` (List of String) Enabled similar item providers for this type, in priority order; Jellyfin always uses its local ones, such as Local Genre/Tag, which the list only ranks. Unless `similar_item_provider_order` is set, writing it also sets Jellyfin's similar item provider order: these names, then the other names the server's order held. Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error.
 - `type` (String) Item type.
 
 <a id="nestedatt--library_options--type_options--image_options"></a>
