@@ -283,6 +283,31 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 		}
 	}
 
+	// Attributes of list elements take no UseStateForUnknown, which pairs
+	// elements by index, so that removing or reordering an element would plan
+	// another element's values, secrets included, for it. The lists fill the
+	// unknowns of each element from the prior element with the same key.
+	elementBool := func(desc string) schema.BoolAttribute {
+		a := optionalBool(desc)
+		a.PlanModifiers = nil
+		return a
+	}
+	elementString := func(desc string) schema.StringAttribute {
+		a := optionalString(desc)
+		a.PlanModifiers = nil
+		return a
+	}
+	elementSensitiveString := func(desc string) schema.StringAttribute {
+		a := sensitiveString(desc)
+		a.PlanModifiers = nil
+		return a
+	}
+	elementStringList := func(desc string) schema.ListAttribute {
+		a := optionalStringList(desc)
+		a.PlanModifiers = nil
+		return a
+	}
+
 	enrollmentDeadline := optionalString("2FA enrollment deadline as an ISO 8601 date-time, e.g. `2030-01-01T00:00:00Z`.")
 	enrollmentDeadline.Validators = []validator.String{
 		stringvalidator.RegexMatches(isoDateTimePattern, "must be an ISO 8601 date-time such as 2030-01-01T00:00:00Z"),
@@ -354,8 +379,8 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 			"user_emails": schema.ListNestedAttribute{
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
-						"user_id": optionalString("Jellyfin user ID."),
-						"email":   optionalString("User email address."),
+						"user_id": elementString("Jellyfin user ID."),
+						"email":   elementString("User email address."),
 					},
 				},
 				Description:         "User email mappings.",
@@ -364,6 +389,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 				Computed:            true,
 				PlanModifiers: []planmodifier.List{
 					listplanmodifier.UseStateForUnknown(),
+					useStateForUnknownByKey([]string{"user_id"}),
 				},
 			},
 			"totp_issuer_name":                   optionalString("TOTP issuer name."),
@@ -383,7 +409,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 			"bypass_for_external_auth_providers": optionalBool("Bypass 2FA for external auth providers."),
 			"oidc_providers": schema.ListNestedAttribute{
 				NestedObject: schema.NestedAttributeObject{
-					Attributes: oidcProviderAttributes(optionalBool, optionalString, sensitiveString, optionalStringList, optionalInt),
+					Attributes: oidcProviderAttributes(elementBool, elementString, elementSensitiveString, elementStringList),
 				},
 				Description:         "List of OIDC provider configurations.",
 				MarkdownDescription: "List of OIDC provider configurations.",
@@ -391,6 +417,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 				Computed:            true,
 				PlanModifiers: []planmodifier.List{
 					listplanmodifier.UseStateForUnknown(),
+					useStateForUnknownByKey([]string{"id"}),
 				},
 			},
 			"geo_ip_city_db_path":                   optionalString("Path to GeoIP city database."),
@@ -418,7 +445,6 @@ func oidcProviderAttributes(
 	optionalString func(string) schema.StringAttribute,
 	sensitiveString func(string) schema.StringAttribute,
 	optionalStringList func(string) schema.ListAttribute,
-	_ func(string) schema.Int64Attribute,
 ) map[string]schema.Attribute {
 	return map[string]schema.Attribute{
 		"id":                          optionalString("Provider ID (callback URL slug)."),
@@ -458,9 +484,6 @@ func oidcProviderAttributes(
 			MarkdownDescription: "Role-to-library access mappings.",
 			Optional:            true,
 			Computed:            true,
-			PlanModifiers: []planmodifier.List{
-				listplanmodifier.UseStateForUnknown(),
-			},
 		},
 		"email_claim":                      optionalString("JWT claim for email."),
 		"sync_email_from_claim":            optionalBool("Sync email from claim."),
@@ -474,9 +497,6 @@ func oidcProviderAttributes(
 			Description:         "Creation timestamp (server-managed).",
 			MarkdownDescription: "Creation timestamp (server-managed).",
 			Computed:            true,
-			PlanModifiers: []planmodifier.String{
-				stringplanmodifier.UseStateForUnknown(),
-			},
 		},
 	}
 }

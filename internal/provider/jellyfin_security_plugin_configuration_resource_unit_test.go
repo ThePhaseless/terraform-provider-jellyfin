@@ -7,15 +7,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"sort"
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
@@ -487,4 +493,103 @@ func testUnitSecurityPluginRead(t *testing.T, b *wire.Binding, raw string) Jelly
 		t.Fatalf("model: %v", d.Errors())
 	}
 	return data
+}
+
+// Removing an OIDC provider must not plan the next one with the removed
+// provider's values: its secret and settings come from the prior entry with
+// its id, and a new entry takes the server's values.
+func TestUnitSecurityPluginPlansOIDCProvidersByID(t *testing.T) {
+	ctx := context.Background()
+	s := schemaOf(&JellyfinSecurityPluginConfigurationResource{})
+	providers, ok := s.Attributes["oidc_providers"].(rschema.ListNestedAttribute)
+	if !ok {
+		t.Fatalf("oidc_providers is a %T", s.Attributes["oidc_providers"])
+	}
+	for name, a := range providers.NestedObject.Attributes {
+		if hasPlanModifiers(a) {
+			t.Errorf("oidc_providers.%s pairs list elements by index with a plan modifier of its own", name)
+		}
+	}
+	elemType, ok := providers.NestedObject.Type().(types.ObjectType)
+	if !ok {
+		t.Fatalf("oidc_providers elements are %T", providers.NestedObject.Type())
+	}
+	// element returns an entry whose attributes hold base (nil for null, or
+	// tftypes.UnknownValue), except those set holds.
+	element := func(base any, set map[string]attr.Value) attr.Value {
+		attrs := map[string]attr.Value{}
+		for name, typ := range elemType.AttrTypes {
+			v, err := typ.ValueFromTerraform(ctx, tftypes.NewValue(typ.TerraformType(ctx), base))
+			if err != nil {
+				t.Fatal(err)
+			}
+			attrs[name] = v
+		}
+		maps.Copy(attrs, set)
+		return types.ObjectValueMust(elemType.AttrTypes, attrs)
+	}
+	prior := func(id, secret string, autoCreate bool, createdAt string) attr.Value {
+		return element(nil, map[string]attr.Value{
+			"id":                types.StringValue(id),
+			"client_secret":     types.StringValue(secret),
+			"auto_create_users": types.BoolValue(autoCreate),
+			"created_at":        types.StringValue(createdAt),
+		})
+	}
+	configured := map[string]attr.Value{"id": types.StringValue("b"), "display_name": types.StringValue("B")}
+
+	state := types.ListValueMust(elemType, []attr.Value{prior("a", "secret-a", true, "tA"), prior("b", "secret-b", false, "tB")})
+	config := types.ListValueMust(elemType, []attr.Value{element(nil, configured)})
+	plan := types.ListValueMust(elemType, []attr.Value{element(tftypes.UnknownValue, configured)})
+
+	existing := tftypes.NewValue(tftypes.Object{}, map[string]tftypes.Value{})
+	resp := planmodifier.ListResponse{PlanValue: plan}
+	for _, m := range providers.PlanModifiers {
+		m.PlanModifyList(ctx, planmodifier.ListRequest{
+			Path:        path.Root("oidc_providers"),
+			State:       tfsdk.State{Raw: existing},
+			Plan:        tfsdk.Plan{Raw: existing},
+			ConfigValue: config,
+			PlanValue:   resp.PlanValue,
+			StateValue:  state,
+		}, &resp)
+	}
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	got, ok := resp.PlanValue.Elements()[0].(types.Object)
+	if !ok {
+		t.Fatalf("planned %s", resp.PlanValue)
+	}
+	for name, want := range map[string]attr.Value{
+		"client_secret":     types.StringValue("secret-b"),
+		"auto_create_users": types.BoolValue(false),
+		"created_at":        types.StringValue("tB"),
+		"display_name":      types.StringValue("B"),
+	} {
+		if v := got.Attributes()[name]; !v.Equal(want) {
+			t.Errorf("planned oidc_providers[0].%s = %s, want %s", name, v, want)
+		}
+	}
+}
+
+func hasPlanModifiers(a rschema.Attribute) bool {
+	switch a := a.(type) {
+	case rschema.StringAttribute:
+		return len(a.PlanModifiers) > 0
+	case rschema.BoolAttribute:
+		return len(a.PlanModifiers) > 0
+	case rschema.ListAttribute:
+		return len(a.PlanModifiers) > 0
+	case rschema.ListNestedAttribute:
+		if len(a.PlanModifiers) > 0 {
+			return true
+		}
+		for _, n := range a.NestedObject.Attributes {
+			if hasPlanModifiers(n) {
+				return true
+			}
+		}
+	}
+	return false
 }
