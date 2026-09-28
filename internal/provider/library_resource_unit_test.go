@@ -311,6 +311,52 @@ func TestUnitUnknownWhileSharedKeysChange(t *testing.T) {
 	}
 }
 
+// A combined list stands for two attributes, and a change to either one
+// makes it unknown.
+func TestUnitUnknownWhileSharedKeysChangeFollowsEverySibling(t *testing.T) {
+	ctx := context.Background()
+	listType := types.ListType{ElemType: types.StringType}.TerraformType(ctx)
+	s := schema.Schema{Attributes: map[string]schema.Attribute{
+		"enabled":  schema.ListAttribute{ElementType: types.StringType, Optional: true, Computed: true},
+		"disabled": schema.ListAttribute{ElementType: types.StringType, Optional: true, Computed: true},
+		"order":    schema.ListAttribute{ElementType: types.StringType, Optional: true, Computed: true},
+	}}
+	list := func(values ...string) tftypes.Value {
+		if values == nil {
+			return tftypes.NewValue(listType, nil)
+		}
+		elems := make([]tftypes.Value, len(values))
+		for i, v := range values {
+			elems[i] = tftypes.NewValue(tftypes.String, v)
+		}
+		return tftypes.NewValue(listType, elems)
+	}
+	object := func(disabled, order tftypes.Value) tftypes.Value {
+		return tftypes.NewValue(s.Type().TerraformType(ctx), map[string]tftypes.Value{"enabled": list(), "disabled": disabled, "order": order})
+	}
+	for name, c := range map[string]struct {
+		config tftypes.Value
+		want   bool
+	}{
+		"the first sibling changes":  {object(list("X"), list()), true},
+		"the second sibling changes": {object(list(), list("B")), true},
+		"neither changes":            {object(list("C"), list("A")), false},
+	} {
+		req := planmodifier.ListRequest{
+			Path:        path.Root("enabled"),
+			Config:      tfsdk.Config{Schema: s, Raw: c.config},
+			State:       tfsdk.State{Schema: s, Raw: object(list("C"), list("A"))},
+			ConfigValue: types.ListNull(types.StringType),
+			PlanValue:   testUnitStringList(t, "A"),
+		}
+		resp := planmodifier.ListResponse{PlanValue: req.PlanValue}
+		unknownWhileSharedKeysChange{siblings: []string{"disabled", "order"}}.PlanModifyList(ctx, req, &resp)
+		if resp.Diagnostics.HasError() || resp.PlanValue.IsUnknown() != c.want {
+			t.Errorf("%s: planned %v (%v), want unknown: %t", name, resp.PlanValue, resp.Diagnostics, c.want)
+		}
+	}
+}
+
 func TestUnitLibraryUpdateWritesTheKeysItsListsShare(t *testing.T) {
 	ctx := context.Background()
 	const served = `{"Name": "Movies", "ItemId": "item", "CollectionType": "movies", "Locations": ["/media"],

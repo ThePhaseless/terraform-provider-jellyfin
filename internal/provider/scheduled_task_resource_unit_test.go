@@ -921,3 +921,17 @@ func TestUnitScheduledTaskKeyPlansUnknownOverANullPriorKey(t *testing.T) {
 		t.Errorf("planned key = %s, want unknown", resp.PlanValue)
 	}
 }
+
+// A task that is gone, such as one a removed plugin added, leaves the state,
+// so that the next plan explains why its key selects nothing.
+func TestScheduledTaskReadDropsATaskThatIsGone(t *testing.T) {
+	t.Parallel()
+
+	srv := &fakeTaskServer{tasks: testTasks()}
+	s := scheduledTaskSchema(t)
+	gone := storedTask("0123456789abcdef0123456789abcdef", types.StringValue("RemovedPluginTask"))
+	resp := readAgainst(t, NewScheduledTaskResource(), srv.client(t), tfsdk.State{Schema: s, Raw: scheduledTaskValue(t, gone)})
+	if resp.Diagnostics.HasError() || !resp.State.Raw.IsNull() {
+		t.Errorf("Read() = %v with state %v, want the resource removed without an error", resp.Diagnostics, resp.State.Raw)
+	}
+}

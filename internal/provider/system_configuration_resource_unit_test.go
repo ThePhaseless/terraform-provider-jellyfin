@@ -427,6 +427,18 @@ func TestUnitOfferedProvidersByItemType(t *testing.T) {
 			t.Errorf("%s of %s = %v (%v), want %s", c.list, c.scope, got, err, c.want)
 		}
 	}
+	// Each list comes from its own member of the item type's options.
+	served := &client.AvailableLibraryOptions{TypeOptions: []client.AvailableLibraryTypeInfo{{
+		Type:                 "Movie",
+		MetadataFetchers:     []client.AvailableOption{{Name: "TheMovieDb"}},
+		ImageFetchers:        []client.AvailableOption{{Name: "Screen Grabber"}},
+		SimilarItemProviders: []client.AvailableOption{{Name: "Local Genre/Tag"}},
+	}}}
+	for list, want := range map[string]string{"MetadataFetchers": "[TheMovieDb]", "ImageFetchers": "[Screen Grabber]", "SimilarItemProviders": "[Local Genre/Tag]"} {
+		if got, err := typeOptionNames(served, list, "movie"); err != nil || fmt.Sprint(got) != want {
+			t.Errorf("%s of Movie = %v (%v), want %s", list, got, err, want)
+		}
+	}
 	if _, err := o.byItemType(ctx, "MetadataFetchers", "Person"); !errors.Is(err, wire.ErrNotOffered) {
 		t.Errorf("an item type no content type holds: %v, want wire.ErrNotOffered", err)
 	}
