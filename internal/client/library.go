@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/url"
 	"strings"
 )
@@ -38,9 +37,7 @@ func (lo *LibraryOptions) MarshalJSON() ([]byte, error) {
 // GetVirtualFolders retrieves all virtual folders (libraries).
 func (c *Client) GetVirtualFolders(ctx context.Context) ([]VirtualFolder, error) {
 	var folders []VirtualFolder
-	if err := c.get(ctx, "/Library/VirtualFolders", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&folders)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/Library/VirtualFolders", &folders); err != nil {
 		return nil, fmt.Errorf("getting virtual folders: %w", err)
 	}
 	return folders, nil
@@ -153,9 +150,7 @@ func (c *Client) GetAvailableLibraryOptions(ctx context.Context, contentType str
 	params.Set("libraryContentType", contentType)
 
 	var opts AvailableLibraryOptions
-	if err := c.get(ctx, "/Libraries/AvailableOptions?"+params.Encode(), func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&opts)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/Libraries/AvailableOptions?"+params.Encode(), &opts); err != nil {
 		return nil, fmt.Errorf("getting the library options Jellyfin offers for %q: %w", contentType, err)
 	}
 	return &opts, nil

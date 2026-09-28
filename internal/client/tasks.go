@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/url"
 )
 
@@ -25,9 +24,7 @@ type ScheduledTask struct {
 // GetScheduledTasks retrieves all scheduled tasks.
 func (c *Client) GetScheduledTasks(ctx context.Context) ([]ScheduledTask, error) {
 	var tasks []ScheduledTask
-	if err := c.get(ctx, "/ScheduledTasks", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&tasks)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/ScheduledTasks", &tasks); err != nil {
 		return nil, fmt.Errorf("getting scheduled tasks: %w", err)
 	}
 	return tasks, nil

@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/url"
 	"sync"
 )
@@ -49,9 +48,7 @@ type VersionInfo struct {
 // GetPluginRepositories retrieves all configured plugin repositories.
 func (c *Client) GetPluginRepositories(ctx context.Context) ([]PluginRepository, error) {
 	var repos []PluginRepository
-	if err := c.get(ctx, "/Repositories", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&repos)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/Repositories", &repos); err != nil {
 		return nil, fmt.Errorf("getting plugin repositories: %w", err)
 	}
 	return repos, nil
@@ -72,9 +69,7 @@ func (c *Client) SetPluginRepositories(ctx context.Context, repos []PluginReposi
 // GetInstalledPlugins retrieves all installed plugins.
 func (c *Client) GetInstalledPlugins(ctx context.Context) ([]InstalledPlugin, error) {
 	var plugins []InstalledPlugin
-	if err := c.get(ctx, "/Plugins", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&plugins)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/Plugins", &plugins); err != nil {
 		return nil, fmt.Errorf("getting installed plugins: %w", err)
 	}
 	return plugins, nil
@@ -130,9 +125,7 @@ func (c *Client) UpdatePluginConfiguration(ctx context.Context, pluginID string,
 // GetAvailablePackages retrieves all available packages from configured repositories.
 func (c *Client) GetAvailablePackages(ctx context.Context) ([]PackageInfo, error) {
 	var packages []PackageInfo
-	if err := c.get(ctx, "/Packages", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&packages)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/Packages", &packages); err != nil {
 		return nil, fmt.Errorf("getting available packages: %w", err)
 	}
 	return packages, nil

@@ -5,9 +5,7 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 )
 
 // SystemInfo represents the full system information from /System/Info.
@@ -29,9 +27,7 @@ type PublicSystemInfo struct {
 // GetSystemInfo retrieves the full system information.
 func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	var info SystemInfo
-	if err := c.get(ctx, "/System/Info", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&info)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/System/Info", &info); err != nil {
 		return nil, fmt.Errorf("getting system info: %w", err)
 	}
 	return &info, nil
@@ -40,9 +36,7 @@ func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 // GetPublicSystemInfo retrieves public system information (no auth required).
 func (c *Client) GetPublicSystemInfo(ctx context.Context) (*PublicSystemInfo, error) {
 	var info PublicSystemInfo
-	if err := c.get(ctx, "/System/Info/Public", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&info)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/System/Info/Public", &info); err != nil {
 		return nil, fmt.Errorf("getting public system info: %w", err)
 	}
 	return &info, nil

@@ -6,6 +6,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -90,117 +91,76 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 	return resp, nil
 }
 
-// get performs an authenticated GET request and decodes the JSON response into target.
-func (c *Client) get(ctx context.Context, path string, decode func(io.Reader) error) error {
-	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
+// send sends a request with the client's authentication and fails with an
+// HTTPError unless the server answers with a 2xx status. It hands the body of
+// that answer to read, unless read is nil.
+func (c *Client) send(ctx context.Context, method, path string, body io.Reader, read func(io.Reader) error) error {
+	resp, err := c.doRequest(ctx, method, path, body)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &HTTPError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)}
+		return &HTTPError{Method: method, Path: path, StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)}
 	}
-
-	if err := decode(resp.Body); err != nil {
-		return fmt.Errorf("decoding response from GET %s: %w", path, err)
+	if read == nil {
+		return nil
 	}
-
+	if err := read(resp.Body); err != nil {
+		return fmt.Errorf("reading the response to %s %s: %w", method, path, err)
+	}
 	return nil
 }
 
-// getRaw performs an authenticated GET request and returns the raw response body as a string.
+// getJSON performs an authenticated GET request and decodes the JSON response
+// into target.
+func (c *Client) getJSON(ctx context.Context, path string, target any) error {
+	return c.send(ctx, http.MethodGet, path, nil, decodeInto(target))
+}
+
+// getRaw performs an authenticated GET request and returns the raw response
+// body.
 func (c *Client) getRaw(ctx context.Context, path string) (string, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", &HTTPError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)}
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("reading response body from GET %s: %w", path, err)
-	}
-
-	return string(bodyBytes), nil
+	var raw []byte
+	err := c.send(ctx, http.MethodGet, path, nil, func(r io.Reader) error {
+		var err error
+		raw, err = io.ReadAll(r)
+		return err
+	})
+	return string(raw), err
 }
 
 // post performs an authenticated POST request with an optional JSON body.
 func (c *Client) post(ctx context.Context, path string, body []byte) error {
-	var reader io.Reader
-	if body != nil {
-		reader = bytes.NewReader(body)
-	}
-
-	resp, err := c.doRequest(ctx, http.MethodPost, path, reader)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &HTTPError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)}
-	}
-
-	return nil
+	return c.send(ctx, http.MethodPost, path, bodyReader(body), nil)
 }
 
-// postRaw performs an authenticated POST request with a raw JSON string body.
+// postRaw performs an authenticated POST request with a raw JSON body.
 func (c *Client) postRaw(ctx context.Context, path string, rawJSON string) error {
-	resp, err := c.doRequest(ctx, http.MethodPost, path, strings.NewReader(rawJSON))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &HTTPError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)}
-	}
-
-	return nil
+	return c.send(ctx, http.MethodPost, path, strings.NewReader(rawJSON), nil)
 }
 
-// postAndDecode performs an authenticated POST request with a JSON body and decodes the response.
-func (c *Client) postAndDecode(ctx context.Context, path string, body []byte, decode func(io.Reader) error) error {
-	var reader io.Reader
-	if body != nil {
-		reader = bytes.NewReader(body)
-	}
-
-	resp, err := c.doRequest(ctx, http.MethodPost, path, reader)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &HTTPError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)}
-	}
-
-	if err := decode(resp.Body); err != nil {
-		return fmt.Errorf("decoding response from POST %s: %w", path, err)
-	}
-
-	return nil
+// postJSON performs an authenticated POST request with a JSON body and
+// decodes the JSON response into target.
+func (c *Client) postJSON(ctx context.Context, path string, body []byte, target any) error {
+	return c.send(ctx, http.MethodPost, path, bodyReader(body), decodeInto(target))
 }
 
 // delete performs an authenticated DELETE request.
 func (c *Client) delete(ctx context.Context, path string) error {
-	resp, err := c.doRequest(ctx, http.MethodDelete, path, nil)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
+	return c.send(ctx, http.MethodDelete, path, nil, nil)
+}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &HTTPError{Method: http.MethodDelete, Path: path, StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)}
+func bodyReader(body []byte) io.Reader {
+	if body == nil {
+		return nil
 	}
+	return bytes.NewReader(body)
+}
 
-	return nil
+func decodeInto(target any) func(io.Reader) error {
+	return func(r io.Reader) error { return json.NewDecoder(r).Decode(target) }
 }
 
 func readResponseBody(body io.Reader) string {

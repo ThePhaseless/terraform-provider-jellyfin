@@ -5,9 +5,7 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/url"
 )
 
@@ -25,9 +23,7 @@ type APIKeyList struct {
 // GetAPIKeys retrieves all API keys.
 func (c *Client) GetAPIKeys(ctx context.Context) ([]APIKey, error) {
 	var keyList APIKeyList
-	if err := c.get(ctx, "/Auth/Keys", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&keyList)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/Auth/Keys", &keyList); err != nil {
 		return nil, fmt.Errorf("getting API keys: %w", err)
 	}
 	return keyList.Items, nil

@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 )
 
 // StartupConfiguration represents the initial setup configuration.
@@ -62,9 +61,7 @@ func (c *Client) SetStartupUser(ctx context.Context, name, password string) erro
 // GetFirstUser retrieves the first user during initial setup.
 func (c *Client) GetFirstUser(ctx context.Context) (*StartupUser, error) {
 	var user StartupUser
-	if err := c.get(ctx, "/Startup/User", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&user)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/Startup/User", &user); err != nil {
 		return nil, fmt.Errorf("getting first user: %w", err)
 	}
 	return &user, nil

@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -45,9 +44,7 @@ type AuthResult struct {
 // GetUsers retrieves all users.
 func (c *Client) GetUsers(ctx context.Context) ([]User, error) {
 	var users []User
-	if err := c.get(ctx, "/Users", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&users)
-	}); err != nil {
+	if err := c.getJSON(ctx, "/Users", &users); err != nil {
 		return nil, fmt.Errorf("getting users: %w", err)
 	}
 	return users, nil
@@ -64,9 +61,7 @@ func (c *Client) CreateUser(ctx context.Context, name, password string) (*User, 
 		return nil, fmt.Errorf("marshaling create user request for %s: %w", name, err)
 	}
 	var user User
-	if err := c.postAndDecode(ctx, "/Users/New", jsonBody, func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&user)
-	}); err != nil {
+	if err := c.postJSON(ctx, "/Users/New", jsonBody, &user); err != nil {
 		return nil, fmt.Errorf("creating user %s: %w", name, err)
 	}
 	return &user, nil
