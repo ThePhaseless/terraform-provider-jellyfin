@@ -72,7 +72,7 @@ func (b *Binding) FlattenAfterApply(ctx context.Context, raw string, model any) 
 		return diags
 	}
 	got = KeepPlannedNulls(planned, got)
-	got = keepUnwrittenComplements(ctx, b.trie(), planned, got)
+	got = keepUnwrittenComplements(ctx, b.nodes, planned, got)
 	diags.Append(b.Dropped(planned, got)...)
 	return append(diags, got.As(ctx, model, basetypes.ObjectAsOptions{})...)
 }
@@ -94,14 +94,7 @@ func (b *Binding) flattenRaw(ctx context.Context, raw string, prior types.Object
 // ignoring case and underscores, so a server that spells it otherwise still
 // reads.
 func (b *Binding) Flatten(ctx context.Context, doc map[string]json.RawMessage, prior types.Object) (types.Object, diag.Diagnostics) {
-	return b.flattenNode(ctx, b.trie(), b.AttrTypes, prior, doc, path.Empty(), "")
-}
-
-func (b *Binding) trie() *node {
-	if b.nodes == nil {
-		return trieOf(b.docs)
-	}
-	return b.nodes
+	return b.flattenNode(ctx, b.nodes, b.AttrTypes, prior, doc, path.Empty(), "")
 }
 
 func (b *Binding) flattenNode(ctx context.Context, n *node, attrTypes map[string]attr.Type, prior types.Object, doc map[string]json.RawMessage, at path.Path, trail string) (types.Object, diag.Diagnostics) {
@@ -200,7 +193,7 @@ func readList(ctx context.Context, f *Field, raw json.RawMessage, prior attr.Val
 				pe = po
 			}
 		}
-		o, d := f.Elem.flattenNode(ctx, f.Elem.trie(), et.AttrTypes, pe, e, at.AtListIndex(i), fmt.Sprintf("%s[%d]", keyTrail, i))
+		o, d := f.Elem.flattenNode(ctx, f.Elem.nodes, et.AttrTypes, pe, e, at.AtListIndex(i), fmt.Sprintf("%s[%d]", keyTrail, i))
 		diags.Append(d...)
 		vals[i] = o
 	}
@@ -221,7 +214,7 @@ func readObject(ctx context.Context, f *Field, raw json.RawMessage, prior attr.V
 	if !ok {
 		po = types.ObjectNull(ot.AttrTypes)
 	}
-	return f.Elem.flattenNode(ctx, f.Elem.trie(), ot.AttrTypes, po, m, at, keyTrail)
+	return f.Elem.flattenNode(ctx, f.Elem.nodes, ot.AttrTypes, po, m, at, keyTrail)
 }
 
 func lookupPath(ctx context.Context, doc map[string]json.RawMessage, keyPath []string, at path.Path) (json.RawMessage, bool) {

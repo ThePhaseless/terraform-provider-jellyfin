@@ -129,7 +129,7 @@ func keepUnwrittenComplements(ctx context.Context, n *node, planned, got basetyp
 				nv = pv
 			}
 		case child.field.f.Elem != nil:
-			nv = keepUnwrittenInElements(ctx, child.field.f.Elem.trie(), pv, gv)
+			nv = keepUnwrittenInElements(ctx, child.field.f.Elem.nodes, pv, gv)
 		}
 		if !nv.Equal(gv) {
 			out[name], changed = nv, true
@@ -192,7 +192,7 @@ func complementWrites(f *Field, attrs map[string]attr.Value) bool {
 // inconsistent result, which it cannot even name inside a sensitive object.
 func (b *Binding) Dropped(planned, got types.Object) diag.Diagnostics {
 	var diags diag.Diagnostics
-	dropped(b.trie(), planned, got, path.Empty(), &diags)
+	dropped(b.nodes, planned, got, path.Empty(), &diags)
 	return diags
 }
 
@@ -228,7 +228,7 @@ func dropped(n *node, planned, got basetypes.ObjectValue, at path.Path, diags *d
 		}
 		if po, ok := pv.(basetypes.ObjectValue); ok {
 			if gov, ok := gv.(basetypes.ObjectValue); ok {
-				dropped(f.Elem.trie(), po, gov, p, diags)
+				dropped(f.Elem.nodes, po, gov, p, diags)
 			}
 			continue
 		}
@@ -241,7 +241,7 @@ func dropped(n *node, planned, got basetypes.ObjectValue, at path.Path, diags *d
 			pe, ok1 := pl.Elements()[i].(basetypes.ObjectValue)
 			ge, ok2 := gl.Elements()[i].(basetypes.ObjectValue)
 			if ok1 && ok2 {
-				dropped(f.Elem.trie(), pe, ge, p.AtListIndex(i), diags)
+				dropped(f.Elem.nodes, pe, ge, p.AtListIndex(i), diags)
 			}
 		}
 	}
@@ -294,7 +294,7 @@ func (b *Binding) VersionErrors(ctx context.Context, cfg tfsdk.Config, serverVer
 		return diags
 	}
 	var gated []gatedValue
-	collectGated(b.trie(), obj, path.Empty(), &gated)
+	collectGated(b.nodes, obj, path.Empty(), &gated)
 	if len(gated) == 0 {
 		return diags
 	}
@@ -375,11 +375,11 @@ func collectGated(n *node, obj basetypes.ObjectValue, at path.Path, out *[]gated
 		}
 		switch x := v.(type) {
 		case basetypes.ObjectValue:
-			collectGated(f.Elem.trie(), x, p, out)
+			collectGated(f.Elem.nodes, x, p, out)
 		case basetypes.ListValue:
 			for i, e := range x.Elements() {
 				if o, ok := e.(basetypes.ObjectValue); ok {
-					collectGated(f.Elem.trie(), o, p.AtListIndex(i), out)
+					collectGated(f.Elem.nodes, o, p.AtListIndex(i), out)
 				}
 			}
 		}

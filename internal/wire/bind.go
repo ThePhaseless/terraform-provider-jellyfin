@@ -237,9 +237,15 @@ func (bb *binder) object(object, prefix string, attrs map[string]schema.Attribut
 			bb.share(b, f, opt)
 		}
 	}
+	b.index()
+	return b
+}
+
+// index orders the binding's docs, as writes follow them, and arranges them
+// in the trie reads follow.
+func (b *Binding) index() {
 	sortDocs(b.docs)
 	b.nodes = trieOf(b.docs)
-	return b
 }
 
 func sortDocs(docs []docField) {
@@ -524,8 +530,7 @@ func (b *Binding) Document(keyPath ...string) (*Binding, error) {
 			}
 		}
 	}
-	sortDocs(v.docs)
-	v.nodes = trieOf(v.docs)
+	v.index()
 	return v, nil
 }
 
@@ -545,7 +550,6 @@ func (b *Binding) Select(names ...string) (*Binding, error) {
 			return nil, fmt.Errorf("%s is not a top-level attribute of the binding", name)
 		}
 	}
-	sortDocs(v.docs)
-	v.nodes = trieOf(v.docs)
+	v.index()
 	return v, nil
 }
