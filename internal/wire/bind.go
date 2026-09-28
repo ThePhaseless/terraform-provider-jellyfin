@@ -83,7 +83,8 @@ type Field struct {
 	// Shares holds the attributes of the same object whose keys Orders or
 	// Complement also writes, while those attributes have no value to write.
 	Shares []*Field
-	// Offered and Scope are what a Complement asks its AvailableFunc for.
+	// Offered and Scope are what a Complement or Orders asks its
+	// AvailableFunc for.
 	Offered string
 	Scope   *Field
 }

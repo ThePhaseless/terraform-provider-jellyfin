@@ -20,19 +20,21 @@ import (
 )
 
 // AvailableFunc returns the names the server offers for offered, the name a
-// Complement option gives, and scope, the value of its scope attribute or "".
-// An error wrapping ErrNotOffered says the server does not list them there.
+// Complement or Orders option gives, and scope, the value of its scope
+// attribute or "". An error wrapping ErrNotOffered says the server does not
+// list them there.
 type AvailableFunc func(ctx context.Context, offered, scope string) ([]string, error)
 
 // ErrNotOffered is what an AvailableFunc wraps when the server does not list
-// the names it offers for a scope: a read then reads null, and a write fails,
-// as neither can tell which names Jellyfin enables.
+// the names it offers for a scope: a Complement then reads null and fails to
+// write, as it cannot tell which names Jellyfin enables, while Orders orders
+// the names without the offered spellings.
 var ErrNotOffered = errors.New("the server does not list the names it offers")
 
 type availableKey struct{}
 
-// WithAvailable returns ctx carrying available, which Complement attributes
-// ask on the reads and writes that take ctx.
+// WithAvailable returns ctx carrying available, which Complement and Orders
+// attributes ask on the reads and writes that take ctx.
 func WithAvailable(ctx context.Context, available AvailableFunc) context.Context {
 	return context.WithValue(ctx, availableKey{}, available)
 }
