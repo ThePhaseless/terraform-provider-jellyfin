@@ -44,8 +44,25 @@ func NewClient(baseURL, apiKey string) *Client {
 	return &Client{
 		BaseURL:    strings.TrimRight(baseURL, "/"),
 		APIKey:     apiKey,
-		HTTPClient: &http.Client{Timeout: 30 * time.Second},
+		HTTPClient: &http.Client{Timeout: 30 * time.Second, Transport: newTransport()},
 	}
+}
+
+// maxIdleConnsPerHost matches Terraform's default parallelism, so that the
+// requests of concurrent resource operations reuse their connections.
+const maxIdleConnsPerHost = 10
+
+// newTransport returns a transport of the client's own: http.DefaultTransport
+// keeps two idle connections per host, and anything that closes its idle
+// connections, as httptest.Server.Close does, would break this client's too.
+func newTransport() http.RoundTripper {
+	t, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return http.DefaultTransport
+	}
+	t = t.Clone()
+	t.MaxIdleConnsPerHost = maxIdleConnsPerHost
+	return t
 }
 
 // doRequest executes an HTTP request with authentication and returns the response.
