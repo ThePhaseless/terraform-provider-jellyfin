@@ -109,10 +109,10 @@ func (c *Client) UpdateVirtualFolder(ctx context.Context, itemID string, library
 		return fmt.Errorf("parsing library options for virtual folder %s: invalid JSON", itemID)
 	}
 
-	body, err := json.Marshal(map[string]json.RawMessage{
-		"Id":             json.RawMessage(fmt.Sprintf("%q", itemID)),
-		"LibraryOptions": json.RawMessage(rawOpts),
-	})
+	body, err := json.Marshal(struct {
+		ID             string          `json:"Id"`
+		LibraryOptions json.RawMessage `json:"LibraryOptions"`
+	}{ID: itemID, LibraryOptions: json.RawMessage(rawOpts)})
 	if err != nil {
 		return fmt.Errorf("marshaling library options for virtual folder %s: %w", itemID, err)
 	}
