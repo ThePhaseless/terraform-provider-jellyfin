@@ -221,9 +221,9 @@ func Unmanaged(object, key, reason string) Option {
 	}
 }
 
-// Document declares that the object at keyPath is written on its own, as a
-// document of its own endpoint. A write merges into it instead of rebuilding
-// it, and Binding.Document returns the binding of just that document.
+// Document declares that a write merges into the object at keyPath instead of
+// rebuilding it, as for an object written on its own, as a document of its
+// own endpoint, whose binding Binding.Document returns.
 func Document(keyPath string) Option {
 	return func(o *options) { o.documents[keyPath] = true }
 }

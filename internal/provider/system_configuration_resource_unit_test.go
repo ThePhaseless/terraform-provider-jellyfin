@@ -564,3 +564,43 @@ func TestUnitSystemReadSurvivesAFailingOfferedProvidersLookup(t *testing.T) {
 		t.Errorf("asked for the offered providers %d times, want once", asked)
 	}
 }
+
+// A create plans the trickplay settings it leaves unset as unknown, which
+// the write must leave as served rather than reset to Jellyfin's defaults.
+func TestUnitSystemTrickplayOptionsKeepWhatTheyLeaveUnset(t *testing.T) {
+	ctx := context.Background()
+	b, err := systemWire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const served = `{"TrickplayOptions": {"EnableHwAcceleration": true, "Interval": 10000, "WidthResolutions": [320, 640], "JpegQuality": 80}}`
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(served), &doc); err != nil {
+		t.Fatal(err)
+	}
+	read, d := b.Flatten(ctx, doc, types.ObjectNull(b.AttrTypes))
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	trickplay, ok := read.Attributes()["trickplay_options"].(types.Object)
+	if !ok {
+		t.Fatal("trickplay_options is not an object")
+	}
+	planned := map[string]attr.Value{}
+	for name, typ := range trickplay.AttributeTypes(ctx) {
+		v, err := typ.ValueFromTerraform(ctx, tftypes.NewValue(typ.TerraformType(ctx), tftypes.UnknownValue))
+		if err != nil {
+			t.Fatal(err)
+		}
+		planned[name] = v
+	}
+	planned["interval"] = types.Int64Value(5000)
+	attrs := read.Attributes()
+	attrs["trickplay_options"] = types.ObjectValueMust(trickplay.AttributeTypes(ctx), planned)
+	plan := types.ObjectValueMust(read.AttributeTypes(ctx), attrs)
+
+	if d := b.Overlay(ctx, doc, plan); d.HasError() {
+		t.Fatal(d)
+	}
+	checkSameJSON(t, doc["TrickplayOptions"], `{"EnableHwAcceleration": true, "Interval": 5000, "WidthResolutions": [320, 640], "JpegQuality": 80}`)
+}

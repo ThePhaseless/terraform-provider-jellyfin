@@ -108,6 +108,9 @@ type SystemConfigurationResourceModel struct {
 var systemWire = sync.OnceValues(func() (*wire.Binding, error) {
 	return wire.Bind(schemaOf(&SystemConfigurationResource{}), "ServerConfiguration",
 		wire.Identity("id"),
+		// Merged into the served options, so that the settings a create
+		// leaves unset, and so plans unknown, keep their values.
+		wire.Document("TrickplayOptions"),
 		wire.Complement("metadata_options.metadata_fetchers", "metadata_fetcher_order", "disabled_metadata_fetchers", "MetadataFetchers", "item_type"),
 		wire.Complement("metadata_options.image_fetchers", "image_fetcher_order", "disabled_image_fetchers", "ImageFetchers", "item_type"))
 })

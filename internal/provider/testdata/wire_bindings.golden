@@ -387,7 +387,7 @@ jellyfin_system_configuration slow_response_threshold_ms -> ServerConfiguration.
 jellyfin_system_configuration sort_remove_characters -> ServerConfiguration.SortRemoveCharacters []string
 jellyfin_system_configuration sort_remove_words -> ServerConfiguration.SortRemoveWords []string
 jellyfin_system_configuration sort_replace_characters -> ServerConfiguration.SortReplaceCharacters []string
-jellyfin_system_configuration trickplay_options -> ServerConfiguration.TrickplayOptions #TrickplayOptions
+jellyfin_system_configuration trickplay_options -> ServerConfiguration.TrickplayOptions #TrickplayOptions document
 jellyfin_system_configuration trickplay_options.enable_hw_acceleration -> TrickplayOptions.EnableHwAcceleration boolean
 jellyfin_system_configuration trickplay_options.enable_hw_encoding -> TrickplayOptions.EnableHwEncoding boolean
 jellyfin_system_configuration trickplay_options.enable_key_frame_only_extraction -> TrickplayOptions.EnableKeyFrameOnlyExtraction boolean
