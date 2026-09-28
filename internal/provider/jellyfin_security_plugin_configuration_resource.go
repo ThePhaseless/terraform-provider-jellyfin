@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -143,17 +144,14 @@ type JellyfinSecurityPluginConfigurationResourceModel struct {
 var securityPluginWire = sync.OnceValues(func() (*wire.Binding, error) {
 	opts := []wire.Option{
 		wire.Identity("id", "plugin_id"),
-		wire.Delimited("oidc_providers.scopes", " "),
-		wire.Delimited("oidc_providers.acr_values", " "),
-		wire.Delimited("oidc_providers.allowed_groups", ","),
-		wire.Delimited("oidc_providers.admin_groups", ","),
-		wire.Delimited("oidc_providers.additional_allowed_cidrs", ","),
-		wire.Delimited("oidc_providers.role_library_mappings.library_ids", ","),
 		wire.CarryServed("oidc_providers", "CreatedAt", "id"),
 		wire.WithCodec("enrollment_deadline", sameInstantCodec{}),
 		// The plugin leaves out a deadline it has none of, which then reads
 		// as the empty string that clears one.
 		wire.ReadMissingAs("enrollment_deadline", types.StringValue("")),
+	}
+	for attrPath, sep := range oidcDelimited {
+		opts = append(opts, wire.Delimited(attrPath, sep))
 	}
 	// The plugin leaves these out when false.
 	for _, name := range []string{
@@ -165,6 +163,30 @@ var securityPluginWire = sync.OnceValues(func() (*wire.Binding, error) {
 	}
 	return wire.Bind(schemaOf(&JellyfinSecurityPluginConfigurationResource{}), wire.SecurityPluginRoot, opts...)
 })
+
+// oidcDelimited maps each list attribute of an OIDC provider that the plugin
+// stores as one string to the separator it joins the values with.
+var oidcDelimited = map[string]string{
+	"oidc_providers.scopes":                            " ",
+	"oidc_providers.acr_values":                        " ",
+	"oidc_providers.allowed_groups":                    ",",
+	"oidc_providers.admin_groups":                      ",",
+	"oidc_providers.additional_allowed_cidrs":          ",",
+	"oidc_providers.role_library_mappings.library_ids": ",",
+}
+
+// delimitedValues rejects values that would read back as other values once
+// joined with sep: one holding sep splits in two, and an empty one vanishes.
+func delimitedValues(a schema.ListAttribute, attrPath string) schema.ListAttribute {
+	sep := oidcDelimited[attrPath]
+	name := map[string]string{" ": "a space", ",": "a comma"}[sep]
+	a.Validators = append(a.Validators, listvalidator.ValueStringsAre(
+		stringvalidator.LengthAtLeast(1),
+		stringvalidator.RegexMatches(regexp.MustCompile("^[^"+regexp.QuoteMeta(sep)+"]*$"),
+			"must not contain "+name+", which separates the values the plugin stores"),
+	))
+	return a
+}
 
 func (r *JellyfinSecurityPluginConfigurationResource) Wire() (*wire.Binding, error) {
 	return securityPluginWire()
@@ -463,11 +485,11 @@ func oidcProviderAttributes(
 		"discovery_url":               optionalString("OIDC discovery URL."),
 		"client_id":                   optionalString("OIDC client ID."),
 		"client_secret":               sensitiveString("OIDC client secret."),
-		"scopes":                      optionalStringList("OIDC scopes (space-delimited on wire)."),
-		"acr_values":                  optionalStringList("OIDC ACR values (space-delimited on wire)."),
+		"scopes":                      delimitedValues(optionalStringList("OIDC scopes (space-delimited on wire)."), "oidc_providers.scopes"),
+		"acr_values":                  delimitedValues(optionalStringList("OIDC ACR values (space-delimited on wire)."), "oidc_providers.acr_values"),
 		"username_claim":              optionalString("JWT claim for username."),
-		"allowed_groups":              optionalStringList("Groups allowed to log in (comma-delimited on wire)."),
-		"admin_groups":                optionalStringList("Groups granted admin (comma-delimited on wire)."),
+		"allowed_groups":              delimitedValues(optionalStringList("Groups allowed to log in (comma-delimited on wire)."), "oidc_providers.allowed_groups"),
+		"admin_groups":                delimitedValues(optionalStringList("Groups granted admin (comma-delimited on wire)."), "oidc_providers.admin_groups"),
 		"allow_admin_group_elevation": optionalBool("Allow admin group elevation."),
 		"template_user_id":            optionalString("Template user ID for auto-created users."),
 		"auto_create_users":           optionalBool("Auto-create users on first login."),
@@ -477,7 +499,7 @@ func oidcProviderAttributes(
 		"show_login_button":           optionalBool("Show login button for this provider."),
 		"force_https":                 optionalBool("Force HTTPS for redirect URI."),
 		"allow_private_networks":      optionalBool("Allow private network redirect URIs."),
-		"additional_allowed_cidrs":    optionalStringList("Additional allowed CIDRs (comma-delimited on wire)."),
+		"additional_allowed_cidrs":    delimitedValues(optionalStringList("Additional allowed CIDRs (comma-delimited on wire)."), "oidc_providers.additional_allowed_cidrs"),
 		"sync_profile_picture":        optionalBool("Sync profile picture from IdP."),
 		"picture_claim":               optionalString("JWT claim for profile picture."),
 		"prompt_select_account":       optionalBool("Prompt for account selection."),
@@ -487,7 +509,7 @@ func oidcProviderAttributes(
 			NestedObject: schema.NestedAttributeObject{
 				Attributes: map[string]schema.Attribute{
 					"role":        optionalString("Role name."),
-					"library_ids": optionalStringList("Library IDs (comma-delimited on wire)."),
+					"library_ids": delimitedValues(optionalStringList("Library IDs (comma-delimited on wire)."), "oidc_providers.role_library_mappings.library_ids"),
 				},
 			},
 			Description:         "Role-to-library access mappings.",

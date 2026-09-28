@@ -18,6 +18,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
@@ -617,4 +618,42 @@ func TestUnitSecurityPluginEnrollmentDeadlineClears(t *testing.T) {
 		t.Fatal("enrollment_deadline is not a string attribute")
 	}
 	testUnitAssertStringValidation(t, a, map[string]bool{"": false, "2030-01-01T00:00:00Z": false, "tomorrow": true})
+}
+
+// A list the plugin stores joined into one string must not hold values that
+// the join would change.
+func TestUnitSecurityPluginDelimitedListsRejectWhatTheJoinChanges(t *testing.T) {
+	ctx := context.Background()
+	s := schemaOf(&JellyfinSecurityPluginConfigurationResource{})
+	providers, ok := s.Attributes["oidc_providers"].(rschema.ListNestedAttribute)
+	if !ok {
+		t.Fatal("oidc_providers is not a nested list")
+	}
+	for _, test := range []struct {
+		attr   string
+		values []string
+		want   bool
+	}{
+		{"scopes", []string{"openid", "profile"}, false},
+		{"scopes", []string{"openid profile"}, true},
+		{"scopes", []string{""}, true},
+		{"allowed_groups", []string{"a b", "c"}, false},
+		{"allowed_groups", []string{"a,b"}, true},
+	} {
+		a, ok := providers.NestedObject.Attributes[test.attr].(rschema.ListAttribute)
+		if !ok {
+			t.Fatalf("%s is not a list", test.attr)
+		}
+		elems := make([]attr.Value, len(test.values))
+		for i, v := range test.values {
+			elems[i] = types.StringValue(v)
+		}
+		resp := validator.ListResponse{}
+		for _, v := range a.Validators {
+			v.ValidateList(ctx, validator.ListRequest{Path: path.Root(test.attr), ConfigValue: types.ListValueMust(types.StringType, elems)}, &resp)
+		}
+		if resp.Diagnostics.HasError() != test.want {
+			t.Errorf("%s = %q: error %t, want %t (%v)", test.attr, test.values, resp.Diagnostics.HasError(), test.want, resp.Diagnostics)
+		}
+	}
 }
