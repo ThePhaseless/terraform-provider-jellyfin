@@ -391,7 +391,10 @@ func (r *ScheduledTaskResource) planTaskForKey(ctx context.Context, req resource
 		if diags.HasError() || strings.EqualFold(stored.ValueString(), id) {
 			return diags
 		}
-		resp.RequiresReplace.Append(path.Root("key"))
+		// Terraform replaces only for a path whose value the plan changes, and
+		// the key keeps its value when its task gets a new ID, such as after
+		// the .NET type that runs the task is renamed.
+		resp.RequiresReplace.Append(path.Root("task_id"))
 	}
 	return append(diags, resp.Plan.SetAttribute(ctx, path.Root("task_id"), id)...)
 }

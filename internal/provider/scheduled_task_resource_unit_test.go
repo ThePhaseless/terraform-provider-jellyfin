@@ -745,22 +745,67 @@ func TestScheduledTaskPlanWithKeyAndTaskID(t *testing.T) {
 	}
 }
 
+// replacesChangedPath reports whether Terraform replaces the resource for
+// resp, which it does only for a path in RequiresReplace whose value differs
+// between state and the plan.
+func replacesChangedPath(t *testing.T, state *ScheduledTaskResourceModel, resp resource.ModifyPlanResponse) bool {
+	t.Helper()
+
+	ctx := context.Background()
+	prior := tfsdk.State{Schema: scheduledTaskSchema(t), Raw: scheduledTaskValue(t, state)}
+	for _, p := range resp.RequiresReplace {
+		var before, after types.String
+		if d := prior.GetAttribute(ctx, p, &before); d.HasError() {
+			t.Fatal(d)
+		}
+		if d := resp.Plan.GetAttribute(ctx, p, &after); d.HasError() {
+			t.Fatal(d)
+		}
+		if !before.Equal(after) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestScheduledTaskPlanReplacesWhenKeySelectsAnotherTask(t *testing.T) {
 	t.Parallel()
 
-	srv := &fakeTaskServer{tasks: testTasks()}
-	state := storedTask(scanMediaLibraryID, types.StringValue("RefreshLibrary"))
-	plan := *state
-	plan.Key = types.StringValue("PluginUpdates")
-	got, resp := planScheduledTask(t, srv.client(t), keyConfig("PluginUpdates"), state, plan)
-	if resp.Diagnostics.HasError() {
-		t.Fatalf("ModifyPlan() = %v", resp.Diagnostics)
+	tests := map[string]struct {
+		state *ScheduledTaskResourceModel
+		key   string
+		want  string
+	}{
+		"for a new key": {
+			state: storedTask(scanMediaLibraryID, types.StringValue("RefreshLibrary")),
+			key:   "PluginUpdates", want: updatePluginsID,
+		},
+		// Only a plan that skips the refresh sees the stale ID with the key
+		// its task still has.
+		"for the stored key of a task whose ID changed": {
+			state: storedTask(cleanLogFilesID, types.StringValue("RefreshLibrary")),
+			key:   "RefreshLibrary", want: scanMediaLibraryID,
+		},
 	}
-	if want := (path.Paths{path.Root("key")}); !reflect.DeepEqual(resp.RequiresReplace, want) {
-		t.Errorf("RequiresReplace = %v, want %v", resp.RequiresReplace, want)
-	}
-	if got.TaskID.ValueString() != updatePluginsID {
-		t.Errorf("planned task_id = %v, want %s", got.TaskID, updatePluginsID)
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := &fakeTaskServer{tasks: testTasks()}
+			plan := *tc.state
+			plan.Key = types.StringValue(tc.key)
+			got, resp := planScheduledTask(t, srv.client(t), keyConfig(tc.key), tc.state, plan)
+			if resp.Diagnostics.HasError() {
+				t.Fatalf("ModifyPlan() = %v", resp.Diagnostics)
+			}
+			if !replacesChangedPath(t, tc.state, resp) {
+				t.Errorf("RequiresReplace = %v, want a path the plan changes", resp.RequiresReplace)
+			}
+			if got.TaskID.ValueString() != tc.want {
+				t.Errorf("planned task_id = %v, want %s", got.TaskID, tc.want)
+			}
+		})
 	}
 }
 
