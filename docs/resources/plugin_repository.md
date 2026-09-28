@@ -34,7 +34,7 @@ resource "jellyfin_plugin_repository" "stable" {
 
 ### Read-Only
 
-- `id` (String) The plugin repository resource identifier.
+- `id` (String) The plugin repository resource identifier, which is its name.
 
 ## Import
 

@@ -553,6 +553,11 @@ func (r *SystemConfigurationResource) apply(ctx context.Context, data *SystemCon
 	}
 	ctx = wire.WithAvailable(ctx, r.offered(r.client))
 
+	// The document holds the plugin repositories, which the write posts back
+	// as read.
+	serverConfigurationMu.Lock()
+	defer serverConfigurationMu.Unlock()
+
 	current, err := r.client.GetSystemConfiguration(ctx)
 	if err != nil {
 		diags.AddError("Failed to read current system configuration", err.Error())

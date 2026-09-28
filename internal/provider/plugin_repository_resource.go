@@ -6,6 +6,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -13,7 +14,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -73,11 +73,11 @@ func (r *PluginRepositoryResource) Schema(_ context.Context, _ resource.SchemaRe
 				},
 			},
 			"id": schema.StringAttribute{
-				Description:         "The plugin repository resource identifier.",
-				MarkdownDescription: "The plugin repository resource identifier.",
+				Description:         "The plugin repository resource identifier, which is its name.",
+				MarkdownDescription: "The plugin repository resource identifier, which is its name.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
+					idFollowsName{},
 				},
 			},
 			"enabled": schema.BoolAttribute{
@@ -114,6 +114,9 @@ func (r *PluginRepositoryResource) Create(ctx context.Context, req resource.Crea
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	serverConfigurationMu.Lock()
+	defer serverConfigurationMu.Unlock()
 
 	repos, err := r.client.GetPluginRepositories(ctx)
 	if err != nil {
@@ -195,6 +198,9 @@ func (r *PluginRepositoryResource) Update(ctx context.Context, req resource.Upda
 		return
 	}
 
+	serverConfigurationMu.Lock()
+	defer serverConfigurationMu.Unlock()
+
 	repos, err := r.client.GetPluginRepositories(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to get plugin repositories", err.Error())
@@ -269,6 +275,9 @@ func (r *PluginRepositoryResource) Delete(ctx context.Context, req resource.Dele
 		return
 	}
 
+	serverConfigurationMu.Lock()
+	defer serverConfigurationMu.Unlock()
+
 	repos, err := r.client.GetPluginRepositories(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to get plugin repositories", err.Error())
@@ -298,6 +307,35 @@ func (r *PluginRepositoryResource) Delete(ctx context.Context, req resource.Dele
 
 func (r *PluginRepositoryResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
+}
+
+// serverConfigurationMu serializes this provider's writes that post back a
+// list or document read from the server configuration: Jellyfin keeps the
+// plugin repositories in it, and each write replaces what it read, so writes
+// running at the same time would drop each other's changes.
+var serverConfigurationMu sync.Mutex
+
+// idFollowsName plans id as the planned name, which it always equals, so a
+// rename plans the id that Update stores.
+type idFollowsName struct{}
+
+func (idFollowsName) Description(context.Context) string {
+	return "The value is the planned name."
+}
+
+func (m idFollowsName) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (idFollowsName) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	var name types.String
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("name"), &name)...)
+	if !name.IsNull() && !name.IsUnknown() {
+		resp.PlanValue = name
+	}
 }
 
 func repositoryNameExists(repos []client.PluginRepository, name string) bool {
