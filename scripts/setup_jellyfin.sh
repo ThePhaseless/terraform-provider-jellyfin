@@ -6,16 +6,16 @@
 # The provider completes the startup wizard during acceptance tests.
 set -euo pipefail
 
-JELLYFIN_URL="${JELLYFIN_ENDPOINT:-http://localhost:8096}"
+JELLYFIN_ENDPOINT="${JELLYFIN_ENDPOINT:-http://localhost:8096}"
 JELLYFIN_USERNAME="${JELLYFIN_USERNAME:-admin}"
 JELLYFIN_PASSWORD="${JELLYFIN_PASSWORD:-Admin123!}"
 MAX_WAIT=120
 ENV_FILE="${JELLYFIN_ENV_FILE:-$(dirname "$0")/../internal/provider/supported_jellyfin_version.env}"
 
-echo "Waiting for Jellyfin to become ready at ${JELLYFIN_URL}..."
+echo "Waiting for Jellyfin to become ready at ${JELLYFIN_ENDPOINT}..."
 for i in $(seq 1 "$MAX_WAIT"); do
     # /Startup/User returns JSON when not configured, or 401 when already configured.
-    HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "${JELLYFIN_URL}/Startup/User" 2>/dev/null || true)
+    HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "${JELLYFIN_ENDPOINT}/Startup/User" 2>/dev/null || true)
     if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "401" ]; then
         echo "Jellyfin is ready! (waited ${i}s)"
         break
@@ -33,10 +33,10 @@ echo "  - Media directories created"
 
 echo ""
 echo "=== Test Environment Ready ==="
-echo "JELLYFIN_ENDPOINT=${JELLYFIN_URL}"
+echo "JELLYFIN_ENDPOINT=${JELLYFIN_ENDPOINT}"
 echo "JELLYFIN_USERNAME=${JELLYFIN_USERNAME}"
 echo "JELLYFIN_PASSWORD=${JELLYFIN_PASSWORD}"
 echo ""
-printf 'export JELLYFIN_ENDPOINT=%q\n' "${JELLYFIN_URL}"
+printf 'export JELLYFIN_ENDPOINT=%q\n' "${JELLYFIN_ENDPOINT}"
 printf 'export JELLYFIN_USERNAME=%q\n' "${JELLYFIN_USERNAME}"
 printf 'export JELLYFIN_PASSWORD=%q\n' "${JELLYFIN_PASSWORD}"
