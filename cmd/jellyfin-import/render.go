@@ -26,6 +26,9 @@ var omittedAttributes = map[string][]string{
 	"jellyfin_library": {"library_options"},
 	// Jellyfin maintains it itself.
 	"jellyfin_livetv_configuration": {"media_locations_created"},
+	// key selects the task, and setting both is an error. The importer
+	// writes task_id only for a task no key selects.
+	"jellyfin_scheduled_task": {"task_id"},
 }
 
 // rendered reports whether the importer writes the attribute at attrPath of

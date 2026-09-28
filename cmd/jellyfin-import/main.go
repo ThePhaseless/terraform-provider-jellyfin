@@ -409,14 +409,24 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 		return nil, nil, err
 	}
 
+	tasksWithKey := map[string]int{}
+	for _, task := range tasks {
+		tasksWithKey[task.Key]++
+	}
+
 	var imports, resources []string
 	for _, task := range tasks {
 		if task.IsHidden {
 			continue
 		}
 
+		// A key selects the task only when it is set and no other task has it.
+		ref, byKey := task.ID, task.Key != "" && tasksWithKey[task.Key] == 1
+		if byKey {
+			ref = task.Key
+		}
 		name := g.uniqueName("jellyfin_scheduled_task", sanitizeName(task.Name))
-		imports = append(imports, importBlock("jellyfin_scheduled_task", name, task.ID))
+		imports = append(imports, importBlock("jellyfin_scheduled_task", name, ref))
 
 		raw, err := json.Marshal(task)
 		if err != nil {
@@ -425,9 +435,13 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 		// Every trigger attribute the server returns is written out, because
 		// the resource removes unset trigger attributes from the server on
 		// apply.
-		attrs, err := importedAttributes(g.context(), "jellyfin_scheduled_task", task.ID, string(raw))
+		attrs, err := importedAttributes(g.context(), "jellyfin_scheduled_task", ref, string(raw))
 		if err != nil {
 			return nil, nil, fmt.Errorf("formatting task %s: %w", task.ID, err)
+		}
+		if !byKey {
+			delete(attrs, "key")
+			attrs["task_id"] = hclString(task.ID)
 		}
 		resources = append(resources, resourceBlock("jellyfin_scheduled_task", name, attrs))
 	}

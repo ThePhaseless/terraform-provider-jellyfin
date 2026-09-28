@@ -195,6 +195,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 			{
 				"Name":     "Scan Media Library",
 				"Id":       "task-id-1",
+				"Key":      "RefreshLibrary",
 				"IsHidden": false,
 				"Triggers": []map[string]interface{}{
 					{
@@ -206,6 +207,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 			{
 				"Name":     "Hidden Task",
 				"Id":       "task-id-2",
+				"Key":      "RefreshGuide",
 				"IsHidden": true,
 				"Triggers": []map[string]interface{}{},
 			},
@@ -409,12 +411,12 @@ func TestGenerateScheduledTasks(t *testing.T) {
 		t.Errorf("expected 1 resource block, got %d", len(resources))
 	}
 
-	if !strings.Contains(imports[0], "task-id-1") {
-		t.Errorf("expected task-id-1 in import: %s", imports[0])
+	if !strings.Contains(imports[0], `id = "RefreshLibrary"`) {
+		t.Errorf("expected the key RefreshLibrary in import: %s", imports[0])
 	}
 
 	want := `resource "jellyfin_scheduled_task" "scan_media_library" {
-  task_id = "task-id-1"
+  key = "RefreshLibrary"
   triggers = [
     {
       interval_ticks = 432000000000
@@ -438,7 +440,7 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 		"no triggers": {
 			triggers: `[]`,
 			want: `resource "jellyfin_scheduled_task" "task" {
-  task_id  = "task-id"
+  key      = "Task"
   triggers = []
 }
 `,
@@ -446,7 +448,7 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 		"null triggers": {
 			triggers: `null`,
 			want: `resource "jellyfin_scheduled_task" "task" {
-  task_id  = "task-id"
+  key      = "Task"
   triggers = []
 }
 `,
@@ -454,7 +456,7 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 		"interval trigger without day_of_week": {
 			triggers: `[{"Type":"IntervalTrigger","IntervalTicks":864000000000}]`,
 			want: `resource "jellyfin_scheduled_task" "task" {
-  task_id = "task-id"
+  key = "Task"
   triggers = [
     {
       interval_ticks = 864000000000
@@ -467,7 +469,7 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 		"daily trigger keeps max_runtime_ticks": {
 			triggers: `[{"Type":"DailyTrigger","TimeOfDayTicks":72000000000,"MaxRuntimeTicks":144000000000}]`,
 			want: `resource "jellyfin_scheduled_task" "task" {
-  task_id = "task-id"
+  key = "Task"
   triggers = [
     {
       max_runtime_ticks = 144000000000
@@ -484,7 +486,7 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 				{"Type":"StartupTrigger"}
 			]`,
 			want: `resource "jellyfin_scheduled_task" "task" {
-  task_id = "task-id"
+  key = "Task"
   triggers = [
     {
       day_of_week       = "Tuesday"
@@ -501,7 +503,7 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 		"explicit nulls and zero ticks": {
 			triggers: `[{"Type":"IntervalTrigger","IntervalTicks":0,"TimeOfDayTicks":null,"DayOfWeek":null,"MaxRuntimeTicks":0}]`,
 			want: `resource "jellyfin_scheduled_task" "task" {
-  task_id = "task-id"
+  key = "Task"
   triggers = [
     {
       interval_ticks    = 0
@@ -519,7 +521,7 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 			t.Parallel()
 
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				fmt.Fprintf(w, `[{"Name": "Task", "Id": "task-id", "Triggers": %s}]`, tc.triggers)
+				fmt.Fprintf(w, `[{"Name": "Task", "Id": "task-id", "Key": "Task", "Triggers": %s}]`, tc.triggers)
 			}))
 			defer server.Close()
 
@@ -538,6 +540,63 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 				t.Errorf("resource block =\n%s\nwant\n%s", resources[0], tc.want)
 			}
 		})
+	}
+}
+
+func TestGenerateScheduledTasksWritesTaskIDWhenNoKeySelectsTheTask(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `[
+			{"Name": "No Key", "Id": "id-no-key", "Key": "", "Triggers": []},
+			{"Name": "Shared A", "Id": "id-shared-a", "Key": "Shared", "Triggers": []},
+			{"Name": "Shared B", "Id": "id-shared-b", "Key": "Shared", "Triggers": []},
+			{"Name": "Own Key", "Id": "id-own-key", "Key": "Own", "Triggers": []}
+		]`)
+	}))
+	defer server.Close()
+
+	g := &generator{
+		client:    client.NewClient(server.URL, "test-key"),
+		usedNames: make(map[string]bool),
+	}
+	imports, resources, err := g.generateScheduledTasks()
+	if err != nil {
+		t.Fatalf("generateScheduledTasks() error: %v", err)
+	}
+
+	want := []struct{ importID, resource string }{
+		{"id-no-key", `resource "jellyfin_scheduled_task" "no_key" {
+  task_id  = "id-no-key"
+  triggers = []
+}
+`},
+		{"id-shared-a", `resource "jellyfin_scheduled_task" "shared_a" {
+  task_id  = "id-shared-a"
+  triggers = []
+}
+`},
+		{"id-shared-b", `resource "jellyfin_scheduled_task" "shared_b" {
+  task_id  = "id-shared-b"
+  triggers = []
+}
+`},
+		{"Own", `resource "jellyfin_scheduled_task" "own_key" {
+  key      = "Own"
+  triggers = []
+}
+`},
+	}
+	if len(imports) != len(want) || len(resources) != len(want) {
+		t.Fatalf("got %d import and %d resource blocks, want %d of each", len(imports), len(resources), len(want))
+	}
+	for i, w := range want {
+		if !strings.Contains(imports[i], fmt.Sprintf("id = %q", w.importID)) {
+			t.Errorf("import block %d = %s, want the id %q", i, imports[i], w.importID)
+		}
+		if resources[i] != w.resource {
+			t.Errorf("resource block %d =\n%s\nwant\n%s", i, resources[i], w.resource)
+		}
 	}
 }
 

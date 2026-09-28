@@ -30,8 +30,12 @@ resource "jellyfin_scheduled_task" "example" {
 
 ### Required
 
-- `task_id` (String) The unique identifier of the scheduled task.
 - `triggers` (Attributes List) The task triggers. This list replaces all of the task's triggers. Each trigger is sent exactly as configured, so an optional attribute left unset is removed from the server; declare every attribute an existing trigger should keep, such as the `max_runtime_ticks` some built-in tasks ship with. (see [below for nested schema](#nestedatt--triggers))
+
+### Optional
+
+- `key` (String) The task's key, the readable name Jellyfin lists next to its ID in `GET /ScheduledTasks`, such as `RefreshLibrary` (*Scan Media Library*) or `PluginUpdates` (*Update Plugins*). It matches exactly, case included. Set `key` or `task_id`, not both; with `task_id` set, `key` reads the task's key.
+- `task_id` (String) The task's ID, which Jellyfin derives from an MD5 hash of the full name of the .NET type that runs the task and matches ignoring case, such as `7738148ffcd07979c7ceb148e06b3aed` for *Scan Media Library*. Set `key` or `task_id`, not both; with `key` set, `task_id` reads the ID of the task the key selects.
 
 ### Read-Only
 

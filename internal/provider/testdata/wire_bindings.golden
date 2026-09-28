@@ -184,8 +184,9 @@ jellyfin_networking_configuration published_server_uri_by_subnet -> NetworkConfi
 jellyfin_networking_configuration remote_ip_filter -> NetworkConfiguration.RemoteIPFilter []string
 jellyfin_networking_configuration require_https -> NetworkConfiguration.RequireHttps boolean
 jellyfin_networking_configuration virtual_interface_names -> NetworkConfiguration.VirtualInterfaceNames []string
-jellyfin_scheduled_task (document) TaskInfo keeps Category, CurrentProgressPercentage, Description, Id, IsHidden, Key, LastExecutionResult, Name, State
+jellyfin_scheduled_task (document) TaskInfo keeps Category, CurrentProgressPercentage, Description, Id, IsHidden, LastExecutionResult, Name, State
 jellyfin_scheduled_task id -> identity
+jellyfin_scheduled_task key -> TaskInfo.Key string
 jellyfin_scheduled_task task_id -> identity
 jellyfin_scheduled_task triggers -> TaskInfo.Triggers []#TaskTriggerInfo read-missing-as=[]
 jellyfin_scheduled_task triggers.day_of_week -> TaskTriggerInfo.DayOfWeek #DayOfWeek null-clears
