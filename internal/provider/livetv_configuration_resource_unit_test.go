@@ -7,6 +7,10 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 func TestUnitLiveTVConfigurationRoundTrip(t *testing.T) {
@@ -28,4 +32,48 @@ func TestUnitLiveTVConfigurationRoundTrip(t *testing.T) {
 func mustJSON(v interface{}) []byte {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+// A first apply plans the settings an entry leaves unset as unknown; the
+// write keeps those of the served entry with the same id.
+func TestUnitLiveTVTunerHostKeepsTheServedEntrysSettings(t *testing.T) {
+	ctx := context.Background()
+	b, err := livetvWire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const served = `{"TunerHosts": [{"Id": "abc", "Url": "http://old", "Type": "hdhomerun", "FriendlyName": "Living room", "TunerCount": 2}]}`
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(served), &doc); err != nil {
+		t.Fatal(err)
+	}
+	read, d := b.Flatten(ctx, doc, types.ObjectNull(b.AttrTypes))
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	hosts, ok := read.Attributes()["tuner_hosts"].(types.List)
+	if !ok {
+		t.Fatal("tuner_hosts is not a list")
+	}
+	elemType, ok := hosts.ElementType(ctx).(types.ObjectType)
+	if !ok {
+		t.Fatal("tuner_hosts holds no objects")
+	}
+	planned := map[string]attr.Value{}
+	for name, typ := range elemType.AttrTypes {
+		v, err := typ.ValueFromTerraform(ctx, tftypes.NewValue(typ.TerraformType(ctx), tftypes.UnknownValue))
+		if err != nil {
+			t.Fatal(err)
+		}
+		planned[name] = v
+	}
+	planned["id"] = types.StringValue("abc")
+	planned["url"] = types.StringValue("http://new")
+	attrs := read.Attributes()
+	attrs["tuner_hosts"] = types.ListValueMust(elemType, []attr.Value{types.ObjectValueMust(elemType.AttrTypes, planned)})
+
+	if d := b.Overlay(ctx, doc, types.ObjectValueMust(read.AttributeTypes(ctx), attrs)); d.HasError() {
+		t.Fatal(d)
+	}
+	checkSameJSON(t, doc["TunerHosts"], `[{"Id": "abc", "Url": "http://new", "Type": "hdhomerun", "FriendlyName": "Living room", "TunerCount": 2}]`)
 }

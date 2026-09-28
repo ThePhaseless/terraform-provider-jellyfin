@@ -111,7 +111,7 @@ jellyfin_livetv_configuration enable_original_audio_with_encoded_recordings -> L
 jellyfin_livetv_configuration enable_recording_subfolders -> LiveTvOptions.EnableRecordingSubfolders boolean
 jellyfin_livetv_configuration guide_days -> LiveTvOptions.GuideDays integer:int32
 jellyfin_livetv_configuration id -> identity
-jellyfin_livetv_configuration listing_providers -> LiveTvOptions.ListingProviders []#ListingsProviderInfo
+jellyfin_livetv_configuration listing_providers -> LiveTvOptions.ListingProviders []#ListingsProviderInfo merge-by=id
 jellyfin_livetv_configuration listing_providers.channel_mappings -> ListingsProviderInfo.ChannelMappings []#NameValuePair
 jellyfin_livetv_configuration listing_providers.channel_mappings.name -> NameValuePair.Name string
 jellyfin_livetv_configuration listing_providers.channel_mappings.value -> NameValuePair.Value string
@@ -142,7 +142,7 @@ jellyfin_livetv_configuration recording_post_processor_arguments -> LiveTvOption
 jellyfin_livetv_configuration save_recording_images -> LiveTvOptions.SaveRecordingImages boolean
 jellyfin_livetv_configuration save_recording_nfo -> LiveTvOptions.SaveRecordingNFO boolean
 jellyfin_livetv_configuration series_recording_path -> LiveTvOptions.SeriesRecordingPath string
-jellyfin_livetv_configuration tuner_hosts -> LiveTvOptions.TunerHosts []#TunerHostInfo
+jellyfin_livetv_configuration tuner_hosts -> LiveTvOptions.TunerHosts []#TunerHostInfo merge-by=id
 jellyfin_livetv_configuration tuner_hosts.allow_fmp4_transcoding_container -> TunerHostInfo.AllowFmp4TranscodingContainer boolean
 jellyfin_livetv_configuration tuner_hosts.allow_hw_transcoding -> TunerHostInfo.AllowHWTranscoding boolean
 jellyfin_livetv_configuration tuner_hosts.allow_stream_sharing -> TunerHostInfo.AllowStreamSharing boolean

@@ -63,7 +63,13 @@ type LiveTVConfigurationResourceModel struct {
 }
 
 var livetvWire = sync.OnceValues(func() (*wire.Binding, error) {
-	return wire.Bind(schemaOf(&LiveTVConfigurationResource{}), "LiveTvOptions", wire.Identity("id"))
+	return wire.Bind(schemaOf(&LiveTVConfigurationResource{}), "LiveTvOptions",
+		wire.Identity("id"),
+		// Planning fills an entry's unset settings from the prior entry it
+		// matches, which a first apply has none of; the write then keeps
+		// those of the served entry with the same id.
+		wire.MergeByKey("tuner_hosts", "id"),
+		wire.MergeByKey("listing_providers", "id"))
 })
 
 func (r *LiveTVConfigurationResource) Wire() (*wire.Binding, error) { return livetvWire() }
@@ -143,8 +149,8 @@ func (r *LiveTVConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: tunerHostAttributes(),
 				},
-				Description:         "Tuner hosts. An entry keeps the settings it does not configure from the existing entry with the same `id`, else the same `url`, else the same `type`.",
-				MarkdownDescription: "Tuner hosts. An entry keeps the settings it does not configure from the existing entry with the same `id`, else the same `url`, else the same `type`.",
+				Description:         "Tuner hosts. An entry keeps the settings it does not configure from the existing entry with the same `id`, else the same `url`, else the same `type`. Before the resource is in state, as on its first apply, only an entry with the `id` of an existing one keeps that one's settings; import the configuration first to keep them by `url` or `type`.",
+				MarkdownDescription: "Tuner hosts. An entry keeps the settings it does not configure from the existing entry with the same `id`, else the same `url`, else the same `type`. Before the resource is in state, as on its first apply, only an entry with the `id` of an existing one keeps that one's settings; import the configuration first to keep them by `url` or `type`.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.List{
@@ -156,8 +162,8 @@ func (r *LiveTVConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: listingProviderAttributes(),
 				},
-				Description:         "Listing providers. An entry keeps the settings it does not configure from the existing entry with the same `id`, else the same `type` and `listings_id`, else the same `type` and `path`, else the same `type`.",
-				MarkdownDescription: "Listing providers. An entry keeps the settings it does not configure from the existing entry with the same `id`, else the same `type` and `listings_id`, else the same `type` and `path`, else the same `type`.",
+				Description:         "Listing providers. An entry keeps the settings it does not configure from the existing entry with the same `id`, else the same `type` and `listings_id`, else the same `type` and `path`, else the same `type`. Before the resource is in state, as on its first apply, only an entry with the `id` of an existing one keeps that one's settings; import the configuration first to keep them by the other keys.",
+				MarkdownDescription: "Listing providers. An entry keeps the settings it does not configure from the existing entry with the same `id`, else the same `type` and `listings_id`, else the same `type` and `path`, else the same `type`. Before the resource is in state, as on its first apply, only an entry with the `id` of an existing one keeps that one's settings; import the configuration first to keep them by the other keys.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.List{
