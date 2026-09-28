@@ -343,8 +343,19 @@ func (g *generator) generatePluginRepositories() ([]string, []string, error) {
 		return nil, nil, err
 	}
 
+	named := map[string]int{}
+	for _, repo := range repos {
+		named[repo.Name]++
+	}
+
 	var imports, resources []string
 	for _, repo := range repos {
+		// jellyfin_plugin_repository imports by name, so it cannot tell such
+		// repositories apart.
+		if named[repo.Name] > 1 {
+			g.warnf("skipping plugin repository %q at %s: %d repositories have that name, and jellyfin_plugin_repository imports by name; rename them to import them", repo.Name, repo.URL, named[repo.Name])
+			continue
+		}
 		name := g.uniqueName("jellyfin_plugin_repository", sanitizeName(repo.Name))
 		imports = append(imports, importBlock("jellyfin_plugin_repository", name, repo.Name))
 

@@ -1681,3 +1681,30 @@ func TestGeneratePluginsImportsEachPluginOnce(t *testing.T) {
 	}
 }
 
+// jellyfin_plugin_repository imports by name, which cannot tell apart two
+// repositories with the same name.
+func TestGeneratePluginRepositoriesSkipsSharedNames(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Repositories", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]any{
+			{"Name": "Repo", "Url": "https://a", "Enabled": true},
+			{"Name": "Repo", "Url": "https://b", "Enabled": true},
+			{"Name": "Other", "Url": "https://c", "Enabled": true},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	var warnings strings.Builder
+	g := &generator{client: client.NewClient(server.URL, "k"), outputDir: t.TempDir(), usedNames: map[string]bool{}, warnings: &warnings}
+	imports, _, err := g.generatePluginRepositories()
+	if err != nil {
+		t.Fatalf("generatePluginRepositories() error: %v", err)
+	}
+	if len(imports) != 1 || !strings.Contains(imports[0], `id = "Other"`) {
+		t.Errorf("imports = %q, want Other alone", imports)
+	}
+	if strings.Count(warnings.String(), "skipping plugin repository") != 2 {
+		t.Errorf("warnings = %q, want one for each repository named Repo", warnings.String())
+	}
+}
