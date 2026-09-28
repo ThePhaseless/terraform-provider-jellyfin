@@ -10,13 +10,11 @@ import (
 	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
-	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -124,68 +122,6 @@ func (r *SystemConfigurationResource) Metadata(_ context.Context, req resource.M
 }
 
 func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	optionalString := func(desc string) schema.StringAttribute {
-		return schema.StringAttribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.String{
-				stringplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-	optionalEnum := func(desc string, values ...string) schema.StringAttribute {
-		a := optionalString(desc + " One of `" + strings.Join(values, "`, `") + "`.")
-		a.Validators = []validator.String{stringvalidator.OneOf(values...)}
-		return a
-	}
-	optionalBool := func(desc string) schema.BoolAttribute {
-		return schema.BoolAttribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.Bool{
-				boolplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-	optionalInt := func(desc string) schema.Int64Attribute {
-		return schema.Int64Attribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.Int64{
-				int64planmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-	optionalStringList := func(desc string) schema.ListAttribute {
-		return schema.ListAttribute{
-			ElementType:         types.StringType,
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.List{
-				listplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-	optionalIntList := func(desc string) schema.ListAttribute {
-		return schema.ListAttribute{
-			ElementType:         types.Int64Type,
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.List{
-				listplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
 	// UseStateForUnknown also copies a null prior value, and a planned null
 	// fails the apply when the server returns a value. That happens for an
 	// entry a list gains in the plan, whose prior values are all null while

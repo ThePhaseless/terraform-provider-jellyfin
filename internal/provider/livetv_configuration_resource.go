@@ -11,8 +11,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -89,60 +87,12 @@ func (r *LiveTVConfigurationResource) Schema(_ context.Context, _ resource.Schem
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"guide_days": schema.Int64Attribute{
-				Description:         "Number of guide days.",
-				MarkdownDescription: "Number of guide days.",
-				Optional:            true,
-				Computed:            true,
-				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.UseStateForUnknown(),
-				},
-			},
-			"recording_path": schema.StringAttribute{
-				Description:         "Recording path.",
-				MarkdownDescription: "Recording path.",
-				Optional:            true,
-				Computed:            true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"movie_recording_path": schema.StringAttribute{
-				Description:         "Movie recording path.",
-				MarkdownDescription: "Movie recording path.",
-				Optional:            true,
-				Computed:            true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"series_recording_path": schema.StringAttribute{
-				Description:         "Series recording path.",
-				MarkdownDescription: "Series recording path.",
-				Optional:            true,
-				Computed:            true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"enable_recording_subfolders": schema.BoolAttribute{
-				Description:         "Whether recording subfolders are enabled.",
-				MarkdownDescription: "Whether recording subfolders are enabled.",
-				Optional:            true,
-				Computed:            true,
-				PlanModifiers: []planmodifier.Bool{
-					boolplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"enable_original_audio_with_encoded_recordings": schema.BoolAttribute{
-				Description:         "Whether original audio is kept with encoded recordings.",
-				MarkdownDescription: "Whether original audio is kept with encoded recordings.",
-				Optional:            true,
-				Computed:            true,
-				PlanModifiers: []planmodifier.Bool{
-					boolplanmodifier.UseStateForUnknown(),
-				},
-			},
+			"guide_days":                                    optionalInt("Number of guide days."),
+			"recording_path":                                optionalString("Recording path."),
+			"movie_recording_path":                          optionalString("Movie recording path."),
+			"series_recording_path":                         optionalString("Series recording path."),
+			"enable_recording_subfolders":                   optionalBool("Whether recording subfolders are enabled."),
+			"enable_original_audio_with_encoded_recordings": optionalBool("Whether original audio is kept with encoded recordings."),
 			"tuner_hosts": schema.ListNestedAttribute{
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: tunerHostAttributes(),
@@ -169,24 +119,8 @@ func (r *LiveTVConfigurationResource) Schema(_ context.Context, _ resource.Schem
 					useStateForUnknownByKey([]string{"id"}, []string{"type", "listings_id"}, []string{"type", "path"}, []string{"type"}),
 				},
 			},
-			"pre_padding_seconds": schema.Int64Attribute{
-				Description:         "Pre-padding seconds.",
-				MarkdownDescription: "Pre-padding seconds.",
-				Optional:            true,
-				Computed:            true,
-				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.UseStateForUnknown(),
-				},
-			},
-			"post_padding_seconds": schema.Int64Attribute{
-				Description:         "Post-padding seconds.",
-				MarkdownDescription: "Post-padding seconds.",
-				Optional:            true,
-				Computed:            true,
-				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.UseStateForUnknown(),
-				},
-			},
+			"pre_padding_seconds":  optionalInt("Pre-padding seconds."),
+			"post_padding_seconds": optionalInt("Post-padding seconds."),
 			// No UseStateForUnknown: Jellyfin rewrites this list in the background
 			// whenever a save points a recording path at an existing directory, so
 			// a value carried over from state would not match the one read back.
@@ -197,42 +131,10 @@ func (r *LiveTVConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				Optional:            true,
 				Computed:            true,
 			},
-			"recording_post_processor": schema.StringAttribute{
-				Description:         "Recording post processor.",
-				MarkdownDescription: "Recording post processor.",
-				Optional:            true,
-				Computed:            true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"recording_post_processor_arguments": schema.StringAttribute{
-				Description:         "Recording post processor arguments.",
-				MarkdownDescription: "Recording post processor arguments.",
-				Optional:            true,
-				Computed:            true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"save_recording_nfo": schema.BoolAttribute{
-				Description:         "Whether to save recording NFO.",
-				MarkdownDescription: "Whether to save recording NFO.",
-				Optional:            true,
-				Computed:            true,
-				PlanModifiers: []planmodifier.Bool{
-					boolplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"save_recording_images": schema.BoolAttribute{
-				Description:         "Whether to save recording images.",
-				MarkdownDescription: "Whether to save recording images.",
-				Optional:            true,
-				Computed:            true,
-				PlanModifiers: []planmodifier.Bool{
-					boolplanmodifier.UseStateForUnknown(),
-				},
-			},
+			"recording_post_processor":           optionalString("Recording post processor."),
+			"recording_post_processor_arguments": optionalString("Recording post processor arguments."),
+			"save_recording_nfo":                 optionalBool("Whether to save recording NFO."),
+			"save_recording_images":              optionalBool("Whether to save recording images."),
 		},
 	}
 }
@@ -240,76 +142,58 @@ func (r *LiveTVConfigurationResource) Schema(_ context.Context, _ resource.Schem
 // The nested attributes carry no UseStateForUnknown: it pairs list elements by
 // index, so tuner_hosts and listing_providers fill their unknowns by key instead.
 func tunerHostAttributes() map[string]schema.Attribute {
-	optionalString := func(desc string) schema.StringAttribute {
-		return schema.StringAttribute{Description: desc, MarkdownDescription: desc, Optional: true, Computed: true}
-	}
-	optionalBool := func(desc string) schema.BoolAttribute {
-		return schema.BoolAttribute{Description: desc, MarkdownDescription: desc, Optional: true, Computed: true}
-	}
-	optionalInt := func(desc string) schema.Int64Attribute {
-		return schema.Int64Attribute{Description: desc, MarkdownDescription: desc, Optional: true, Computed: true}
-	}
 	return map[string]schema.Attribute{
-		"id":                               optionalString("Tuner host ID."),
-		"url":                              optionalString("Tuner host URL."),
-		"type":                             optionalString("Tuner host type."),
-		"device_id":                        optionalString("Device ID."),
-		"friendly_name":                    optionalString("Friendly name."),
-		"import_favorites_only":            optionalBool("Import favorites only."),
-		"allow_hw_transcoding":             optionalBool("Allow hardware transcoding."),
-		"allow_fmp4_transcoding_container": optionalBool("Allow fmp4 transcoding container."),
-		"allow_stream_sharing":             optionalBool("Allow stream sharing."),
-		"fallback_max_streaming_bitrate":   optionalInt("Fallback max streaming bitrate."),
-		"enable_stream_looping":            optionalBool("Enable stream looping."),
-		"source":                           optionalString("Source."),
-		"tuner_count":                      optionalInt("Tuner count."),
-		"user_agent":                       optionalString("User agent."),
-		"ignore_dts":                       optionalBool("Ignore DTS."),
-		"read_at_native_framerate":         optionalBool("Read at native framerate."),
+		"id":                               elementString("Tuner host ID."),
+		"url":                              elementString("Tuner host URL."),
+		"type":                             elementString("Tuner host type."),
+		"device_id":                        elementString("Device ID."),
+		"friendly_name":                    elementString("Friendly name."),
+		"import_favorites_only":            elementBool("Import favorites only."),
+		"allow_hw_transcoding":             elementBool("Allow hardware transcoding."),
+		"allow_fmp4_transcoding_container": elementBool("Allow fmp4 transcoding container."),
+		"allow_stream_sharing":             elementBool("Allow stream sharing."),
+		"fallback_max_streaming_bitrate":   elementInt("Fallback max streaming bitrate."),
+		"enable_stream_looping":            elementBool("Enable stream looping."),
+		"source":                           elementString("Source."),
+		"tuner_count":                      elementInt("Tuner count."),
+		"user_agent":                       elementString("User agent."),
+		"ignore_dts":                       elementBool("Ignore DTS."),
+		"read_at_native_framerate":         elementBool("Read at native framerate."),
 	}
 }
 
 func listingProviderAttributes() map[string]schema.Attribute {
-	optionalString := func(desc string) schema.StringAttribute {
-		return schema.StringAttribute{Description: desc, MarkdownDescription: desc, Optional: true, Computed: true}
-	}
-	optionalBool := func(desc string) schema.BoolAttribute {
-		return schema.BoolAttribute{Description: desc, MarkdownDescription: desc, Optional: true, Computed: true}
-	}
-	optionalStringList := func(desc string) schema.ListAttribute {
-		return schema.ListAttribute{ElementType: types.StringType, Description: desc, MarkdownDescription: desc, Optional: true, Computed: true}
-	}
 	return map[string]schema.Attribute{
-		"id":       optionalString("Provider ID."),
-		"type":     optionalString("Provider type."),
-		"username": optionalString("Username."),
+		"id":       elementString("Provider ID."),
+		"type":     elementString("Provider type."),
+		"username": elementString("Username."),
 		"password": schema.StringAttribute{
 			Description: "Password.", MarkdownDescription: "Password.",
 			Optional: true, Computed: true, Sensitive: true,
 		},
-		"listings_id":       optionalString("Listings ID."),
-		"zip_code":          optionalString("ZIP code."),
-		"country":           optionalString("Country."),
-		"path":              optionalString("Path."),
-		"enabled_tuners":    optionalStringList("Enabled tuners."),
-		"enable_all_tuners": optionalBool("Enable all tuners."),
-		"news_categories":   optionalStringList("News categories."),
-		"sports_categories": optionalStringList("Sports categories."),
-		"kids_categories":   optionalStringList("Kids categories."),
-		"movie_categories":  optionalStringList("Movie categories."),
+		"listings_id":       elementString("Listings ID."),
+		"zip_code":          elementString("ZIP code."),
+		"country":           elementString("Country."),
+		"path":              elementString("Path."),
+		"enabled_tuners":    elementStringList("Enabled tuners."),
+		"enable_all_tuners": elementBool("Enable all tuners."),
+		"news_categories":   elementStringList("News categories."),
+		"sports_categories": elementStringList("Sports categories."),
+		"kids_categories":   elementStringList("Kids categories."),
+		"movie_categories":  elementStringList("Movie categories."),
 		"channel_mappings": schema.ListNestedAttribute{
 			NestedObject: schema.NestedAttributeObject{
 				Attributes: map[string]schema.Attribute{
-					"name":  optionalString("Channel name."),
-					"value": optionalString("Mapped value."),
+					"name":  elementString("Channel name."),
+					"value": elementString("Mapped value."),
 				},
 			},
 			Description: "Channel mappings.", MarkdownDescription: "Channel mappings.",
 			Optional: true, Computed: true,
 		},
-		"movie_prefix":       optionalString("Movie prefix."),
-		"preferred_language": optionalString("Preferred language."),
-		"user_agent":         optionalString("User agent."),
+		"movie_prefix":       elementString("Movie prefix."),
+		"preferred_language": elementString("Preferred language."),
+		"user_agent":         elementString("User agent."),
 	}
 }
 

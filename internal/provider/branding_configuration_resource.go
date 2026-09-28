@@ -11,7 +11,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -73,9 +72,9 @@ func (r *BrandingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"login_disclaimer":      schema.StringAttribute{Description: "The login disclaimer text.", MarkdownDescription: "The login disclaimer text.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
-			"custom_css":            schema.StringAttribute{Description: "Custom CSS content.", MarkdownDescription: "Custom CSS content.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
-			"splashscreen_enabled":  schema.BoolAttribute{Description: "Whether the splash screen is enabled.", MarkdownDescription: "Whether the splash screen is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
+			"login_disclaimer":      optionalString("The login disclaimer text."),
+			"custom_css":            optionalString("Custom CSS content."),
+			"splashscreen_enabled":  optionalBool("Whether the splash screen is enabled."),
 			"splashscreen_location": schema.StringAttribute{Description: "The splash screen location. " + splashscreenLocationUnsupportedMessage, MarkdownDescription: "The splash screen location. " + splashscreenLocationUnsupportedMessage, Optional: true, DeprecationMessage: splashscreenLocationUnsupportedMessage, Validators: []validator.String{splashscreenLocationValidator{}}},
 		},
 	}

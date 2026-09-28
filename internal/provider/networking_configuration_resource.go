@@ -13,9 +13,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -95,28 +92,28 @@ func (r *NetworkingConfigurationResource) Schema(_ context.Context, _ resource.S
 				},
 			},
 			"base_url":                               schema.StringAttribute{Description: "The base URL, such as /jellyfin: empty, or a path that starts with / and does not end with one, as Jellyfin stores it.", MarkdownDescription: "The base URL, such as `/jellyfin`: empty, or a path that starts with `/` and does not end with one, as Jellyfin stores it.", Optional: true, Computed: true, Validators: []validator.String{baseURLValidator}, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
-			"enable_https":                           schema.BoolAttribute{Description: "Whether HTTPS is enabled.", MarkdownDescription: "Whether HTTPS is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
-			"require_https":                          schema.BoolAttribute{Description: "Whether HTTPS is required.", MarkdownDescription: "Whether HTTPS is required.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
-			"certificate_path":                       schema.StringAttribute{Description: "Path to the TLS certificate.", MarkdownDescription: "Path to the TLS certificate.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
+			"enable_https":                           optionalBool("Whether HTTPS is enabled."),
+			"require_https":                          optionalBool("Whether HTTPS is required."),
+			"certificate_path":                       optionalString("Path to the TLS certificate."),
 			"certificate_password":                   schema.StringAttribute{Description: "Password for the TLS certificate.", MarkdownDescription: "Password for the TLS certificate.", Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}, Sensitive: true},
-			"internal_http_port":                     schema.Int64Attribute{Description: "Internal HTTP port.", MarkdownDescription: "Internal HTTP port.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()}},
-			"internal_https_port":                    schema.Int64Attribute{Description: "Internal HTTPS port.", MarkdownDescription: "Internal HTTPS port.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()}},
-			"public_http_port":                       schema.Int64Attribute{Description: "Public HTTP port.", MarkdownDescription: "Public HTTP port.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()}},
-			"public_https_port":                      schema.Int64Attribute{Description: "Public HTTPS port.", MarkdownDescription: "Public HTTPS port.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()}},
-			"auto_discovery":                         schema.BoolAttribute{Description: "Whether auto discovery is enabled.", MarkdownDescription: "Whether auto discovery is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
-			"enable_upnp":                            schema.BoolAttribute{Description: "Whether UPnP is enabled.", MarkdownDescription: "Whether UPnP is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
-			"enable_ipv4":                            schema.BoolAttribute{Description: "Whether IPv4 is enabled.", MarkdownDescription: "Whether IPv4 is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
-			"enable_ipv6":                            schema.BoolAttribute{Description: "Whether IPv6 is enabled.", MarkdownDescription: "Whether IPv6 is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
-			"enable_remote_access":                   schema.BoolAttribute{Description: "Whether remote access is enabled.", MarkdownDescription: "Whether remote access is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
-			"local_network_subnets":                  schema.ListAttribute{ElementType: types.StringType, Description: "Local network subnets.", MarkdownDescription: "Local network subnets.", Optional: true, Computed: true, PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}},
-			"local_network_addresses":                schema.ListAttribute{ElementType: types.StringType, Description: "Local network addresses.", MarkdownDescription: "Local network addresses.", Optional: true, Computed: true, PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}},
-			"known_proxies":                          schema.ListAttribute{ElementType: types.StringType, Description: "Known proxy addresses.", MarkdownDescription: "Known proxy addresses.", Optional: true, Computed: true, PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}},
-			"ignore_virtual_interfaces":              schema.BoolAttribute{Description: "Whether virtual interfaces are ignored.", MarkdownDescription: "Whether virtual interfaces are ignored.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
-			"virtual_interface_names":                schema.ListAttribute{ElementType: types.StringType, Description: "Virtual interface names.", MarkdownDescription: "Virtual interface names.", Optional: true, Computed: true, PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}},
-			"enable_published_server_uri_by_request": schema.BoolAttribute{Description: "Whether published server URI by request is enabled.", MarkdownDescription: "Whether published server URI by request is enabled.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
-			"published_server_uri_by_subnet":         schema.ListAttribute{ElementType: types.StringType, Description: "Published server URIs by subnet.", MarkdownDescription: "Published server URIs by subnet.", Optional: true, Computed: true, PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}},
-			"remote_ip_filter":                       schema.ListAttribute{ElementType: types.StringType, Description: "Remote IP filter list.", MarkdownDescription: "Remote IP filter list.", Optional: true, Computed: true, PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}},
-			"is_remote_ip_filter_blacklist":          schema.BoolAttribute{Description: "Whether the remote IP filter is a blacklist.", MarkdownDescription: "Whether the remote IP filter is a blacklist.", Optional: true, Computed: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
+			"internal_http_port":                     optionalInt("Internal HTTP port."),
+			"internal_https_port":                    optionalInt("Internal HTTPS port."),
+			"public_http_port":                       optionalInt("Public HTTP port."),
+			"public_https_port":                      optionalInt("Public HTTPS port."),
+			"auto_discovery":                         optionalBool("Whether auto discovery is enabled."),
+			"enable_upnp":                            optionalBool("Whether UPnP is enabled."),
+			"enable_ipv4":                            optionalBool("Whether IPv4 is enabled."),
+			"enable_ipv6":                            optionalBool("Whether IPv6 is enabled."),
+			"enable_remote_access":                   optionalBool("Whether remote access is enabled."),
+			"local_network_subnets":                  optionalStringList("Local network subnets."),
+			"local_network_addresses":                optionalStringList("Local network addresses."),
+			"known_proxies":                          optionalStringList("Known proxy addresses."),
+			"ignore_virtual_interfaces":              optionalBool("Whether virtual interfaces are ignored."),
+			"virtual_interface_names":                optionalStringList("Virtual interface names."),
+			"enable_published_server_uri_by_request": optionalBool("Whether published server URI by request is enabled."),
+			"published_server_uri_by_subnet":         optionalStringList("Published server URIs by subnet."),
+			"remote_ip_filter":                       optionalStringList("Remote IP filter list."),
+			"is_remote_ip_filter_blacklist":          optionalBool("Whether the remote IP filter is a blacklist."),
 		},
 	}
 }

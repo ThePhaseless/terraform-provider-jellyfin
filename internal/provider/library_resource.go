@@ -20,7 +20,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
@@ -307,40 +306,6 @@ func samePaths(a, b []string) bool {
 }
 
 func libraryOptionsAttributes() map[string]schema.Attribute {
-	optionalString := func(desc string) schema.StringAttribute {
-		return schema.StringAttribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.String{
-				stringplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-	optionalBool := func(desc string) schema.BoolAttribute {
-		return schema.BoolAttribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.Bool{
-				boolplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-	optionalStringList := func(desc string) schema.ListAttribute {
-		return schema.ListAttribute{
-			ElementType:         types.StringType,
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.List{
-				listplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
 	unsupportedBool := func(desc string) schema.BoolAttribute {
 		return schema.BoolAttribute{
 			Description:         desc + " " + unsupportedLibraryOptionMessage,
@@ -437,17 +402,6 @@ func libraryOptionsAttributes() map[string]schema.Attribute {
 }
 
 func pathInfoAttributes() map[string]schema.Attribute {
-	optionalString := func(desc string) schema.StringAttribute {
-		return schema.StringAttribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.String{
-				stringplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
 	unsupportedString := func(desc string, sensitive bool) schema.StringAttribute {
 		return schema.StringAttribute{
 			Description:         desc + " " + unsupportedLibraryOptionMessage,
@@ -504,29 +458,6 @@ func (priorValueEvenIfNull) PlanModifyString(_ context.Context, req planmodifier
 const unsupportedLibraryOptionMessage = "Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release."
 
 func typeOptionsAttributes() map[string]schema.Attribute {
-	optionalString := func(desc string) schema.StringAttribute {
-		return schema.StringAttribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.String{
-				stringplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-	optionalStringList := func(desc string) schema.ListAttribute {
-		return schema.ListAttribute{
-			ElementType:         types.StringType,
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.List{
-				listplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
 	deprecatedOrder := func(desc, deprecation string) schema.ListAttribute {
 		a := optionalStringList(desc + " " + deprecation)
 		a.DeprecationMessage = deprecation

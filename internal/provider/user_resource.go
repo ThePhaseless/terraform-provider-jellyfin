@@ -18,9 +18,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/float64planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -148,19 +145,7 @@ type UserPolicyModel struct {
 }
 
 func userPolicyAttributes() map[string]schema.Attribute {
-	optionalBool := func(desc string) schema.BoolAttribute {
-		return schema.BoolAttribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.Bool{
-				boolplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-
-	optionalString := func(desc, def string) schema.StringAttribute {
+	defaultedString := func(desc, def string) schema.StringAttribute {
 		a := schema.StringAttribute{
 			Description:         desc,
 			MarkdownDescription: desc,
@@ -176,18 +161,6 @@ func userPolicyAttributes() map[string]schema.Attribute {
 		return a
 	}
 
-	optionalInt := func(desc string) schema.Int64Attribute {
-		return schema.Int64Attribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.Int64{
-				int64planmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-
 	// Null is the server's "no limit", so these are not computed: a computed
 	// attribute would keep the prior limit when unset and could never be
 	// cleared.
@@ -196,31 +169,6 @@ func userPolicyAttributes() map[string]schema.Attribute {
 			Description:         desc,
 			MarkdownDescription: desc,
 			Optional:            true,
-		}
-	}
-
-	optionalFloat := func(desc string) schema.Float64Attribute {
-		return schema.Float64Attribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.Float64{
-				float64planmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-
-	optionalStringList := func(desc string) schema.ListAttribute {
-		return schema.ListAttribute{
-			ElementType:         types.StringType,
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.List{
-				listplanmodifier.UseStateForUnknown(),
-			},
 		}
 	}
 
@@ -241,14 +189,9 @@ func userPolicyAttributes() map[string]schema.Attribute {
 		"access_schedules": schema.ListNestedAttribute{
 			NestedObject: schema.NestedAttributeObject{
 				Attributes: map[string]schema.Attribute{
-					"day_of_week": schema.StringAttribute{
-						Description:         "Day of week for the schedule.",
-						MarkdownDescription: "Day of week for the schedule.",
-						Optional:            true,
-						Computed:            true,
-					},
-					"start_hour": withoutPlanModifiers(optionalFloat("Start hour of the schedule (0-24).")),
-					"end_hour":   withoutPlanModifiers(optionalFloat("End hour of the schedule (0-24).")),
+					"day_of_week": elementString("Day of week for the schedule."),
+					"start_hour":  elementFloat("Start hour of the schedule (0-24)."),
+					"end_hour":    elementFloat("End hour of the schedule (0-24)."),
 				},
 			},
 			Description:         "Access schedules restricting when the user can use the server.",
@@ -292,9 +235,9 @@ func userPolicyAttributes() map[string]schema.Attribute {
 		"blocked_media_folders":                guidList(optionalStringList("Media folders that are blocked, by ID as Jellyfin lists it, such as a library's `item_id`.")),
 		"blocked_channels":                     guidList(optionalStringList("Channels that are blocked, by ID as Jellyfin lists it.")),
 		"remote_client_bitrate_limit":          optionalInt("Remote client bitrate limit."),
-		"authentication_provider_id":           optionalString("Authentication provider ID.", ""),
-		"password_reset_provider_id":           optionalString("Password reset provider ID.", ""),
-		"sync_play_access":                     optionalString("SyncPlay access level.", ""),
+		"authentication_provider_id":           defaultedString("Authentication provider ID.", ""),
+		"password_reset_provider_id":           defaultedString("Password reset provider ID.", ""),
+		"sync_play_access":                     defaultedString("SyncPlay access level.", ""),
 	}
 }
 
@@ -364,11 +307,6 @@ func (r *UserResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 			},
 		},
 	}
-}
-
-func withoutPlanModifiers(a schema.Float64Attribute) schema.Float64Attribute {
-	a.PlanModifiers = nil
-	return a
 }
 
 // Jellyfin reads an ID in any of .NET's Guid spellings but lists it as 32

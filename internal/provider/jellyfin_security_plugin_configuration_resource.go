@@ -19,8 +19,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -201,39 +199,6 @@ func (r *JellyfinSecurityPluginConfigurationResource) Metadata(_ context.Context
 	resp.TypeName = req.ProviderTypeName + "_security_plugin_configuration"
 }
 func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	optionalBool := func(desc string) schema.BoolAttribute {
-		return schema.BoolAttribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.Bool{
-				boolplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-	optionalInt := func(desc string) schema.Int64Attribute {
-		return schema.Int64Attribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.Int64{
-				int64planmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-	optionalString := func(desc string) schema.StringAttribute {
-		return schema.StringAttribute{
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.String{
-				stringplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
 	sensitiveString := func(desc string) schema.StringAttribute {
 		return schema.StringAttribute{
 			Description:         desc,
@@ -243,18 +208,6 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 			Sensitive:           true,
 			PlanModifiers: []planmodifier.String{
 				stringplanmodifier.UseStateForUnknown(),
-			},
-		}
-	}
-	optionalStringList := func(desc string) schema.ListAttribute {
-		return schema.ListAttribute{
-			ElementType:         types.StringType,
-			Description:         desc,
-			MarkdownDescription: desc,
-			Optional:            true,
-			Computed:            true,
-			PlanModifiers: []planmodifier.List{
-				listplanmodifier.UseStateForUnknown(),
 			},
 		}
 	}
@@ -268,23 +221,8 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 	// elements by index, so that removing or reordering an element would plan
 	// another element's values, secrets included, for it. The lists fill the
 	// unknowns of each element from the prior element with the same key.
-	elementBool := func(desc string) schema.BoolAttribute {
-		a := optionalBool(desc)
-		a.PlanModifiers = nil
-		return a
-	}
-	elementString := func(desc string) schema.StringAttribute {
-		a := optionalString(desc)
-		a.PlanModifiers = nil
-		return a
-	}
 	elementSensitiveString := func(desc string) schema.StringAttribute {
 		a := sensitiveString(desc)
-		a.PlanModifiers = nil
-		return a
-	}
-	elementStringList := func(desc string) schema.ListAttribute {
-		a := optionalStringList(desc)
 		a.PlanModifiers = nil
 		return a
 	}
