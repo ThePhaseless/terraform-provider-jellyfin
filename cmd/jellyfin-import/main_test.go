@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1197,6 +1198,32 @@ func TestImportClientRequiresPasswordWhenAPIKeyMissing(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "missing Jellyfin password") {
 		t.Fatalf("importClient() error = %v, want missing password error", err)
+	}
+}
+
+func TestFromEnvFillsOnlyFlagsTheCommandLineLeavesOut(t *testing.T) {
+	t.Setenv("JELLYFIN_API_KEY", "key-from-env")
+	t.Setenv("JELLYFIN_ENDPOINT", "http://env.test")
+
+	fs := flag.NewFlagSet("jellyfin-import", flag.ContinueOnError)
+	endpoint := fs.String("endpoint", "", "")
+	apiKey := fs.String("api-key", "", "")
+	username := fs.String("username", "", "")
+	if err := fs.Parse([]string{"-api-key=", "-username=admin"}); err != nil {
+		t.Fatal(err)
+	}
+	fromEnv(fs, "endpoint", "JELLYFIN_ENDPOINT")
+	fromEnv(fs, "api-key", "JELLYFIN_API_KEY")
+	fromEnv(fs, "username", "JELLYFIN_USERNAME")
+
+	if *endpoint != "http://env.test" {
+		t.Errorf("endpoint = %q, want the environment's", *endpoint)
+	}
+	if *apiKey != "" {
+		t.Errorf("api-key set to empty = %q, want it kept empty", *apiKey)
+	}
+	if *username != "admin" {
+		t.Errorf("username = %q, want the command line's", *username)
 	}
 }
 

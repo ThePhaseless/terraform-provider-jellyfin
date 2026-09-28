@@ -29,10 +29,10 @@ func main() {
 	password := flag.String("password", "", "Jellyfin password (or JELLYFIN_PASSWORD env)")
 	outputDir := flag.String("output", ".", "Output directory for generated Terraform files")
 	flag.Parse()
-	fromEnv(endpoint, "JELLYFIN_ENDPOINT")
-	fromEnv(apiKey, "JELLYFIN_API_KEY")
-	fromEnv(username, "JELLYFIN_USERNAME")
-	fromEnv(password, "JELLYFIN_PASSWORD")
+	fromEnv(flag.CommandLine, "endpoint", "JELLYFIN_ENDPOINT")
+	fromEnv(flag.CommandLine, "api-key", "JELLYFIN_API_KEY")
+	fromEnv(flag.CommandLine, "username", "JELLYFIN_USERNAME")
+	fromEnv(flag.CommandLine, "password", "JELLYFIN_PASSWORD")
 
 	if *endpoint == "" {
 		fmt.Fprintln(os.Stderr, "Error: --endpoint or JELLYFIN_ENDPOINT is required")
@@ -69,10 +69,19 @@ func main() {
 	fmt.Println("Import files generated successfully in", *outputDir)
 }
 
-// fromEnv sets an unset flag's value from the environment variable env.
-func fromEnv(value *string, env string) {
-	if *value == "" {
-		*value = os.Getenv(env)
+// fromEnv sets the flag name from the environment variable env when the
+// command line leaves it out, as a default would, so a flag set to empty, such
+// as -api-key= to sign in with a password instead, stays empty.
+func fromEnv(fs *flag.FlagSet, name, env string) {
+	value, ok := os.LookupEnv(env)
+	if !ok {
+		return
+	}
+	explicit := false
+	fs.Visit(func(f *flag.Flag) { explicit = explicit || f.Name == name })
+	if !explicit {
+		// A string flag takes any value.
+		_ = fs.Set(name, value)
 	}
 }
 
