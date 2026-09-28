@@ -18,6 +18,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/release"
 )
 
 func TestAccUserResource(t *testing.T) {
@@ -281,7 +282,7 @@ func testAccPreCheckJellyfinVersionAtLeast(t *testing.T, minVersion string) {
 	if err != nil {
 		t.Fatalf("reading Jellyfin version: %v", err)
 	}
-	if compareDottedVersions(info.Version, minVersion) < 0 {
+	if release.Compare(info.Version, minVersion) < 0 {
 		t.Skipf("requires Jellyfin %s or newer, server is %s", minVersion, info.Version)
 	}
 }

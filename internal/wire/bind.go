@@ -14,6 +14,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/release"
 )
 
 type Mode int
@@ -286,7 +288,7 @@ func (bb *binder) field(object, path, name string, a schema.Attribute, inst, sin
 		}
 		f.Prop = bb.c.floor[object][opt.key]
 		f.Until = opt.until
-		if !hasLeadingDigit(opt.until) {
+		if !release.HasLeadingDigit(opt.until) {
 			bb.errorf("%s: Legacy needs the version that removed the key, not %q", path, opt.until)
 		}
 	case opt.key != "":

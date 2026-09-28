@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/release"
 )
 
 //go:embed schema/jellyfin_api_schema.golden
@@ -72,23 +74,14 @@ var embedded = sync.OnceValue(func() *catalog {
 		pinned:      pinned,
 		floor:       parseAPIGolden(floorAPIGolden),
 		unversioned: unversioned,
-		floorVer:    envValue(floorEnv, "JELLYFIN_VERSION"),
-		sinceVer:    envValue(floorEnv, "NEXT_JELLYFIN_VERSION"),
+		floorVer:    release.FromEnv(floorEnv, "JELLYFIN_VERSION"),
+		sinceVer:    release.FromEnv(floorEnv, "NEXT_JELLYFIN_VERSION"),
 	}
 })
 
 // FloorVersion is the Jellyfin release jellyfin_api_schema_floor.golden
 // records.
 func FloorVersion() string { return embedded().floorVer }
-
-func envValue(content, key string) string {
-	for _, line := range strings.Split(content, "\n") {
-		if v, ok := strings.CutPrefix(strings.TrimSpace(line), key+"="); ok {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
-}
 
 // parseAPIGolden reads the "schema Object.Key: signature" lines of
 // jellyfin_api_schema.golden. A line without a key declares an object without

@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/release"
 )
 
 var testAccProtoV6ProviderFactories = map[string]func() (tfprotov6.ProviderServer, error){
@@ -57,5 +58,5 @@ func testAccJellyfinVersionAtLeast(t *testing.T, minVersion string) bool {
 	if err != nil {
 		t.Fatalf("reading the Jellyfin version: %v", err)
 	}
-	return compareDottedVersions(info.Version, minVersion) >= 0
+	return release.Compare(info.Version, minVersion) >= 0
 }

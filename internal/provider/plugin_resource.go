@@ -22,6 +22,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/release"
 )
 
 // pluginInstallTimeout bounds the wait for a Jellyfin install to land on disk;
@@ -443,7 +444,7 @@ func selectInstalledPlugin(plugins []client.InstalledPlugin, id, name, version s
 		if version != "" && samePluginVersion(p.Version, version) {
 			return p, true
 		}
-		if !found || compareDottedVersions(p.Version, selected.Version) > 0 {
+		if !found || release.Compare(p.Version, selected.Version) > 0 {
 			selected, found = p, true
 		}
 	}
@@ -609,7 +610,7 @@ func samePluginVersion(got, want string) bool {
 	if want == "" {
 		return true
 	}
-	return compareDottedVersions(got, want) == 0
+	return release.Compare(got, want) == 0
 }
 
 // resolveRepositoryURL attempts to find the repository URL for a plugin by
@@ -673,7 +674,7 @@ func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, 
 			return "", err
 		}
 		if supported != "" && latest != "" {
-			if c := compareDottedVersions(pluginRelease(latest), pluginRelease(supported)); c > 0 {
+			if c := release.Compare(pluginRelease(latest), pluginRelease(supported)); c > 0 {
 				tflog.Warn(ctx, "Plugin version newer than supported", map[string]interface{}{
 					"plugin":    name,
 					"latest":    latest,
@@ -738,7 +739,7 @@ func pickReleaseBuild(offered []client.VersionInfo, want string) string {
 		if v.Version == want {
 			return want
 		}
-		if pluginRelease(v.Version) == pluginRelease(want) && (best == "" || compareDottedVersions(v.Version, best) > 0) {
+		if pluginRelease(v.Version) == pluginRelease(want) && (best == "" || release.Compare(v.Version, best) > 0) {
 			best = v.Version
 		}
 	}

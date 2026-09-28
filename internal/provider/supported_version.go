@@ -6,8 +6,8 @@ package provider
 import (
 	_ "embed"
 	"fmt"
-	"strconv"
-	"strings"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/release"
 )
 
 //go:embed supported_jellyfin_version.env
@@ -19,100 +19,20 @@ var supportedSecurityPluginVersionEnv string
 // supportedJellyfinVersion returns the tested Jellyfin server version from the
 // embedded .env file.
 func supportedJellyfinVersion() string {
-	return parseVersionEnv(supportedJellyfinVersionEnv, "JELLYFIN_VERSION")
+	return release.FromEnv(supportedJellyfinVersionEnv, "JELLYFIN_VERSION")
 }
 
 // supportedSecurityPluginVersion returns the tested JellyfinSecurity plugin
 // version from the embedded .env file.
 func supportedSecurityPluginVersion() string {
-	return parseVersionEnv(supportedSecurityPluginVersionEnv, "SECURITY_PLUGIN_VERSION")
-}
-
-func parseVersionEnv(content, key string) string {
-	content = strings.TrimSpace(content)
-	prefix := key + "="
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
-		}
-	}
-	return ""
-}
-
-// compareDottedVersions compares dotted numeric versions a and b.
-// It returns -1 if a < b, 0 if a == b, and 1 if a > b.
-// Each segment contributes its leading integer (trailing non-digits ignored);
-// missing segments count as 0; a version without a leading digit compares
-// equal to any other.
-func compareDottedVersions(a, b string) int {
-	if !hasLeadingDigit(a) || !hasLeadingDigit(b) {
-		return 0
-	}
-
-	aParts := strings.Split(a, ".")
-	bParts := strings.Split(b, ".")
-	maxLen := len(aParts)
-	if len(bParts) > maxLen {
-		maxLen = len(bParts)
-	}
-
-	for i := range maxLen {
-		aSeg := parseSegment(getPart(aParts, i))
-		bSeg := parseSegment(getPart(bParts, i))
-
-		if aSeg < bSeg {
-			return -1
-		}
-		if aSeg > bSeg {
-			return 1
-		}
-	}
-
-	return 0
-}
-
-func hasLeadingDigit(s string) bool {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return false
-	}
-	return s[0] >= '0' && s[0] <= '9'
-}
-
-func getPart(parts []string, i int) string {
-	if i >= len(parts) {
-		return ""
-	}
-	return parts[i]
-}
-
-func parseSegment(s string) int64 {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0
-	}
-
-	end := 0
-	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
-		end++
-	}
-	if end == 0 {
-		return 0
-	}
-
-	n, err := strconv.ParseInt(s[:end], 10, 64)
-	if err != nil {
-		return 0
-	}
-	return n
+	return release.FromEnv(supportedSecurityPluginVersionEnv, "SECURITY_PLUGIN_VERSION")
 }
 
 // versionNewerWarning returns a detail message when installed > supported.
 // The ok return value is true when installed is newer and the caller should
 // surface the detail as a warning.
 func versionNewerWarning(what, installed, supported string) (detail string, ok bool) {
-	if compareDottedVersions(installed, supported) <= 0 {
+	if release.Compare(installed, supported) <= 0 {
 		return "", false
 	}
 

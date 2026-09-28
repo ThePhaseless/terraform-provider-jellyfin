@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strconv"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -17,6 +15,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/release"
 )
 
 // KeepPlannedNulls returns got with each attribute inside a nested list
@@ -275,11 +275,11 @@ type VersionGap struct {
 
 // VersionErrors rejects each configured value whose field the server's
 // Jellyfin version lacks: a field with a Since version on older servers, and
-// a Legacy field on its until version and later. It asks version for the
+// a Legacy field on its until version and later. It asks serverVersion for the
 // server's version only when such a value is configured. It leaves out values
 // unknown at plan time; Terraform plans again during apply, once they are
 // known.
-func (b *Binding) VersionErrors(ctx context.Context, cfg tfsdk.Config, version func() (string, error)) diag.Diagnostics {
+func (b *Binding) VersionErrors(ctx context.Context, cfg tfsdk.Config, serverVersion func() (string, error)) diag.Diagnostics {
 	var diags diag.Diagnostics
 	if cfg.Schema == nil || cfg.Raw.IsNull() {
 		return diags
@@ -298,20 +298,20 @@ func (b *Binding) VersionErrors(ctx context.Context, cfg tfsdk.Config, version f
 	if len(gated) == 0 {
 		return diags
 	}
-	ver, err := version()
+	ver, err := serverVersion()
 	if err != nil {
 		diags.AddError("Failed to read the Jellyfin version", err.Error())
 		return diags
 	}
-	if !hasLeadingDigit(ver) {
+	if !release.HasLeadingDigit(ver) {
 		return diags
 	}
 	for _, g := range gated {
 		gap := VersionGap{Path: g.p, Key: g.f.versionKey(), ServerVersion: ver}
 		switch {
-		case g.f.Since != "" && compareVersions(ver, g.f.Since) < 0:
+		case g.f.Since != "" && release.Compare(ver, g.f.Since) < 0:
 			gap.Since = g.f.Since
-		case g.f.Until != "" && compareVersions(ver, g.f.Until) >= 0:
+		case g.f.Until != "" && release.Compare(ver, g.f.Until) >= 0:
 			gap.Until = g.f.Until
 		default:
 			continue
@@ -384,41 +384,4 @@ func collectGated(n *node, obj basetypes.ObjectValue, at path.Path, out *[]gated
 			}
 		}
 	}
-}
-
-func hasLeadingDigit(s string) bool {
-	s = strings.TrimSpace(s)
-	return s != "" && s[0] >= '0' && s[0] <= '9'
-}
-
-// compareVersions compares dotted versions segment by segment, each by its
-// leading integer, with a missing segment counting as 0.
-func compareVersions(a, b string) int {
-	as, bs := strings.Split(strings.TrimSpace(a), "."), strings.Split(strings.TrimSpace(b), ".")
-	for i := range max(len(as), len(bs)) {
-		x, y := versionSegment(as, i), versionSegment(bs, i)
-		switch {
-		case x < y:
-			return -1
-		case x > y:
-			return 1
-		}
-	}
-	return 0
-}
-
-func versionSegment(parts []string, i int) int64 {
-	if i >= len(parts) {
-		return 0
-	}
-	s := strings.TrimSpace(parts[i])
-	end := 0
-	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
-		end++
-	}
-	n, err := strconv.ParseInt(s[:end], 10, 64)
-	if err != nil {
-		return 0
-	}
-	return n
 }

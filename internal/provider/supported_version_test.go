@@ -19,43 +19,6 @@ func TestSupportedVersionParsers(t *testing.T) {
 	}
 }
 
-func TestCompareDottedVersions(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		a    string
-		b    string
-		want int
-	}{
-		{"newer patch", "10.11.12", "10.11.11", 1},
-		{"equal", "10.11.11", "10.11.11", 0},
-		{"older minor", "10.9.0", "10.11.11", -1},
-		{"newer major vs older very new minor", "10.12.0", "10.11.99", 1},
-		{"equal with extra zero segment", "10.11.11.0", "10.11.11", 0},
-		{"garbage treated as 0.0.0", "not-a-version", "10.11.11", 0},
-		{"two garbage", "foo", "bar", 0},
-		{"sso newer", "4.0.0.5", "4.0.0.4", 1},
-		{"sso equal", "4.0.0.4", "4.0.0.4", 0},
-		{"sso older", "4.0.0.3", "4.0.0.4", -1},
-		{"shorter version equal", "10.11", "10.11.0", 0},
-		{"trailing non-digit ignored", "10.11.11-rc1", "10.11.11", 0},
-		{"newer because rc suffix ignored", "10.11.12-rc1", "10.11.11", 1},
-		{"leading whitespace", " 10.11.12 ", "10.11.11", 1},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			got := compareDottedVersions(tt.a, tt.b)
-			if got != tt.want {
-				t.Errorf("compareDottedVersions(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestVersionNewerWarning(t *testing.T) {
 	t.Parallel()
 

@@ -6,6 +6,8 @@ package wire
 import (
 	"strings"
 	"testing"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/release"
 )
 
 func TestUnitParseAPIGolden(t *testing.T) {
@@ -103,24 +105,7 @@ func TestUnitEmbeddedCatalog(t *testing.T) {
 	if _, ok := floor["EncodingOptions"]["HlsAudioSeekStrategy"]; ok {
 		t.Error("the floor golden has HlsAudioSeekStrategy, which Jellyfin 12.0 added")
 	}
-	if !hasLeadingDigit(c.floorVer) || compareVersions(c.sinceVer, c.floorVer) <= 0 {
+	if !release.HasLeadingDigit(c.floorVer) || release.Compare(c.sinceVer, c.floorVer) <= 0 {
 		t.Errorf("floor.env: version %q, next %q; want a version and a later one", c.floorVer, c.sinceVer)
-	}
-}
-
-func TestUnitCompareVersions(t *testing.T) {
-	for _, c := range []struct {
-		a, b string
-		want int
-	}{
-		{"10.11.11", "12.0", -1},
-		{"12.0.0", "12.0", 0},
-		{"12.1.0", "12.0", 1},
-		{"10.10", "10.9.11", 1},
-		{"10.10.0-rc1", "10.10", 0},
-	} {
-		if got := compareVersions(c.a, c.b); got != c.want {
-			t.Errorf("compareVersions(%q, %q) = %d, want %d", c.a, c.b, got, c.want)
-		}
 	}
 }
