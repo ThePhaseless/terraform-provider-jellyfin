@@ -7,3 +7,4 @@ The document generation tool looks for files in the following locations by defau
 * **provider/provider.tf** example file for the provider index page
 * **data-sources/`full data source name`/data-source.tf** example file for the named data source page
 * **resources/`full resource name`/resource.tf** example file for the named resource page
+* **resources/`full resource name`/import.sh** example `terraform import` commands for the Import section of the named resource page, present for every resource that supports import
