@@ -533,19 +533,51 @@ func TestUnitSecurityPluginPlansOIDCProvidersByID(t *testing.T) {
 		maps.Copy(attrs, set)
 		return types.ObjectValueMust(elemType.AttrTypes, attrs)
 	}
-	prior := func(id, secret string, autoCreate bool, createdAt string) attr.Value {
-		return element(nil, map[string]attr.Value{
-			"id":                types.StringValue(id),
-			"client_secret":     types.StringValue(secret),
-			"auto_create_users": types.BoolValue(autoCreate),
-			"created_at":        types.StringValue(createdAt),
+	mappingType, ok := elemType.AttrTypes["role_library_mappings"].(types.ListType)
+	if !ok {
+		t.Fatalf("role_library_mappings is a %s", elemType.AttrTypes["role_library_mappings"])
+	}
+	mappingObjType, ok := mappingType.ElemType.(types.ObjectType)
+	if !ok {
+		t.Fatalf("role_library_mappings elements are %s", mappingType.ElemType)
+	}
+	mapping := func(role string, libraryIDs attr.Value) attr.Value {
+		return types.ObjectValueMust(mappingObjType.AttrTypes, map[string]attr.Value{
+			"role":        types.StringValue(role),
+			"library_ids": libraryIDs,
 		})
 	}
-	configured := map[string]attr.Value{"id": types.StringValue("b"), "display_name": types.StringValue("B")}
+	mappings := func(entries ...attr.Value) attr.Value {
+		return types.ListValueMust(mappingObjType, entries)
+	}
+	libraries := func(id string) attr.Value {
+		return types.ListValueMust(types.StringType, []attr.Value{types.StringValue(id)})
+	}
+	prior := func(id, secret string, autoCreate bool, createdAt string, roleMappings attr.Value) attr.Value {
+		return element(nil, map[string]attr.Value{
+			"id":                    types.StringValue(id),
+			"client_secret":         types.StringValue(secret),
+			"auto_create_users":     types.BoolValue(autoCreate),
+			"created_at":            types.StringValue(createdAt),
+			"role_library_mappings": roleMappings,
+		})
+	}
+	// b moves to the index a held and swaps its role mappings, leaving their
+	// libraries unset.
+	configured := map[string]attr.Value{
+		"id":                    types.StringValue("b"),
+		"display_name":          types.StringValue("B"),
+		"role_library_mappings": mappings(mapping("adults", types.ListNull(types.StringType)), mapping("kids", types.ListNull(types.StringType))),
+	}
+	planned := maps.Clone(configured)
+	planned["role_library_mappings"] = mappings(mapping("adults", types.ListUnknown(types.StringType)), mapping("kids", types.ListUnknown(types.StringType)))
 
-	state := types.ListValueMust(elemType, []attr.Value{prior("a", "secret-a", true, "tA"), prior("b", "secret-b", false, "tB")})
+	state := types.ListValueMust(elemType, []attr.Value{
+		prior("a", "secret-a", true, "tA", mappings(mapping("adults", libraries("a-adults")), mapping("kids", libraries("a-kids")))),
+		prior("b", "secret-b", false, "tB", mappings(mapping("kids", libraries("b-kids")), mapping("adults", libraries("b-adults")))),
+	})
 	config := types.ListValueMust(elemType, []attr.Value{element(nil, configured)})
-	plan := types.ListValueMust(elemType, []attr.Value{element(tftypes.UnknownValue, configured)})
+	plan := types.ListValueMust(elemType, []attr.Value{element(tftypes.UnknownValue, planned)})
 
 	existing := tftypes.NewValue(tftypes.Object{}, map[string]tftypes.Value{})
 	resp := planmodifier.ListResponse{PlanValue: plan}
@@ -567,10 +599,11 @@ func TestUnitSecurityPluginPlansOIDCProvidersByID(t *testing.T) {
 		t.Fatalf("planned %s", resp.PlanValue)
 	}
 	for name, want := range map[string]attr.Value{
-		"client_secret":     types.StringValue("secret-b"),
-		"auto_create_users": types.BoolValue(false),
-		"created_at":        types.StringValue("tB"),
-		"display_name":      types.StringValue("B"),
+		"client_secret":         types.StringValue("secret-b"),
+		"auto_create_users":     types.BoolValue(false),
+		"created_at":            types.StringValue("tB"),
+		"display_name":          types.StringValue("B"),
+		"role_library_mappings": mappings(mapping("adults", libraries("b-adults")), mapping("kids", libraries("b-kids"))),
 	} {
 		if v := got.Attributes()[name]; !v.Equal(want) {
 			t.Errorf("planned oidc_providers[0].%s = %s, want %s", name, v, want)
