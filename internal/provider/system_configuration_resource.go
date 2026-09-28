@@ -208,12 +208,12 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 		"item_type":                   nonNullStateString(optionalString("Item type.")),
 		"disabled_metadata_savers":    nonNullStateList(optionalStringList("Disabled metadata savers.")),
 		"local_metadata_reader_order": nonNullStateList(optionalStringList("Local metadata reader order.")),
-		"metadata_fetchers":           combinedStringList(itemTypeFetchersDescription("metadata", "disabled_metadata_fetchers", "metadata_fetcher_order"), "item_type", "disabled_metadata_fetchers", "metadata_fetcher_order"),
-		"disabled_metadata_fetchers":  replacedBy(nonNullStateList(optionalStringList("Disabled metadata fetchers.")), itemTypeFetchersDeprecation("metadata"), "item_type", "metadata_fetchers"),
-		"metadata_fetcher_order":      replacedBy(nonNullStateList(optionalStringList("Metadata fetcher order.")), itemTypeFetchersDeprecation("metadata"), "item_type", "metadata_fetchers"),
-		"image_fetchers":              combinedStringList(itemTypeFetchersDescription("image", "disabled_image_fetchers", "image_fetcher_order"), "item_type", "disabled_image_fetchers", "image_fetcher_order"),
-		"disabled_image_fetchers":     replacedBy(nonNullStateList(optionalStringList("Disabled image fetchers.")), itemTypeFetchersDeprecation("image"), "item_type", "image_fetchers"),
-		"image_fetcher_order":         replacedBy(nonNullStateList(optionalStringList("Image fetcher order.")), itemTypeFetchersDeprecation("image"), "item_type", "image_fetchers"),
+		"metadata_fetchers":           combinedStringList(itemTypeFetchersDescription("metadata", "disabled_metadata_fetchers", "metadata_fetcher_order"), "disabled_metadata_fetchers", "metadata_fetcher_order"),
+		"disabled_metadata_fetchers":  replacedBy(nonNullStateList(optionalStringList("Disabled metadata fetchers.")), itemTypeFetchersDeprecation("metadata"), "metadata_fetchers"),
+		"metadata_fetcher_order":      replacedBy(nonNullStateList(optionalStringList("Metadata fetcher order.")), itemTypeFetchersDeprecation("metadata"), "metadata_fetchers"),
+		"image_fetchers":              combinedStringList(itemTypeFetchersDescription("image", "disabled_image_fetchers", "image_fetcher_order"), "disabled_image_fetchers", "image_fetcher_order"),
+		"disabled_image_fetchers":     replacedBy(nonNullStateList(optionalStringList("Disabled image fetchers.")), itemTypeFetchersDeprecation("image"), "image_fetchers"),
+		"image_fetcher_order":         replacedBy(nonNullStateList(optionalStringList("Image fetcher order.")), itemTypeFetchersDeprecation("image"), "image_fetchers"),
 	}
 
 	nameValuePairAttributes := map[string]schema.Attribute{
@@ -439,7 +439,11 @@ func (r *SystemConfigurationResource) ImportState(ctx context.Context, _ resourc
 }
 
 // ModifyPlan gates each configured field on the Jellyfin version it needs, so
-// a field a later pin adds is checked without a change here.
+// a field a later pin adds is checked without a change here. It also plans
+// each metadata_options attribute left unset from the prior entry with the
+// same item type. UseNonNullStateForUnknown takes it from the prior entry at
+// the same index instead, so inserting or reordering entries would plan, and
+// then write, another item type's lists.
 func (r *SystemConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	if req.Plan.Raw.IsNull() {
 		return
@@ -447,6 +451,99 @@ func (r *SystemConfigurationResource) ModifyPlan(ctx context.Context, req resour
 	if b := wireBinding(&resp.Diagnostics, systemWire); b != nil {
 		resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
 	}
+	if resp.Diagnostics.HasError() || req.State.Raw.IsNull() {
+		return
+	}
+
+	metadataOptionsPath := path.Root("metadata_options")
+	var config, plan, state types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, metadataOptionsPath, &config)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, metadataOptionsPath, &plan)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, metadataOptionsPath, &state)...)
+	if resp.Diagnostics.HasError() || config.IsNull() || config.IsUnknown() || plan.IsNull() || plan.IsUnknown() {
+		return
+	}
+
+	planned, diags := planMetadataOptionsByItemType(ctx, config, plan, state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, metadataOptionsPath, planned)...)
+}
+
+type metadataOptionsModel struct {
+	ItemType                 types.String `tfsdk:"item_type"`
+	DisabledMetadataSavers   types.List   `tfsdk:"disabled_metadata_savers"`
+	LocalMetadataReaderOrder types.List   `tfsdk:"local_metadata_reader_order"`
+	MetadataFetchers         types.List   `tfsdk:"metadata_fetchers"`
+	DisabledMetadataFetchers types.List   `tfsdk:"disabled_metadata_fetchers"`
+	MetadataFetcherOrder     types.List   `tfsdk:"metadata_fetcher_order"`
+	ImageFetchers            types.List   `tfsdk:"image_fetchers"`
+	DisabledImageFetchers    types.List   `tfsdk:"disabled_image_fetchers"`
+	ImageFetcherOrder        types.List   `tfsdk:"image_fetcher_order"`
+}
+
+// planMetadataOptionsByItemType plans the attributes of each entry as the
+// plan modifiers of its schema do, but against the prior entry with its item
+// type.
+func planMetadataOptionsByItemType(ctx context.Context, config, plan, state types.List) (types.List, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	var c, p, s []metadataOptionsModel
+	if config.ElementsAs(ctx, &c, false).HasError() || plan.ElementsAs(ctx, &p, false).HasError() || len(c) != len(p) {
+		return plan, diags
+	}
+	if !state.IsNull() && !state.IsUnknown() && state.ElementsAs(ctx, &s, false).HasError() {
+		return plan, diags
+	}
+
+	for i := range p {
+		// Without an item type, an entry takes the one of the prior entry at
+		// its index, so its plan from that entry stands.
+		if c[i].ItemType.IsNull() {
+			continue
+		}
+		prior, found := priorMetadataOptions(s, i, c[i].ItemType)
+		fromPrior := func(configured, planned, prior types.List, sharedKeysChange bool) types.List {
+			switch {
+			case !configured.IsNull():
+				return planned
+			case found && !sharedKeysChange && !prior.IsNull():
+				return prior
+			case found && !sharedKeysChange && planned.IsNull():
+				// Only a plan that changes nothing holds a null: once
+				// anything changes, the framework plans every unset
+				// attribute unknown.
+				return planned
+			}
+			return types.ListUnknown(types.StringType)
+		}
+		e := c[i]
+		p[i].DisabledMetadataSavers = fromPrior(e.DisabledMetadataSavers, p[i].DisabledMetadataSavers, prior.DisabledMetadataSavers, false)
+		p[i].LocalMetadataReaderOrder = fromPrior(e.LocalMetadataReaderOrder, p[i].LocalMetadataReaderOrder, prior.LocalMetadataReaderOrder, false)
+		p[i].MetadataFetchers = fromPrior(e.MetadataFetchers, p[i].MetadataFetchers, prior.MetadataFetchers,
+			changes(e.DisabledMetadataFetchers, prior.DisabledMetadataFetchers) || changes(e.MetadataFetcherOrder, prior.MetadataFetcherOrder))
+		p[i].DisabledMetadataFetchers = fromPrior(e.DisabledMetadataFetchers, p[i].DisabledMetadataFetchers, prior.DisabledMetadataFetchers, changes(e.MetadataFetchers, prior.MetadataFetchers))
+		p[i].MetadataFetcherOrder = fromPrior(e.MetadataFetcherOrder, p[i].MetadataFetcherOrder, prior.MetadataFetcherOrder, changes(e.MetadataFetchers, prior.MetadataFetchers))
+		p[i].ImageFetchers = fromPrior(e.ImageFetchers, p[i].ImageFetchers, prior.ImageFetchers,
+			changes(e.DisabledImageFetchers, prior.DisabledImageFetchers) || changes(e.ImageFetcherOrder, prior.ImageFetcherOrder))
+		p[i].DisabledImageFetchers = fromPrior(e.DisabledImageFetchers, p[i].DisabledImageFetchers, prior.DisabledImageFetchers, changes(e.ImageFetchers, prior.ImageFetchers))
+		p[i].ImageFetcherOrder = fromPrior(e.ImageFetcherOrder, p[i].ImageFetcherOrder, prior.ImageFetcherOrder, changes(e.ImageFetchers, prior.ImageFetchers))
+	}
+
+	out, d := types.ListValueFrom(ctx, plan.ElementType(ctx), p)
+	diags.Append(d...)
+	return out, diags
+}
+
+// priorMetadataOptions prefers the prior entry at index when it has the item
+// type, so that a configuration holding an item type twice plans each entry
+// from its own prior values.
+func priorMetadataOptions(state []metadataOptionsModel, index int, itemType types.String) (metadataOptionsModel, bool) {
+	if index < len(state) && !state[index].ItemType.IsNull() && !itemType.IsUnknown() && strings.EqualFold(state[index].ItemType.ValueString(), itemType.ValueString()) {
+		return state[index], true
+	}
+	return entryWithType(state, itemType, func(e metadataOptionsModel) types.String { return e.ItemType })
 }
 
 func (r *SystemConfigurationResource) apply(ctx context.Context, data *SystemConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {

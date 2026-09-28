@@ -173,6 +173,115 @@ func TestUnitSystemConfigurationEnumValidators(t *testing.T) {
 	}
 }
 
+// testUnitMetadataOptions is an entry of itemType, or of none for "", whose
+// lists all hold lists.
+func testUnitMetadataOptions(itemType string, lists types.List) metadataOptionsModel {
+	typ := types.StringNull()
+	if itemType != "" {
+		typ = types.StringValue(itemType)
+	}
+	return metadataOptionsModel{
+		ItemType: typ, DisabledMetadataSavers: lists, LocalMetadataReaderOrder: lists,
+		MetadataFetchers: lists, DisabledMetadataFetchers: lists, MetadataFetcherOrder: lists,
+		ImageFetchers: lists, DisabledImageFetchers: lists, ImageFetcherOrder: lists,
+	}
+}
+
+func TestUnitPlanMetadataOptionsByItemType(t *testing.T) {
+	ctx := context.Background()
+	var resp resource.SchemaResponse
+	(&SystemConfigurationResource{}).Schema(ctx, resource.SchemaRequest{}, &resp)
+	nested, ok := resp.Schema.Attributes["metadata_options"].(rschema.ListNestedAttribute)
+	if !ok {
+		t.Fatalf("metadata_options attribute type = %T, want schema.ListNestedAttribute", resp.Schema.Attributes["metadata_options"])
+	}
+	list := func(entries ...metadataOptionsModel) types.List {
+		return testUnitList(t, nested.NestedObject.Type(), entries)
+	}
+	null, unknown := types.ListNull(types.StringType), types.ListUnknown(types.StringType)
+	// retyped is what the framework plans for an entry of itemType at the
+	// index of prior, which sets only the metadata fetchers given.
+	retyped := func(prior metadataOptionsModel, itemType string, metadataFetchers ...types.List) metadataOptionsModel {
+		prior.ItemType = types.StringValue(itemType)
+		for _, l := range metadataFetchers {
+			prior.MetadataFetchers = l
+		}
+		return prior
+	}
+
+	movie := testUnitMetadataOptions("Movie", testUnitStringList(t, "movie"))
+	movie.MetadataFetchers = testUnitStringList(t, "The Open Movie Database")
+	secondMovie := testUnitMetadataOptions("Movie", testUnitStringList(t, "second movie"))
+	series := testUnitMetadataOptions("Series", testUnitStringList(t, "series"))
+	nullImageFetchers := movie
+	nullImageFetchers.ImageFetchers = null
+
+	movieConfig := testUnitMetadataOptions("Movie", null)
+	movieConfig.MetadataFetchers = movie.MetadataFetchers
+	changedMovieConfig := testUnitMetadataOptions("Movie", null)
+	changedMovieConfig.MetadataFetchers = testUnitStringList(t, "TheMovieDb")
+	changedMovie := movie
+	changedMovie.MetadataFetchers = changedMovieConfig.MetadataFetchers
+	changedMovie.DisabledMetadataFetchers, changedMovie.MetadataFetcherOrder = unknown, unknown
+	movieWithUnknownImageFetchers := movie
+	movieWithUnknownImageFetchers.ImageFetchers = unknown
+
+	for name, c := range map[string]struct {
+		state, config, plan, want types.List
+	}{
+		"swapped entries": {
+			state:  list(movie, series),
+			config: list(testUnitMetadataOptions("Series", null), movieConfig),
+			plan:   list(retyped(movie, "Series"), retyped(series, "Movie", movieConfig.MetadataFetchers)),
+			want:   list(series, movie),
+		},
+		"a moved entry whose fetchers change": {
+			state:  list(movie, series),
+			config: list(testUnitMetadataOptions("Series", null), changedMovieConfig),
+			plan:   list(retyped(movie, "Series"), retyped(series, "Movie", changedMovieConfig.MetadataFetchers)),
+			want:   list(series, changedMovie),
+		},
+		"a new item type": {
+			state:  list(movie),
+			config: list(testUnitMetadataOptions("Book", null)),
+			plan:   list(retyped(movie, "Book")),
+			want:   list(testUnitMetadataOptions("Book", unknown)),
+		},
+		"an entry without an item type": {
+			state:  list(movie),
+			config: list(testUnitMetadataOptions("", null)),
+			plan:   list(movie),
+			want:   list(movie),
+		},
+		"an item type held twice": {
+			state:  list(movie, secondMovie),
+			config: list(testUnitMetadataOptions("Movie", null), testUnitMetadataOptions("Movie", null)),
+			plan:   list(movie, secondMovie),
+			want:   list(movie, secondMovie),
+		},
+		"a null prior list of a moved entry": {
+			state:  list(series, nullImageFetchers),
+			config: list(testUnitMetadataOptions("Movie", null), testUnitMetadataOptions("Series", null)),
+			plan:   list(retyped(series, "Movie"), retyped(nullImageFetchers, "Series")),
+			want:   list(movieWithUnknownImageFetchers, series),
+		},
+		"a null prior list in a plan that changes nothing": {
+			state:  list(nullImageFetchers),
+			config: list(movieConfig),
+			plan:   list(nullImageFetchers),
+			want:   list(nullImageFetchers),
+		},
+	} {
+		got, d := planMetadataOptionsByItemType(ctx, c.config, c.plan, c.state)
+		if d.HasError() {
+			t.Fatalf("%s: %v", name, d)
+		}
+		if !got.Equal(c.want) {
+			t.Errorf("%s: planned\n%s\nwant\n%s", name, got, c.want)
+		}
+	}
+}
+
 func TestUnitSystemConfigurationEntriesAndRenamedKeysCopyOnlyNonNullPriorValues(t *testing.T) {
 	ctx := context.Background()
 

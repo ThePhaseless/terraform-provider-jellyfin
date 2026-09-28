@@ -287,7 +287,7 @@ func TestAccUpgradeFromV038ThenInsertMetadataOptions(t *testing.T) {
 	movie := `{ item_type = "Movie", disabled_metadata_fetchers = ["The Open Movie Database"], metadata_fetcher_order = ["The Open Movie Database", "TheMovieDb"] }`
 	testAccUpgradeFromV038(t, testAccSystemConfigurationEntriesConfig(movie), resource.TestStep{
 		Config: testAccSystemConfigurationEntriesConfig(`{ item_type = "BoxSet", disabled_metadata_fetchers = [] }`, movie),
-		Check: testAccCheckMovieMetadataOptions(t, map[string][]string{
+		Check: testAccCheckMetadataOptions(t, "Movie", map[string][]string{
 			"DisabledMetadataFetchers": {"The Open Movie Database"},
 			"MetadataFetcherOrder":     {"The Open Movie Database", "TheMovieDb"},
 		}),
