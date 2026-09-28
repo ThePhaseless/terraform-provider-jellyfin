@@ -218,7 +218,7 @@ func (b *Binding) VersionErrors(ctx context.Context, cfg tfsdk.Config, version f
 		return diags
 	}
 	for _, g := range gated {
-		gap := VersionGap{Path: g.p, Key: g.f.key(), ServerVersion: ver}
+		gap := VersionGap{Path: g.p, Key: g.f.versionKey(), ServerVersion: ver}
 		switch {
 		case g.f.Since != "" && compareVersions(ver, g.f.Since) < 0:
 			gap.Since = g.f.Since
@@ -235,6 +235,20 @@ func (b *Binding) VersionErrors(ctx context.Context, cfg tfsdk.Config, version f
 		diags.AddAttributeError(g.p, summary, detail)
 	}
 	return diags
+}
+
+// versionKey is the key whose version gates f. A Complement has no key of its
+// own and takes its Since from a key it writes.
+func (f *Field) versionKey() string {
+	if len(f.KeyPath) > 0 {
+		return f.key()
+	}
+	for _, s := range f.Shares {
+		if s.Since == f.Since {
+			return s.key()
+		}
+	}
+	return f.Name
 }
 
 func (f *Field) genericVersionMessage(g VersionGap) (summary, detail string) {

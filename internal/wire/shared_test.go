@@ -292,6 +292,23 @@ func TestUnitComplementRejectsWhatItCannotWrite(t *testing.T) {
 	}
 }
 
+func TestUnitComplementVersionErrorNamesTheKeyItTakesItsVersionFrom(t *testing.T) {
+	b := sharedBinding(t)
+	model, d := b.Flatten(WithAvailable(context.Background(), offering(map[string][]string{"Movie": {"A"}}, new([]string))),
+		doc(t, `{"Opts": [{"ItemType": "Movie", "FetcherOrder": ["A"], "DisabledFetchers": []}]}`), types.ObjectNull(b.AttrTypes))
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	m := with(t, model, "opts[0].fetcher_order", types.ListNull(types.StringType))
+	m = with(t, m, "opts[0].disabled_fetchers", types.ListNull(types.StringType))
+	m = with(t, m, "types", types.ListNull(b.AttrTypes["types"].(types.ListType).ElemType))
+	diags := b.VersionErrors(context.Background(), configOf(t, sharedAttrs(), m), func() (string, error) { return "1.9", nil })
+	want := "opts[0].fetchers | Unsupported Jellyfin server version | opts[0].fetchers requires Jellyfin 2.0 or later: the server runs Jellyfin 1.9, which has no FetcherOrder field, so it would discard the value. Remove opts[0].fetchers from the configuration or upgrade the server."
+	if got := strings.Join(versionErrorLines(diags), "\n"); got != want {
+		t.Errorf("VersionErrors:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestUnitBindRejectsSharedKeysItCannotWrite(t *testing.T) {
 	neither := []Option{MergeByKey("types", "type"), NeverSent("enabled", "unbound"), NeverSent("opts.fetchers", "unbound")}
 	for name, c := range map[string]struct {
