@@ -17,14 +17,13 @@ var supportedJellyfinVersionEnv string
 var supportedSecurityPluginVersionEnv string
 
 // supportedJellyfinVersion returns the tested Jellyfin server version from the
-// embedded .env file. It trims whitespace and strips the JELLYFIN_VERSION= prefix.
+// embedded .env file.
 func supportedJellyfinVersion() string {
 	return parseVersionEnv(supportedJellyfinVersionEnv, "JELLYFIN_VERSION")
 }
 
 // supportedSecurityPluginVersion returns the tested JellyfinSecurity plugin
-// version from the embedded .env file. It trims whitespace and strips the
-// SECURITY_PLUGIN_VERSION= prefix.
+// version from the embedded .env file.
 func supportedSecurityPluginVersion() string {
 	return parseVersionEnv(supportedSecurityPluginVersionEnv, "SECURITY_PLUGIN_VERSION")
 }
@@ -44,8 +43,8 @@ func parseVersionEnv(content, key string) string {
 // compareDottedVersions compares dotted numeric versions a and b.
 // It returns -1 if a < b, 0 if a == b, and 1 if a > b.
 // Each segment contributes its leading integer (trailing non-digits ignored);
-// missing segments count as 0; no leading digit in the first segment means the
-// version is treated as 0.0.0.
+// missing segments count as 0; a version without a leading digit compares
+// equal to any other.
 func compareDottedVersions(a, b string) int {
 	if !hasLeadingDigit(a) || !hasLeadingDigit(b) {
 		return 0

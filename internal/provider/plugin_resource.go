@@ -170,9 +170,6 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 		)
 		return
 	}
-	// Resolve version: "supported" (or unset for known plugins) uses the
-	// hardcoded supported version; "latest" resolves the newest from the
-	// repository manifest; any other value is used as-is.
 	resolvedVersion, err := r.resolvePluginVersion(ctx, data.Name.ValueString(), data.Version)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to resolve plugin version", err.Error())
@@ -255,7 +252,6 @@ func (r *PluginResource) Read(ctx context.Context, req resource.ReadRequest, res
 		data.Version = types.StringValue(p.Version)
 	}
 
-	// Populate repository_url from available packages if not already set.
 	if data.RepositoryURL.IsNull() || data.RepositoryURL.ValueString() == "" {
 		repoURL := r.resolveRepositoryURL(ctx, data.Name.ValueString(), p.Version)
 		if repoURL != "" {
@@ -673,7 +669,6 @@ func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, 
 
 	switch {
 	case version.IsNull() || version.IsUnknown() || version.ValueString() == "":
-		// Unset: use supported for known plugins, latest for others.
 		if supported != "" {
 			return r.resolveSupportedBuild(ctx, name, supported)
 		}
@@ -692,8 +687,6 @@ func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, 
 		}
 		if supported != "" && latest != "" {
 			if c := compareDottedVersions(pluginRelease(latest), pluginRelease(supported)); c > 0 {
-				resp := "" // placeholder — warning is logged below
-				_ = resp
 				tflog.Warn(ctx, "Plugin version newer than supported", map[string]interface{}{
 					"plugin":    name,
 					"latest":    latest,

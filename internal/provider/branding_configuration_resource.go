@@ -158,10 +158,9 @@ func (r *BrandingConfigurationResource) Delete(_ context.Context, _ resource.Del
 }
 
 func (r *BrandingConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Singleton resource — the import ID is not used. Read will populate all fields.
-	// Set only the id: the framework types every other attribute from the
-	// schema, and the Read that follows an import fills them. Writing a
-	// zero-valued model here left list attributes without an element type.
+	// Singleton resource, so the import ID is not used. Set only the id: the
+	// framework types every other attribute from the schema, and the Read that
+	// follows an import fills them.
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("branding"))...)
 }
 

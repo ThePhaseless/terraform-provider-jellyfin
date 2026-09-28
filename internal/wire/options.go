@@ -163,7 +163,7 @@ func ReadMissingAs(attrPath string, v attr.Value) Option {
 
 // VersionMessage words the error VersionErrors reports for a configured value
 // of the attribute, which some Jellyfin version lacks, in place of the generic
-// wording, so a resource keeps the message its users already know.
+// wording.
 func VersionMessage(attrPath string, message func(VersionGap) (summary, detail string)) Option {
 	return func(o *options) { o.attr(attrPath).versionMsg = message }
 }

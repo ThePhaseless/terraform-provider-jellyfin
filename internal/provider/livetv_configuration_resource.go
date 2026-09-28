@@ -368,8 +368,8 @@ func (r *LiveTVConfigurationResource) Delete(_ context.Context, _ resource.Delet
 
 func (r *LiveTVConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Set only the id: the framework types every other attribute from the
-	// schema, and the Read that follows an import fills them. Writing a
-	// zero-valued model here left list attributes without an element type.
+	// schema, and the Read that follows an import fills them. A zero-valued
+	// model would leave list attributes without an element type.
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("livetv"))...)
 }
 

@@ -70,9 +70,8 @@ var userWire = sync.OnceValues(func() (*wire.Binding, error) {
 		wire.Key("is_administrator", "Policy.IsAdministrator"),
 		wire.Key("is_disabled", "Policy.IsDisabled"),
 		wire.Key("enable_all_folders", "Policy.EnableAllFolders"),
-		// Each has a default, so the plan always holds a value: reading a
-		// missing or null flag as null would plan a change where earlier
-		// releases, which read it as false, planned none.
+		// Each has a default, so the plan always holds a value: a missing or
+		// null flag reads as false, as reading it as null would plan a change.
 		wire.ReadMissingAs("is_administrator", types.BoolValue(false)),
 		wire.ReadMissingAs("is_disabled", types.BoolValue(false)),
 		wire.ReadMissingAs("enable_all_folders", types.BoolValue(false)),
@@ -534,7 +533,6 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		return
 	}
 
-	// Update password if changed.
 	if !data.Password.IsNull() && !data.Password.Equal(state.Password) {
 		if err := r.client.UpdateUserPassword(ctx, state.ID.ValueString(), "", data.Password.ValueString()); err != nil {
 			resp.Diagnostics.AddError("Failed to update user password", err.Error())

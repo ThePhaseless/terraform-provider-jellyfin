@@ -75,7 +75,7 @@ resource "jellyfin_library" "test" {
 				),
 			},
 			// Set the metadata fetcher order and an image option's minimum width,
-			// with path_infos and an empty image_options list elsewhere as in #116.
+			// with path_infos and an empty image_options list elsewhere.
 			{
 				Config: `
 resource "jellyfin_library" "test" {

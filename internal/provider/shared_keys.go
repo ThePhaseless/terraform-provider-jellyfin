@@ -140,8 +140,8 @@ func combinedStringList(desc string, replaced ...string) schema.ListAttribute {
 	}
 }
 
-// replacedBy deprecates a, a list attribute that replacement now writes the
-// Jellyfin key of.
+// replacedBy deprecates a, a list attribute whose Jellyfin key replacement
+// also writes.
 func replacedBy(a schema.ListAttribute, deprecation, replacement string) schema.ListAttribute {
 	a.Description += " " + deprecation
 	a.MarkdownDescription += " " + deprecation

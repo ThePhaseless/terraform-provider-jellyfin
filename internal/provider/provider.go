@@ -24,7 +24,6 @@ import (
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
-// Ensure JellyfinProvider satisfies various provider interfaces.
 var _ provider.Provider = &JellyfinProvider{}
 
 // Jellyfin can answer 503 briefly after the HTTP port opens while startup tasks finish.

@@ -99,8 +99,8 @@ func (c *Client) RemoveVirtualFolder(ctx context.Context, name string) error {
 // UpdateVirtualFolder updates the library options for a virtual folder.
 func (c *Client) UpdateVirtualFolder(ctx context.Context, itemID string, libraryOptions *LibraryOptions) error {
 	// POST /Library/VirtualFolders/LibraryOptions takes UpdateLibraryOptionsDto:
-	// the library's item id and the options object. Sending the options flat
-	// left Id empty and the server refused it ("Guid can't be empty").
+	// the library's item id and the options object. Options sent flat leave Id
+	// empty, which the server refuses ("Guid can't be empty").
 	rawOpts := "{}"
 	if libraryOptions != nil && libraryOptions.RawJSON != "" {
 		rawOpts = libraryOptions.RawJSON
@@ -123,7 +123,7 @@ func (c *Client) UpdateVirtualFolder(ctx context.Context, itemID string, library
 	return nil
 }
 
-// GetVirtualFolderLibraryOptions extracts the LibraryOptions from a VirtualFolder as a LibraryOptions struct.
+// GetLibraryOptions extracts the LibraryOptions from a VirtualFolder as a LibraryOptions struct.
 func (vf *VirtualFolder) GetLibraryOptions() *LibraryOptions {
 	return &LibraryOptions{
 		RawJSON: strings.TrimSpace(string(vf.LibraryOptions)),

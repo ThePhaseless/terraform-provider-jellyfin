@@ -262,7 +262,6 @@ func (r *ScheduledTaskResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
-	// Verify the task exists.
 	if _, err := r.client.GetScheduledTask(ctx, data.TaskID.ValueString()); err != nil {
 		resp.Diagnostics.AddError("Failed to find scheduled task", err.Error())
 		return

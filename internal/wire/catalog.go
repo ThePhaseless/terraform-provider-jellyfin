@@ -91,9 +91,9 @@ func envValue(content, key string) string {
 }
 
 // parseAPIGolden reads the "schema Object.Key: signature" lines of
-// jellyfin_api_schema.golden. A line without a key describes a schema that is
-// not an object, such as an enum, which properties referring to it take as
-// their scalar type.
+// jellyfin_api_schema.golden. A line without a key declares an object without
+// properties, or describes a schema that is not an object, such as an enum,
+// which properties referring to it take as their scalar type.
 func parseAPIGolden(text string) Index {
 	ix := Index{}
 	aliases := map[string]string{}

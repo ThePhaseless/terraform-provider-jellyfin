@@ -97,9 +97,10 @@ func (c *Client) UpdateSystemConfiguration(ctx context.Context, config *SystemCo
 	return nil
 }
 
-// RestartServer restarts the Jellyfin server. The HTTP API becomes unavailable
-// while the server restarts; callers should poll GetSystemInfo until
-// HasPendingRestart is false before issuing further requests.
+// RestartServer asks the Jellyfin server to restart and returns without
+// waiting. The server may keep answering for a while, and plugin updates can
+// set HasPendingRestart again soon after, so neither shows that the restart
+// is over; jellyfin_restart waits for several healthy answers in a row.
 func (c *Client) RestartServer(ctx context.Context) error {
 	if err := c.post(ctx, "/System/Restart", nil); err != nil {
 		return fmt.Errorf("restarting server: %w", err)

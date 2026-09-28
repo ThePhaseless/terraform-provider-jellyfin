@@ -18,8 +18,8 @@ import (
 // Codec converts between an attribute value and its JSON.
 //
 // Encode gets only known, non-null values. Decode gets only a present value
-// other than JSON null, and returns a null value for JSON it cannot read, which
-// is how every attribute read so far has treated a value of the wrong type.
+// other than JSON null, and returns a null value for JSON it cannot read, so
+// a value of the wrong type reads as null rather than failing the read.
 // prior is the attribute's value before the read: the plan after an apply, the
 // state on a refresh.
 type Codec interface {

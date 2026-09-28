@@ -105,7 +105,7 @@ func asksOfferedNames(b *wire.Binding) bool {
 
 // SharedKeys maps, by resource type, the dotted path of each attribute whose
 // Jellyfin keys another attribute of the same object also writes, such as a
-// deprecated attribute its replacement now writes, to the name of that
+// deprecated attribute whose keys its replacement writes, to the name of that
 // attribute.
 func SharedKeys(ctx context.Context) (map[string]map[string]string, error) {
 	out := map[string]map[string]string{}

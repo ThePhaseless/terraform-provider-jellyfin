@@ -41,7 +41,7 @@ var sharedKeys = sync.OnceValues(func() (map[string]map[string]string, error) {
 // resourceType into the configuration, where null reports whether an
 // attribute of the same object reads null. Sensitive values stay out of
 // resources.tf. A deprecated attribute leaves the imported value to the
-// attribute that now writes its Jellyfin keys, unless that one reads null,
+// attribute that also writes its Jellyfin keys, unless that one reads null,
 // as it does where it cannot write them.
 func rendered(resourceType, attrPath string, a schema.Attribute, null func(name string) bool) bool {
 	if !a.IsOptional() && !a.IsRequired() || a.IsSensitive() || slices.Contains(omittedAttributes[resourceType], attrPath) {

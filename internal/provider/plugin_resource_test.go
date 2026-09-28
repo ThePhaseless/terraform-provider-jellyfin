@@ -52,7 +52,7 @@ resource "jellyfin_plugin" "test" {
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
-			// Import by plugin *name* — the scenario from issue #84: the user
+			// Import by plugin *name*: the user
 			// runs `terraform import jellyfin_plugin.x "SSO-Auth"` using the
 			// plugin name, not the server-assigned UUID. ImportStateId overrides
 			// the default behaviour (which imports using the state ID) so we can
@@ -78,8 +78,8 @@ resource "jellyfin_plugin" "test" {
 					return id[:8] + "-" + id[8:12] + "-" + id[12:16] + "-" + id[16:20] + "-" + id[20:], nil
 				},
 			},
-			// Verify Create is idempotent when the plugin is already installed
-			// (issue #84): adding a second resource for the same plugin name
+			// Verify Create is idempotent when the plugin is already installed:
+			// adding a second resource for the same plugin name
 			// must not 404. Create detects the plugin is already present and
 			// reuses the existing install instead of POSTing again.
 			{
