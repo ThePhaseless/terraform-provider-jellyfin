@@ -42,7 +42,6 @@ resource "jellyfin_system_configuration" "test" {
 `,
 				ExpectError: regexp.MustCompile(`"cast_receiver_applications\[0\]\.name"\s+must\s+be\s+specified`),
 			},
-			// Create and Read.
 			{
 				Config: testAccSystemConfigurationResourceConfig("TestServer", systemConfigurationTestValues{
 					itemIDFlags:              false,
@@ -66,7 +65,6 @@ resource "jellyfin_system_configuration" "test" {
 					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "cast_receiver_applications.0.name", "Stable"),
 				),
 			},
-			// ImportState.
 			{
 				ResourceName:            "jellyfin_system_configuration.test",
 				ImportState:             true,

@@ -82,8 +82,6 @@ func (r *BrandingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 
 const splashscreenLocationUnsupportedMessage = "Jellyfin ignores a splash screen location in the branding configuration, so setting it is an error. The attribute will be removed in a future release."
 
-// splashscreenLocationValidator rejects a configured splashscreen_location:
-// Jellyfin 10.11 and 12 drop the key and read it back as null.
 var splashscreenLocationValidator = unsetValidator{
 	summary: "Unsupported branding option",
 	reason:  "Jellyfin ignores a splash screen location in the branding configuration, so the server would drop this value",
@@ -128,9 +126,6 @@ func (r *BrandingConfigurationResource) Delete(_ context.Context, _ resource.Del
 }
 
 func (r *BrandingConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Singleton resource, so the import ID is not used. Set only the id: the
-	// framework types every other attribute from the schema, and the Read that
-	// follows an import fills them.
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("branding"))...)
 }
 

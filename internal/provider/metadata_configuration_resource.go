@@ -111,9 +111,6 @@ func (r *MetadataConfigurationResource) Delete(_ context.Context, _ resource.Del
 }
 
 func (r *MetadataConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Singleton resource, so the import ID is not used. Set only the id: the
-	// framework types every other attribute from the schema, and the Read that
-	// follows an import fills them.
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("metadata"))...)
 }
 

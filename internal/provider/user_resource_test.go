@@ -37,14 +37,12 @@ func TestAccUserResource(t *testing.T) {
 					resource.TestCheckNoResourceAttr("jellyfin_user.test", "policy.max_parental_rating"),
 				),
 			},
-			// ImportState.
 			{
 				ResourceName:            "jellyfin_user.test",
 				ImportState:             true,
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"password"},
 			},
-			// Update.
 			{
 				Config: testAccUserResourceConfig("testuser1_updated"),
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -288,8 +286,7 @@ func testAccPreCheckJellyfinVersionAtLeast(t *testing.T, minVersion string) {
 }
 
 // testAccSetUserSubtitleLanguage changes a per-user setting of
-// jellyfin_user.test outside Terraform, so a later step can check that the
-// provider leaves it alone.
+// jellyfin_user.test outside Terraform.
 func testAccSetUserSubtitleLanguage(t *testing.T, language string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()

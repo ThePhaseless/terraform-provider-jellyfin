@@ -28,7 +28,6 @@ import (
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
-// The goldens live next to internal/wire, which embeds them.
 const (
 	jellyfinAPISchemaGolden      = "../wire/schema/jellyfin_api_schema.golden"
 	jellyfinAPISchemaFloorGolden = "../wire/schema/jellyfin_api_schema_floor.golden"
@@ -117,8 +116,6 @@ TestUnitJellyfinSecurityWriteKeepsTheServedShape fails while a rebuilt OIDC
 provider, user email or role mapping drops a key the golden lists.`,
 }
 
-// The spec types /System/Configuration/{key} as an opaque blob, so the schema
-// behind each key the client reads or writes has to be named by hand.
 var namedConfigurationSchemas = map[string]string{
 	"branding": "BrandingOptionsDto",
 	"encoding": "EncodingOptions",
@@ -127,9 +124,6 @@ var namedConfigurationSchemas = map[string]string{
 	"network":  "NetworkConfiguration",
 }
 
-// The provider reads only AccessToken from AuthenticationResult; expanding its
-// SessionInfo would drag the whole playback model (BaseItemDto,
-// MediaSourceInfo, DeviceProfile, ...) into the guard.
 var unexpandedSchemas = map[string]bool{
 	"SessionInfoDto": true,
 }
@@ -210,8 +204,7 @@ func testAccReducedAPISchema(t *testing.T, c *client.Client) []string {
 }
 
 // reduceOpenAPISpec keeps only the operations the client calls and the schemas
-// they reach, so a Jellyfin release trips the guard only when it changes
-// something the provider depends on.
+// they reach.
 func reduceOpenAPISpec(spec string, calls []apiCall) ([]string, error) {
 	var doc struct {
 		Paths      map[string]map[string]json.RawMessage `json:"paths"`
@@ -443,9 +436,7 @@ func schemaClosure(schemas map[string]json.RawMessage, roots map[string]bool) ([
 	return out, nil
 }
 
-// schemaLines puts each property of an object schema on a line of its own, so
-// a changed field is one short line in the golden diff rather than an edit
-// inside a line of several kilobytes.
+// schemaLines puts each property of an object schema on a line of its own.
 func schemaLines(name string, s map[string]json.RawMessage, refs map[string]bool) ([]string, error) {
 	rawProps, ok := s["properties"]
 	if !ok || jsonString(s, "type") != "object" {
@@ -602,7 +593,7 @@ func typeSignature(s map[string]json.RawMessage, refs map[string]bool) (string, 
 }
 
 // clientAPICalls lists the requests internal/client makes, read from its
-// source so the guard follows the client without a hand-kept endpoint list.
+// source.
 func clientAPICalls(dir string) ([]apiCall, error) {
 	names, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {

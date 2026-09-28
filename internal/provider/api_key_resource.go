@@ -96,9 +96,8 @@ func (r *APIKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	// Jellyfin does not return the key it creates, so Create finds it by
-	// comparing the keys listed before and after. Another Create running
-	// meanwhile would add a key of its own to that difference.
+	// Jellyfin does not return the new key, so Create diffs the listings before
+	// and after; a concurrent Create would pollute that diff.
 	apiKeyCreateMu.Lock()
 	defer apiKeyCreateMu.Unlock()
 
@@ -135,9 +134,8 @@ func (r *APIKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 // the key it made by comparing the keys listed before and after.
 var apiKeyCreateMu sync.Mutex
 
-// createdAPIKey returns the key that after lists and before does not: the one
-// named appName, or else the only new one, since another client can create a
-// key meanwhile. It returns nil when neither identifies the key.
+// createdAPIKey returns the key after lists and before does not: the one
+// named appName, else the only new one, else nil.
 func createdAPIKey(before, after []client.APIKey, appName string) *client.APIKey {
 	existing := make(map[string]bool, len(before))
 	for _, k := range before {

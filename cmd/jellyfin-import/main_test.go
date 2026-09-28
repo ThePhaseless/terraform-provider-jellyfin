@@ -1280,13 +1280,8 @@ func terraformFmtCheck(t *testing.T, dir string) {
 	}
 }
 
-// seedFixtures gives the server what the importer has to handle for the
-// generated files to validate, and puts the server back when the test ends:
-// strings that HCL would interpolate or reject unless escaped, metadata
-// options for an item type Jellyfin lists no fetchers for, API keys whose
-// names sanitize to the same resource name or to its suffixed form, and a
-// music videos library and one without a collection type, which the importer
-// writes as mixed.
+// seedFixtures gives the server the cases the importer must handle for the
+// generated files to validate, and restores the server when the test ends.
 func seedFixtures(t *testing.T, c *client.Client) {
 	t.Helper()
 

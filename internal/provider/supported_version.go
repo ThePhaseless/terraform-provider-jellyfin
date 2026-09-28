@@ -28,9 +28,8 @@ func supportedSecurityPluginVersion() string {
 	return release.FromEnv(supportedSecurityPluginVersionEnv, "SECURITY_PLUGIN_VERSION")
 }
 
-// versionNewerWarning returns a detail message when installed > supported.
-// The ok return value is true when installed is newer and the caller should
-// surface the detail as a warning.
+// versionNewerWarning returns the detail to surface as a warning, and ok true,
+// when installed is newer than supported.
 func versionNewerWarning(what, installed, supported string) (detail string, ok bool) {
 	if release.Compare(installed, supported) <= 0 {
 		return "", false

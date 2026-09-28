@@ -11,10 +11,9 @@ import (
 	"sync"
 )
 
-// pluginChangeMu serialises plugin installs and uninstalls. Jellyfin's plugin
-// manager adds and removes entries in an unsynchronised list, so overlapping
-// requests fail with ArgumentOutOfRangeException or a missing meta.json and can
-// leave that list inconsistent until the server restarts.
+// pluginChangeMu serialises plugin installs and uninstalls: overlapping
+// requests race Jellyfin's unsynchronised plugin list, failing or corrupting it
+// until restart.
 var pluginChangeMu sync.Mutex
 
 // PluginRepository represents a plugin repository.

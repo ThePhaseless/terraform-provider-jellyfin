@@ -123,11 +123,7 @@ func (r *SystemConfigurationResource) Metadata(_ context.Context, req resource.M
 
 func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	// UseStateForUnknown also copies a null prior value, and a planned null
-	// fails the apply when the server returns a value. That happens for an
-	// entry a list gains in the plan, whose prior values are all null while
-	// the server fills in what the entry leaves out, and for the three
-	// attributes whose keys 0.3.7 and earlier misspelt, which state from
-	// those versions holds as null.
+	// fails the apply when the server returns a value.
 	nonNullStateString := func(a schema.StringAttribute) schema.StringAttribute {
 		a.PlanModifiers = []planmodifier.String{stringplanmodifier.UseNonNullStateForUnknown()}
 		return a
@@ -277,10 +273,8 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 			"cast_receiver_applications": schema.ListNestedAttribute{
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: castReceiverApplicationAttributes,
-					// Required on id and name would make Terraform propose null for
-					// them whenever the list is left out of the configuration, so
-					// every plan would differ from state; the element validator
-					// enforces them only for entries that are configured.
+					// Not Required on id and name: Terraform would propose null for them when the
+					// list is left out, so plans would never be empty.
 					Validators: []validator.Object{
 						objectvalidator.AlsoRequires(path.MatchRelative().AtName("id"), path.MatchRelative().AtName("name")),
 					},
@@ -355,10 +349,6 @@ func (r *SystemConfigurationResource) Delete(_ context.Context, _ resource.Delet
 }
 
 func (r *SystemConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Singleton resource, so the import ID is not used. Set only the id: the
-	// framework types every other attribute from the schema, and the Read that
-	// follows an import fills them. A zero-valued model would leave list
-	// attributes without an element type.
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("system"))...)
 }
 
@@ -408,9 +398,8 @@ type metadataOptionsModel struct {
 	ImageFetcherOrder        types.List   `tfsdk:"image_fetcher_order"`
 }
 
-// planMetadataOptionsByItemType plans the attributes of each entry as the
-// plan modifiers of its schema do, but against the prior entry with its item
-// type.
+// planMetadataOptionsByItemType plans each entry's attributes as its schema's
+// plan modifiers do, but against the prior entry with its item type.
 func planMetadataOptionsByItemType(ctx context.Context, config, plan, state types.List) (types.List, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	var c, p, s []metadataOptionsModel
@@ -435,9 +424,8 @@ func planMetadataOptionsByItemType(ctx context.Context, config, plan, state type
 			case found && !sharedKeysChange && !prior.IsNull():
 				return prior
 			case found && !sharedKeysChange && planned.IsNull():
-				// Only a plan that changes nothing holds a null: once
-				// anything changes, the framework plans every unset
-				// attribute unknown.
+				// Only a plan that changes nothing holds a null; otherwise the
+				// framework plans every unset attribute unknown.
 				return planned
 			}
 			return types.ListUnknown(types.StringType)
@@ -460,9 +448,8 @@ func planMetadataOptionsByItemType(ctx context.Context, config, plan, state type
 	return out, diags
 }
 
-// priorMetadataOptions prefers the prior entry at index when it has the item
-// type, so that a configuration holding an item type twice plans each entry
-// from its own prior values.
+// priorMetadataOptions prefers the prior entry at index when it has the item type,
+// so an item type held twice plans each entry from its own prior values.
 func priorMetadataOptions(state []metadataOptionsModel, index int, itemType types.String) (metadataOptionsModel, bool) {
 	if index < len(state) && !state[index].ItemType.IsNull() && !itemType.IsUnknown() && strings.EqualFold(state[index].ItemType.ValueString(), itemType.ValueString()) {
 		return state[index], true

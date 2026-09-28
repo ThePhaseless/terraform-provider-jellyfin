@@ -20,7 +20,6 @@ func TestAccLiveTVConfigurationResource(t *testing.T) {
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Create and Read.
 			{
 				Config: `
 resource "jellyfin_livetv_configuration" "test" {
@@ -82,7 +81,6 @@ resource "jellyfin_livetv_configuration" "test" {
 					resource.TestCheckResourceAttr("jellyfin_livetv_configuration.test", "listing_providers.0.channel_mappings.0.value", "one"),
 				),
 			},
-			// ImportState.
 			{
 				ResourceName:      "jellyfin_livetv_configuration.test",
 				ImportState:       true,
@@ -240,9 +238,8 @@ resource "jellyfin_livetv_configuration" "test" {
 	})
 }
 
-// Jellyfin rewrites MediaLocationsCreated from an async handler that can still
-// be running after the configuration POST returns, so a refresh straight after
-// an apply may read the list from before it.
+// Jellyfin rewrites MediaLocationsCreated asynchronously after the POST
+// returns, so a refresh right after apply may read the old list.
 func testAccWaitForLiveTVMediaLocations(t *testing.T, want ...string) resource.TestCheckFunc {
 	t.Helper()
 

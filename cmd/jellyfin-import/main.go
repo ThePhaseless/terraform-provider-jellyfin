@@ -130,8 +130,6 @@ func (g *generator) warnf(format string, args ...any) {
 
 // uniqueName returns a Terraform resource name that no earlier call returned
 // for resourceType, appending the lowest numeric suffix that is still free.
-// A suffixed name has to be checked as well, because another name can
-// sanitize to it.
 func (g *generator) uniqueName(resourceType, baseName string) string {
 	name := baseName
 	for i := 1; g.usedNames[resourceType+"."+name]; i++ {
@@ -275,9 +273,6 @@ func (g *generator) generateLibraries() ([]string, []string, error) {
 
 	var imports, resources []string
 	for _, folder := range folders {
-		// collection_type is checked against a fixed list and replaces the
-		// library when it changes, so for any other type no configuration both
-		// passes validation and matches the imported state.
 		collectionType, accepted := provider.LibraryCollectionType(folder.CollectionType)
 		if !accepted {
 			g.warnf("skipping library %q: jellyfin_library does not accept its collection type %q", folder.Name, folder.CollectionType)
@@ -336,8 +331,6 @@ func (g *generator) generatePluginRepositories() ([]string, []string, error) {
 
 	var imports, resources []string
 	for _, repo := range repos {
-		// jellyfin_plugin_repository imports by name, so it cannot tell such
-		// repositories apart.
 		if named[repo.Name] > 1 {
 			g.warnf("skipping plugin repository %q at %s: %d repositories have that name, and jellyfin_plugin_repository imports by name; rename them to import them", repo.Name, repo.URL, named[repo.Name])
 			continue
@@ -420,9 +413,8 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 			continue
 		}
 
-		// A key selects the task only when it is set and no other task has it.
-		ref, byKey := task.ID, task.Key != "" && tasksWithKey[task.Key] == 1
-		if byKey {
+		ref, keySelectsTask := task.ID, task.Key != "" && tasksWithKey[task.Key] == 1
+		if keySelectsTask {
 			ref = task.Key
 		}
 		name := g.uniqueName("jellyfin_scheduled_task", sanitizeName(task.Name))
@@ -439,7 +431,7 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 		if err != nil {
 			return nil, nil, fmt.Errorf("formatting task %s: %w", task.ID, err)
 		}
-		if !byKey {
+		if !keySelectsTask {
 			delete(attrs, "key")
 			attrs["task_id"] = hclString(task.ID)
 		}
@@ -493,8 +485,8 @@ func sanitizeName(name string) string {
 	if result == "" {
 		result = "unnamed"
 	}
-	// Ensure it starts with a letter.
-	if result[0] >= '0' && result[0] <= '9' {
+	startsWithDigit := result[0] >= '0' && result[0] <= '9'
+	if startsWithDigit {
 		result = "r_" + result
 	}
 	return result

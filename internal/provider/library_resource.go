@@ -98,9 +98,8 @@ var libraryWire = sync.OnceValues(func() (*wire.Binding, error) {
 
 func (r *LibraryResource) Wire() (*wire.Binding, error) { return libraryWire() }
 
-// libraryOptionsWire writes POST /Library/VirtualFolders/LibraryOptions and
-// reads the options of the library listing; the rest of the library comes
-// from the typed folder.
+// libraryOptionsWire binds POST /Library/VirtualFolders/LibraryOptions and
+// the listing's options; the rest comes from the typed folder.
 var libraryOptionsWire = sync.OnceValues(func() (*wire.Binding, error) {
 	b, err := libraryWire()
 	if err != nil {
@@ -256,10 +255,6 @@ func LibraryCollectionType(served string) (string, bool) {
 	return collectionType, slices.Contains(collectionTypes, collectionType)
 }
 
-// Jellyfin gives a library created without a collection type the same null
-// collection type as one created as mixed, and only its library listing tells
-// them apart, so reading it as an empty string would force a replacement that
-// changes nothing.
 func flattenCollectionType(collectionType string) types.String {
 	if collectionType == "" {
 		return types.StringValue("mixed")
@@ -267,18 +262,10 @@ func flattenCollectionType(collectionType string) types.String {
 	return types.StringValue(collectionType)
 }
 
-// Earlier provider versions stored a library without a collection type as "".
-// A refresh reads that as mixed, but a plan that skips the refresh, as
-// -refresh=false does, still compares mixed against "", and replacing the
-// library there would delete and recreate it for a collection type it already
-// has.
 func collectionTypeRequiresReplace(_ context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
 	resp.RequiresReplace = !req.StateValue.Equal(types.StringValue("")) || !req.PlanValue.Equal(types.StringValue("mixed"))
 }
 
-// Jellyfin lists a library's locations sorted, so the paths read back in
-// that order whatever order they were created in. A read keeps the prior
-// order of the same paths, and only other paths replace the library.
 func pathsRequireReplace(ctx context.Context, req planmodifier.ListRequest, resp *listplanmodifier.RequiresReplaceIfFuncResponse) {
 	var planned, prior []string
 	if req.PlanValue.ElementsAs(ctx, &planned, false).HasError() || req.StateValue.ElementsAs(ctx, &prior, false).HasError() {
@@ -431,11 +418,6 @@ func pathInfoAttributes() map[string]schema.Attribute {
 
 const networkPathRemovedMessage = "Jellyfin 10.10 removed network paths, so setting it is an error on Jellyfin 10.10 and later."
 
-// Jellyfin before 10.10 keeps a network path set in its web UI, which planning
-// the prior value carries into the options apply writes back. Unlike
-// UseStateForUnknown, which leaves the value unknown when the library is
-// created, this plans null there too: apply then sends no network path and the
-// server has none, so an unknown value would only show as known after apply.
 type priorValueEvenIfNull struct{}
 
 func (priorValueEvenIfNull) Description(context.Context) string {
@@ -452,9 +434,6 @@ func (priorValueEvenIfNull) PlanModifyString(_ context.Context, req planmodifier
 	}
 }
 
-// Attributes with no Jellyfin library option behind them stay in the schema,
-// deprecated, so configurations that leave them unset keep working until
-// they are removed.
 const unsupportedLibraryOptionMessage = "Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release."
 
 func typeOptionsAttributes() map[string]schema.Attribute {
@@ -488,10 +467,6 @@ func typeOptionsAttributes() map[string]schema.Attribute {
 
 const similarItemsNote = "Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error."
 
-// Jellyfin enables what the list names but ranks by the order key alone, with
-// the names it leaves out last, so the list sets the order too. The list reads
-// back the enabled key alone: reading the order into it would plan a change
-// for every configuration that keeps the two keys in different orders.
 func ordersNote(kind, orderAttr string) string {
 	return fmt.Sprintf("Unless `%[1]s` is set, changing the list also sets Jellyfin's %[2]s order: these names, then the other names the server's order held. The list does not read that order back, so while it stays as it is, Jellyfin keeps the order it has, including one set by `%[1]s` or outside Terraform.", orderAttr, kind)
 }
@@ -554,9 +529,8 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	// library_options is computed, so a plan without it carries an unknown
-	// object, which the pointer field of the model cannot hold. Read the
-	// attributes one by one and convert the options only when they are known.
+	// library_options may be unknown, which the model's pointer field cannot
+	// hold, so read the attributes one by one.
 	var data LibraryResourceModel
 	var opts types.Object
 	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("name"), &data.Name)...)
@@ -581,21 +555,12 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	// The options are written once the library exists, where a failure taints
-	// it and every later apply replaces it only to fail again. Writing them
-	// into an empty document first catches here what does not depend on the
-	// options the server serves, such as a subtitle fetcher it does not
-	// offer. The plan cannot check that: a plugin the same apply installs
-	// offers its fetchers only after the plan.
 	ctx = wire.WithAvailable(ctx, newOfferedProviders(r.client).forLibrary(data.CollectionType.ValueString()))
 	if d := b.OverlayModel(ctx, map[string]json.RawMessage{}, &data); d.HasError() {
 		resp.Diagnostics.Append(d...)
 		return
 	}
 
-	// Jellyfin does not refuse a duplicate name: it adds the library as
-	// "<name>2", and the lookup by name below would then adopt the existing
-	// library while the new one is left unmanaged.
 	switch _, err := r.findFolder(ctx, data.Name.ValueString()); {
 	case err == nil:
 		resp.Diagnostics.AddError(
@@ -619,9 +584,8 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	// Track the library before its options are applied: a failure below then
-	// leaves it in state as tainted, to be replaced, rather than on the server
-	// unmanaged, where the next create would refuse the duplicate name.
+	// Track the library before applying its options: a failure then taints it
+	// in state instead of leaving it unmanaged.
 	tracked := LibraryResourceModel{
 		ID:             types.StringValue(folder.Name),
 		Name:           data.Name,
@@ -685,12 +649,6 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	// With the options unchanged, the update can only be collection_type going
-	// from the "" earlier versions stored to mixed, or the paths changing
-	// their order, which the server already has. Writing the options anyway
-	// would store them as the server reads them, and a plan made without a
-	// refresh, which carries the options from state written by an older
-	// version, need not match that.
 	var plannedOptions, priorOptions types.Object
 	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("library_options"), &plannedOptions)...)
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("library_options"), &priorOptions)...)
@@ -775,10 +733,8 @@ func (r *LibraryResource) Delete(ctx context.Context, req resource.DeleteRequest
 	}
 }
 
-// unchangedOptions reports whether planned holds the prior options. An
-// attribute planned unknown over a null prior counts as unchanged: state from
-// a release without the attribute holds it as null, and a plan that skips
-// the refresh leaves such a computed attribute unknown.
+// unchangedOptions reports whether planned holds the prior options, counting
+// an attribute planned unknown over a null prior as unchanged.
 func unchangedOptions(planned, prior types.Object) bool {
 	if planned.IsNull() || planned.IsUnknown() || prior.IsNull() || prior.IsUnknown() {
 		return planned.Equal(prior)
@@ -813,8 +769,7 @@ func (r *LibraryResource) findFolder(ctx context.Context, name string) (*client.
 }
 
 // missingPathsHint names the paths the server cannot find when it rejected a
-// create with a 400. Jellyfin answers a missing path with only "Error
-// processing request." and writes the reason to its own log.
+// create with a 400.
 func (r *LibraryResource) missingPathsHint(ctx context.Context, createErr error, paths []string) string {
 	var httpErr *client.HTTPError
 	if !errors.As(createErr, &httpErr) || httpErr.StatusCode != http.StatusBadRequest {
@@ -850,10 +805,6 @@ func (r *LibraryResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	if b == nil {
 		return
 	}
-	// The version check runs at plan time because a server that lacks an
-	// option drops it only after the library is created, so the failure would
-	// taint the new library and every later apply would replace it before
-	// failing again.
 	resp.Diagnostics.Append(checkServerHasFields(ctx, r.client, b, req.Config)...)
 	if resp.Diagnostics.HasError() || req.State.Raw.IsNull() {
 		return
@@ -955,9 +906,8 @@ func entryWithType[T any](entries []T, typ types.String, typeOf func(T) types.St
 	return zero, false
 }
 
-// orderFromPrior plans an unset order attribute unknown while its list
-// attribute is configured to other names than the prior entry's, as the list
-// then writes the order.
+// orderFromPrior plans an unset order unknown while its list is configured
+// to other names than the prior entry's, as the list then writes it.
 func orderFromPrior(configuredList, priorList, configured, planned, prior types.List, found bool) types.List {
 	if configured.IsNull() && !configuredList.IsNull() && (!found || !configuredList.Equal(priorList)) {
 		return types.ListUnknown(types.StringType)

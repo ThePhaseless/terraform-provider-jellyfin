@@ -261,12 +261,9 @@ func normalizeGUID(s string) string {
 	return strings.ToLower(strings.ReplaceAll(s, "-", ""))
 }
 
-// samePluginGUIDPlanModifier plans the plugin_id in state when the
-// configuration spells the same GUID another way. jellyfin_plugin's id and GET
-// /Plugins use the dash-free spelling while a GUID copied from elsewhere, such
-// as an import ID, often has dashes, and without this a change of spelling
-// would replace the resource. Terraform accepts a prior value in place of a
-// configured one the provider treats as equal.
+// samePluginGUIDPlanModifier plans the state's plugin_id when the configuration
+// spells the same GUID another way, so a dashed GUID, as in an import ID, does
+// not replace the resource.
 type samePluginGUIDPlanModifier struct{}
 
 func (samePluginGUIDPlanModifier) Description(context.Context) string {

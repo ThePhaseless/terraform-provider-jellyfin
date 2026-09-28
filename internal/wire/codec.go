@@ -260,8 +260,7 @@ func (c delimitedCodec) Decode(_ context.Context, raw json.RawMessage, _ attr.Va
 }
 
 // defaultCodec picks the codec an attribute of type t gets for property p, or
-// fails when the two do not match without a declared codec. A legacy key has
-// no property in the pinned golden, so only its attribute type counts.
+// fails without a declared codec; a legacy key counts only its attribute type.
 func defaultCodec(t attr.Type, p Prop, legacy bool) (Codec, error) {
 	// fits reports whether the property is a list or not, as list says, of one
 	// of the scalars; a legacy key fits whatever the attribute's type.

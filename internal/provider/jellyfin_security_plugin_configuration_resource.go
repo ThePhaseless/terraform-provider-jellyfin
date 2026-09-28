@@ -136,28 +136,22 @@ type JellyfinSecurityPluginConfigurationResourceModel struct {
 	OnboardingPasswordRequireSymbol    types.Bool   `tfsdk:"onboarding_password_require_symbol"`
 }
 
-// The plugin's golden has no older release to derive a Since from, so this
-// binding gates nothing on the plugin's version. No attribute claims the
-// plugin's RequireForAllUsers, a legacy alias it keeps for
-// EnforcementScope=All, so every write sends it back as served.
 var securityPluginWire = sync.OnceValues(func() (*wire.Binding, error) {
 	opts := []wire.Option{
 		wire.Identity("id", "plugin_id"),
 		wire.CarryServed("oidc_providers", "CreatedAt", "id"),
 		wire.WithCodec("enrollment_deadline", sameInstantCodec{}),
-		// The plugin leaves out a deadline it has none of, which then reads
-		// as the empty string that clears one.
 		wire.ReadMissingAs("enrollment_deadline", types.StringValue("")),
 	}
 	for attrPath, sep := range oidcDelimited {
 		opts = append(opts, wire.Delimited(attrPath, sep))
 	}
-	// The plugin leaves these out when false.
-	for _, name := range []string{
+	omittedWhenFalse := []string{
 		"allow_indefinite_trust", "onboarding_password_require_uppercase",
 		"onboarding_password_require_lowercase", "onboarding_password_require_digit",
 		"onboarding_password_require_symbol",
-	} {
+	}
+	for _, name := range omittedWhenFalse {
 		opts = append(opts, wire.ReadMissingAs(name, types.BoolValue(false)))
 	}
 	return wire.Bind(schemaOf(&JellyfinSecurityPluginConfigurationResource{}), wire.SecurityPluginRoot, opts...)
@@ -217,10 +211,8 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 		return a
 	}
 
-	// Attributes of list elements take no UseStateForUnknown, which pairs
-	// elements by index, so that removing or reordering an element would plan
-	// another element's values, secrets included, for it. The lists fill the
-	// unknowns of each element from the prior element with the same key.
+	// No UseStateForUnknown on element attributes: it pairs by index, so a
+	// reorder would plan another element's values, secrets included.
 	elementSensitiveString := func(desc string) schema.StringAttribute {
 		a := sensitiveString(desc)
 		a.PlanModifiers = nil
@@ -231,8 +223,6 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 	enrollmentDeadline.Validators = []validator.String{
 		stringvalidator.RegexMatches(isoDateTimePattern, "must be an ISO 8601 date-time such as 2030-01-01T00:00:00Z, or empty"),
 	}
-	// State from before a missing deadline read as "" holds it as null, which
-	// UseStateForUnknown would plan, although apply reads "".
 	enrollmentDeadline.PlanModifiers = []planmodifier.String{stringplanmodifier.UseNonNullStateForUnknown(), sameInstantPlanModifier{}}
 
 	resp.Schema = schema.Schema{
@@ -492,8 +482,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) ImportState(ctx context.Co
 }
 
 // securityPlugin reports whether GET /Plugins lists the JellyfinSecurity
-// plugin, and the version of it that jellyfin_plugin reads, which leaves out
-// a version Jellyfin deletes at the next restart.
+// plugin, and the version jellyfin_plugin reads for it.
 func (r *JellyfinSecurityPluginConfigurationResource) securityPlugin(ctx context.Context) (installed bool, version string, err error) {
 	plugins, err := r.client.GetInstalledPlugins(ctx)
 	if err != nil {
@@ -576,8 +565,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) read(ctx context.Context, 
 }
 
 // keepSameInstant returns prior when served names the same instant, so a
-// configured date-time survives the server rewriting it in .NET's round-trip
-// layout (2030-01-01T00:00:00Z comes back as 2030-01-01T00:00:00.0000000Z).
+// configured date-time survives .NET's round-trip rewrite.
 func keepSameInstant(prior, served types.String) types.String {
 	if sameInstant(prior, served) {
 		return prior
@@ -622,8 +610,7 @@ func (sameInstantCodec) Decode(_ context.Context, raw json.RawMessage, prior att
 }
 
 // sameInstantPlanModifier plans the prior value when the configuration names
-// the same instant. An imported or server-side value is stored in .NET's
-// layout, which would otherwise show as a diff against the configured spelling.
+// the same instant.
 type sameInstantPlanModifier struct{}
 
 func (sameInstantPlanModifier) Description(context.Context) string {

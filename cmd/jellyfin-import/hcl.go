@@ -20,9 +20,8 @@ func hclObject(attrs map[string]string, depth int) string {
 	return b.String()
 }
 
-// writeAttributes writes attrs sorted by name, aligning the equals signs the
-// way terraform fmt does: across each run of consecutive single-line values,
-// which a multi-line value ends without being aligned itself.
+// writeAttributes writes attrs sorted, aligning "=" like terraform fmt across
+// each run of single-line values.
 func writeAttributes(b *strings.Builder, attrs map[string]string, indent string) {
 	keys := sortedKeys(attrs)
 	for start := 0; start < len(keys); {
@@ -41,9 +40,8 @@ func writeAttributes(b *strings.Builder, attrs map[string]string, indent string)
 	}
 }
 
-// hclString quotes s as an HCL string literal, escaping control characters
-// and the ${ and %{ template introducers, which HCL would otherwise
-// interpolate.
+// hclString quotes s as an HCL literal, escaping control characters and the
+// ${ / %{ introducers.
 func hclString(s string) string {
 	var b strings.Builder
 	b.WriteByte('"')

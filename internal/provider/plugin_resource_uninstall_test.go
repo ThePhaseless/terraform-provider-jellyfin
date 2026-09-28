@@ -24,12 +24,10 @@ import (
 
 const bookshelfID = "9c4e63f1031b4f25988b4f7d78a8b53e"
 
-// fakePluginServer stands in for Jellyfin's plugin endpoints. DELETE
-// /Plugins/{id}/{version} removes that version, answers 204 without removing
-// anything when users may not uninstall it, as Jellyfin does for a plugin it
-// bundles, and 404 when it is not listed, and any install or uninstall
-// answers 400 while another one is in flight, as Jellyfin's unsynchronised
-// plugin list can.
+const requestOverlapWindow = 20 * time.Millisecond
+
+// fakePluginServer fakes Jellyfin's plugin endpoints: versioned DELETE (204
+// no-op for bundled, 404 unlisted), 400 on overlap.
 type fakePluginServer struct {
 	mu          sync.Mutex
 	plugins     []client.InstalledPlugin
@@ -74,8 +72,7 @@ func (f *fakePluginServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.maxInFlight = max(f.maxInFlight, f.inFlight)
 		f.mu.Unlock()
 
-		// Long enough for requests sent without waiting on each other to overlap.
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(requestOverlapWindow)
 
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -157,7 +154,6 @@ func TestUnitPluginInstallsAndUninstallsDoNotOverlap(t *testing.T) {
 	ctx := context.Background()
 	var wg sync.WaitGroup
 	for i := range 8 {
-		// Separate clients, as separate provider instances in one process have.
 		c := client.NewClient(server.URL, "test-key")
 		wg.Go(func() {
 			var err error
@@ -356,9 +352,8 @@ func TestUnitPluginConcurrentUninstallsOfOnePluginSucceed(t *testing.T) {
 	}
 }
 
-// replacePluginVersionFirst creates a Bookshelf 13.0.0.0 resource through
-// creator and then destroys a Bookshelf 12.0.0.0 resource through destroyer,
-// the order create_before_destroy puts a change of version in.
+// replacePluginVersionFirst creates Bookshelf 13 via creator, then destroys 12
+// via destroyer (create_before_destroy order).
 func replacePluginVersionFirst(t *testing.T, creator, destroyer *PluginResource) {
 	t.Helper()
 	ctx := context.Background()
@@ -413,7 +408,6 @@ func TestUnitPluginDeleteLeavesVersionCreatedThroughSameClient(t *testing.T) {
 func TestUnitPluginDeleteThroughAnotherClientRemovesCreatedVersion(t *testing.T) {
 	fake := bookshelfAfterUpdate()
 	r := newFakePluginResource(t, fake)
-	// Another Terraform run configures the provider, and so its client, anew.
 	other := &PluginResource{client: client.NewClient(r.client.BaseURL, r.client.APIKey)}
 
 	replacePluginVersionFirst(t, r, other)

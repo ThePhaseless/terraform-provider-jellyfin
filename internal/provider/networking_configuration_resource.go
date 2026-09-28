@@ -118,9 +118,6 @@ func (r *NetworkingConfigurationResource) Schema(_ context.Context, _ resource.S
 	}
 }
 
-// Jellyfin stores a base URL with a leading / added and a trailing one
-// removed, and a blank one as empty, so any other value would read back
-// otherwise than configured.
 var baseURLValidator = stringvalidator.RegexMatches(regexp.MustCompile(`^(/.*[^/])?$`),
 	"must be empty, or start with / and not end with /, such as /jellyfin")
 
@@ -163,10 +160,6 @@ func (r *NetworkingConfigurationResource) Delete(_ context.Context, _ resource.D
 }
 
 func (r *NetworkingConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Singleton resource, so the import ID is not used. Set only the id: the
-	// framework types every other attribute from the schema, and the Read that
-	// follows an import fills them. A zero-valued model would leave list
-	// attributes without an element type.
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue("networking"))...)
 }
 

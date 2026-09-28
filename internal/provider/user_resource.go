@@ -67,8 +67,6 @@ var userWire = sync.OnceValues(func() (*wire.Binding, error) {
 		wire.Key("is_administrator", "Policy.IsAdministrator"),
 		wire.Key("is_disabled", "Policy.IsDisabled"),
 		wire.Key("enable_all_folders", "Policy.EnableAllFolders"),
-		// Each has a default, so the plan always holds a value: a missing or
-		// null flag reads as false, as reading it as null would plan a change.
 		wire.ReadMissingAs("is_administrator", types.BoolValue(false)),
 		wire.ReadMissingAs("is_disabled", types.BoolValue(false)),
 		wire.ReadMissingAs("enable_all_folders", types.BoolValue(false)),
@@ -88,8 +86,6 @@ var userPolicyWire = sync.OnceValues(func() (*wire.Binding, error) {
 	return b.Document("Policy")
 })
 
-// userNameWire writes a rename, which posts the whole user: selecting the
-// name keeps the policy and flags out of that request.
 var userNameWire = sync.OnceValues(func() (*wire.Binding, error) {
 	b, err := userWire()
 	if err != nil {
@@ -161,9 +157,8 @@ func userPolicyAttributes() map[string]schema.Attribute {
 		return a
 	}
 
-	// Null is the server's "no limit", so these are not computed: a computed
-	// attribute would keep the prior limit when unset and could never be
-	// cleared.
+	// Not computed: null is the server's "no limit", and a computed attribute
+	// would keep the prior limit when unset.
 	nullableInt := func(desc string) schema.Int64Attribute {
 		return schema.Int64Attribute{
 			Description:         desc,
@@ -182,10 +177,8 @@ func userPolicyAttributes() map[string]schema.Attribute {
 		"blocked_tags":                  optionalStringList("Tags that are blocked for the user."),
 		"allowed_tags":                  optionalStringList("Tags that are explicitly allowed for the user."),
 		"enable_user_preference_access": optionalBool("Whether the user can access their own preferences."),
-		// A schedule's attributes take no UseStateForUnknown, which pairs
-		// list elements by index: removing a schedule would plan the next one
-		// with its hours. The list fills them from the prior schedule with the
-		// same day and hours instead.
+		// No UseStateForUnknown: it pairs list elements by index, so removing a
+		// schedule would plan the next one with its hours.
 		"access_schedules": schema.ListNestedAttribute{
 			NestedObject: schema.NestedAttributeObject{
 				Attributes: map[string]schema.Attribute{
@@ -309,8 +302,6 @@ func (r *UserResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 	}
 }
 
-// Jellyfin reads an ID in any of .NET's Guid spellings but lists it as 32
-// lowercase hex digits, so any other spelling would read back otherwise.
 var guidPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 func guidList(a schema.ListAttribute) schema.ListAttribute {
@@ -329,9 +320,6 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
-	// policy is computed, so a plan without it carries an unknown object,
-	// which the pointer field of the model cannot hold. Read the attributes
-	// one by one and convert the policy only when it is known.
 	var data UserResourceModel
 	var policy types.Object
 	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("name"), &data.Name)...)
@@ -364,18 +352,11 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 
 	data.ID = types.StringValue(user.ID)
-	// Saved now so that a failure below leaves the user in state as tainted
-	// rather than orphaned on the server, where its name would make every
-	// later create fail.
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), data.ID)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// A failed policy update still reads the user back, so the tainted state
-	// holds the user as the server has it rather than only its id. From the
-	// id alone, an untaint followed by an apply without refresh plans a null
-	// policy, and Update fails with an inconsistent result.
 	flatten := b.FlattenAfterApply
 	if err := r.applyPolicy(ctx, &data, user.ID, &resp.Diagnostics); err != nil {
 		resp.Diagnostics.AddError("Failed to update user policy", err.Error())
@@ -499,9 +480,6 @@ func (r *UserResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRe
 }
 
 // renameUser posts the user read from the server back with only Name changed.
-// The server also replaces the user's Configuration with the one in the body,
-// so sending just the name would reset per-user settings such as language
-// preferences.
 func (r *UserResource) renameUser(ctx context.Context, id, name string) error {
 	b, err := userNameWire()
 	if err != nil {
@@ -553,9 +531,6 @@ func (r *UserResource) applyPolicy(ctx context.Context, data *UserResourceModel,
 		return fmt.Errorf("overlaying policy")
 	}
 
-	// Jellyfin refuses to disable an administrator, going by the flag the
-	// user holds before the write, so a policy that demotes and disables the
-	// user at once is posted in two steps: the demotion, then the rest.
 	if wasAdministrator && !jsonTrue(baseMap[policyIsAdministrator]) && jsonTrue(baseMap[policyIsDisabled]) {
 		demoted := maps.Clone(baseMap)
 		demoted[policyIsDisabled] = json.RawMessage("false")

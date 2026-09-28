@@ -32,11 +32,6 @@ import (
 // Every configured key then equals the prior one at its index, so preferring
 // that element makes this plan pair them by index as well, even where two prior
 // elements share a key.
-//
-// It stands in for UseStateForUnknown on the nested attributes, which pairs
-// elements by index: an inserted or reordered element would take the values of
-// the element that held its index before, and an appended one would be planned
-// null.
 func useStateForUnknownByKey(keyGroups ...[]string) planmodifier.List {
 	return useStateForUnknownByKeyModifier{keyGroups: keyGroups}
 }
@@ -172,7 +167,7 @@ func fillUnsetInList(ctx context.Context, configured, planned, prior attr.Value)
 	elements := slices.Clone(p.Elements())
 	filled := false
 	for k := range elements {
-		key := setNames(cs[k])
+		key := nonNullNames(cs[k])
 		if ps[k] == nil || len(key) == 0 {
 			continue
 		}
@@ -206,8 +201,7 @@ func fullyKnown(ctx context.Context, v attr.Value) bool {
 	return err == nil && tv.IsFullyKnown()
 }
 
-// setNames returns the names of the attributes attrs does not leave null.
-func setNames(attrs map[string]attr.Value) []string {
+func nonNullNames(attrs map[string]attr.Value) []string {
 	var names []string
 	for name, v := range attrs {
 		if !v.IsNull() {

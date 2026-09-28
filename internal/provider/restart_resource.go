@@ -127,7 +127,6 @@ func (r *RestartResource) Create(ctx context.Context, req resource.CreateRequest
 }
 
 func (r *RestartResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	// The restart is a point-in-time action; refresh preserves state as-is.
 	var data RestartResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
@@ -149,7 +148,6 @@ func (r *RestartResource) Update(ctx context.Context, req resource.UpdateRequest
 }
 
 func (r *RestartResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
-	// Nothing to undo on the server; just drop from state.
 }
 
 // waitForServerReady blocks until a restart already requested has completed,
@@ -160,14 +158,6 @@ func waitForServerReady(ctx context.Context, c *client.Client, timeout time.Dura
 
 // awaitRestart waits out a restart that has already been requested, returning
 // once the server has answered successfully restartSettleReads times in a row.
-//
-// Two things rule out the obvious signals. Jellyfin keeps serving for a moment
-// after it accepts POST /System/Restart, so polling immediately reads the host
-// that is about to go away; the settle delay covers that. And Jellyfin restarts
-// in-process here rather than exiting, so the server may never stop answering
-// at all, which is why an outage is not required. HasPendingRestart is no help
-// either: background plugin auto-updates raise it again seconds after a restart
-// clears it.
 func awaitRestart(ctx context.Context, c *client.Client, timeout, poll time.Duration) error {
 	deadline := time.Now().Add(timeout)
 

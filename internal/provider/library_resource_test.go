@@ -30,7 +30,6 @@ func TestAccLibraryResource(t *testing.T) {
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Create and Read.
 			{
 				Config: `
 resource "jellyfin_library" "test" {
@@ -45,8 +44,7 @@ resource "jellyfin_library" "test" {
 					resource.TestCheckResourceAttrSet("jellyfin_library.test", "item_id"),
 				),
 			},
-			// Update library_options in place: the options endpoint takes the
-			// item id and the options, not the options alone.
+			// Update library_options in place.
 			{
 				Config: `
 resource "jellyfin_library" "test" {
@@ -74,8 +72,6 @@ resource "jellyfin_library" "test" {
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.type_options.0.image_fetchers.0", "TheMovieDb"),
 				),
 			},
-			// Set the metadata fetcher order and an image option's minimum width,
-			// with path_infos and an empty image_options list elsewhere.
 			{
 				Config: `
 resource "jellyfin_library" "test" {
@@ -127,10 +123,8 @@ resource "jellyfin_library" "test" {
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.type_options.0.similar_item_provider_order.1", "TheMovieDb"),
 				),
 			},
-			// Insert an entry ahead of Movie and leave most of Movie unset: the
-			// unset values stay on the server's Movie entry and do not move to
-			// the new entry at Movie's former index, while Movie's metadata
-			// fetcher order follows its metadata_fetchers.
+			// Insert an entry ahead of Movie: Movie's unset values stay on Movie,
+			// not on the entry at its old index.
 			{
 				Config: `
 resource "jellyfin_library" "test" {
@@ -181,7 +175,6 @@ resource "jellyfin_library" "test" {
 					},
 				),
 			},
-			// ImportState.
 			{
 				ResourceName:                         "jellyfin_library.test",
 				ImportState:                          true,
@@ -396,9 +389,8 @@ resource "jellyfin_library" "test" {
 `,
 				ExpectError: testAccLibrarySimilarItemsRejected,
 			},
-			// disabled and extract_chapters_during_library_scan are stored as
-			// Jellyfin's Enabled and ExtractChapterImagesDuringLibraryScan, and
-			// the create plans the network path left unset as null.
+			// disabled and extract_chapters_... map to Enabled and
+			// ExtractChapterImagesDuringLibraryScan; unset network path plans null.
 			{
 				PreConfig: func() {
 					if err := testAccCheckNoLibraryNamed(t, "TestOptions")(nil); err != nil {

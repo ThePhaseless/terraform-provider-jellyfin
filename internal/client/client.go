@@ -49,13 +49,8 @@ func NewClient(baseURL, apiKey string) *Client {
 	}
 }
 
-// maxIdleConnsPerHost matches Terraform's default parallelism, so that the
-// requests of concurrent resource operations reuse their connections.
 const maxIdleConnsPerHost = 10
 
-// newTransport returns a transport of the client's own: http.DefaultTransport
-// keeps two idle connections per host, and anything that closes its idle
-// connections, as httptest.Server.Close does, would break this client's too.
 func newTransport() http.RoundTripper {
 	t, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
@@ -90,9 +85,8 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 	return resp, nil
 }
 
-// send sends a request with the client's authentication and fails with an
-// HTTPError unless the server answers with a 2xx status. It hands the body of
-// that answer to read, unless read is nil.
+// send fails with an HTTPError on a non-2xx answer, else hands the body to
+// read (if non-nil).
 func (c *Client) send(ctx context.Context, method, path string, body io.Reader, read func(io.Reader) error) error {
 	resp, err := c.doRequest(ctx, method, path, body)
 	if err != nil {

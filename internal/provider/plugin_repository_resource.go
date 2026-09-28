@@ -296,10 +296,8 @@ func (r *PluginRepositoryResource) ImportState(ctx context.Context, req resource
 	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
 }
 
-// serverConfigurationMu serializes this provider's writes that post back a
-// list or document read from the server configuration: Jellyfin keeps the
-// plugin repositories in it, and each write replaces what it read, so writes
-// running at the same time would drop each other's changes.
+// serverConfigurationMu serializes writes that post back what they read from the server
+// configuration, which holds the plugin repositories, so they do not drop each other's changes.
 var serverConfigurationMu sync.Mutex
 
 // idFollowsName plans id as the planned name, which it always equals, so a
@@ -335,9 +333,8 @@ func repositoryNameExists(repos []client.PluginRepository, name string) bool {
 	return false
 }
 
-// findPluginRepositoryIndex returns the matching repository index, -1 when no
-// repository is found, or an error when the repository name is ambiguous and
-// the URL does not disambiguate it.
+// findPluginRepositoryIndex returns the matching index, -1 when none matches,
+// or an error when the name is ambiguous and url does not disambiguate it.
 func findPluginRepositoryIndex(repos []client.PluginRepository, name, url string) (int, error) {
 	matches := make([]int, 0, 1)
 	for i, repo := range repos {

@@ -25,8 +25,6 @@ import (
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/release"
 )
 
-// pluginInstallTimeout bounds the wait for a Jellyfin install to land on disk;
-// the download runs asynchronously after the API call returns.
 const (
 	pluginInstallTimeout = 2 * time.Minute
 	pluginPollInterval   = 2 * time.Second
@@ -128,9 +126,8 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Validators: []validator.String{
 					stringvalidator.LengthAtLeast(1),
 				},
-				// An unset value is planned unknown when version changes in
-				// place and state holds no repository, which must not replace
-				// the plugin.
+				// An unset value is planned unknown when version changes in place;
+				// replacing on it would reinstall the plugin.
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplaceIfConfigured(),
@@ -273,11 +270,8 @@ func (r *PluginResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	}
 }
 
-// versionNamesInstalled reports whether version, planned to replace another
-// value, names the installed version, in which case the plugin stays as it is
-// and only state changes. A keyword is resolved as an install would resolve
-// it, so importing a plugin into a configuration that asks for the latest
-// version, when that is the version installed, does not reinstall it.
+// versionNamesInstalled reports whether version, planned to replace another value, names the
+// installed version; a keyword is resolved as an install would resolve it.
 func (r *PluginResource) versionNamesInstalled(ctx context.Context, name string, version types.String, installed string) (bool, error) {
 	if version.IsUnknown() || version.IsNull() || installed == "" {
 		return false, nil
@@ -342,18 +336,8 @@ func (r *PluginResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	}
 }
 
-// uninstall removes every listed version of the plugin with the given id that
-// Jellyfin lets users uninstall, other than a version a jellyfin_plugin
-// created in this run, and returns the versions Jellyfin does not let users
-// uninstall, which are the ones it bundles.
-//
-// After an update Jellyfin lists both the running version and the one that
-// loads at the next restart, and removing only one leaves the other to load at
-// that restart. Each version goes by its own DELETE: the DELETE without a
-// version removes a version that is not loaded, which under
-// create_before_destroy is the one the replacement just installed. A failed
-// request still counts once its version is no longer listed, which is how an
-// uninstall that raced another one for the same plugin ends.
+// uninstall removes every listed version Jellyfin lets users uninstall, other than one a
+// jellyfin_plugin created this run, and returns the bundled versions it cannot remove.
 func (r *PluginResource) uninstall(ctx context.Context, id string) ([]client.InstalledPlugin, error) {
 	listed, err := r.listedPlugins(ctx, id)
 	if err != nil {
@@ -361,8 +345,6 @@ func (r *PluginResource) uninstall(ctx context.Context, id string) ([]client.Ins
 	}
 	var errs []error
 	for _, p := range listed {
-		// Jellyfin answers 204 to the DELETE of a plugin it does not let users
-		// uninstall and leaves it in place.
 		if !p.CanUninstall {
 			continue
 		}
@@ -394,12 +376,8 @@ func (r *PluginResource) uninstall(ctx context.Context, id string) ([]client.Ins
 	return bundled, nil
 }
 
-// pluginVersionsCreated holds the plugin versions that a jellyfin_plugin
-// created or adopted, keyed by the provider's client, which lasts one
-// Terraform run. Under create_before_destroy a replacement is created before
-// the object it replaces is destroyed, and both share the plugin's GUID, so
-// this is how that destroy tells the replacement's version from an update
-// Jellyfin installed on its own, which it must remove.
+// pluginVersionsCreated holds the plugin versions a jellyfin_plugin created or adopted,
+// keyed by client (one Terraform run), so a destroy spares a create_before_destroy replacement.
 var pluginVersionsCreated sync.Map
 
 type createdPluginVersion struct {
@@ -425,12 +403,8 @@ func pluginVersions(plugins []client.InstalledPlugin) []string {
 	return versions
 }
 
-// selectInstalledPlugin returns the entry GET /Plugins lists for the plugin
-// with the given id in either GUID spelling, or with the given name, which is
-// all an import by name knows. Jellyfin lists every version on disk, so after
-// an update both the running version and the one that loads at the next
-// restart are listed: the entry at version wins, otherwise the newest.
-// Versions Jellyfin deletes at the next restart do not count.
+// selectInstalledPlugin returns the GET /Plugins entry for id (either GUID spelling) or name:
+// the one at version, else the newest, skipping versions pending deletion.
 func selectInstalledPlugin(plugins []client.InstalledPlugin, id, name, version string) (client.InstalledPlugin, bool) {
 	var selected client.InstalledPlugin
 	found := false
@@ -486,16 +460,6 @@ func (r *PluginResource) listedPlugins(ctx context.Context, id string) ([]client
 
 // waitForPlugin blocks until name is installed at version and returns the
 // entry GET /Plugins lists for it.
-//
-// Matching the version, not just the name, is what lets a caller restart the
-// server afterwards and be sure it loads the assembly this install put down:
-// Jellyfin's install is asynchronous and returns long before the download
-// lands, so a name-only match returns while the previous version is still the
-// only one on disk. Jellyfin registers the new version as soon as it is
-// written, with status "Restart" and the version it replaces "Superceded", so
-// this does not wait on a restart that has not happened yet. A version left
-// behind for deletion at the next restart is not the one this install put
-// down.
 func (r *PluginResource) waitForPlugin(ctx context.Context, name, version string, timeout time.Duration) (*client.InstalledPlugin, error) {
 	deadline := time.Now().Add(timeout)
 	var seen string
@@ -526,7 +490,7 @@ func (r *PluginResource) waitForPlugin(ctx context.Context, name, version string
 
 // notOfferedHint explains the 404 Jellyfin answers an install with when none
 // of its enabled repositories offers the package at that version for this
-// server; it installs a version that is already installed again.
+// server.
 func notOfferedHint(err error, name, version string) string {
 	if !client.IsNotFound(err) {
 		return ""
@@ -535,11 +499,6 @@ func notOfferedHint(err error, name, version string) string {
 }
 
 func (r *PluginResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Plugins can be imported by name (e.g. `terraform import jellyfin_plugin.x
-	// "SSO-Auth"`) or by the server-assigned UUID. We set the import ID into both
-	// `id` and `name` so Read can match whichever one is correct — it matches
-	// an entry by either and overwrites both with the canonical values from the
-	// server afterward.
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), req.ID)...)
 }
@@ -559,9 +518,8 @@ func (r *PluginResource) findInstalledPlugin(ctx context.Context, name, version 
 	return nil, nil
 }
 
-// versionDescribes reports whether version, as held in state, still describes
-// the installed version: a keyword, which is resolved only at install time, or
-// the installed release in any spelling samePluginVersion accepts.
+// versionDescribes reports whether version in state still describes installed: a keyword,
+// or the installed release in any spelling samePluginVersion accepts.
 func versionDescribes(version types.String, installed string) bool {
 	if version.IsNull() || version.IsUnknown() {
 		return false
@@ -570,9 +528,7 @@ func versionDescribes(version types.String, installed string) bool {
 }
 
 // omittedVersionPlanModifier plans the installed version for a version the
-// configuration no longer sets while state holds a keyword. Terraform plans an
-// omitted Optional and Computed value as the prior one, and Read keeps a
-// keyword, so the keyword would otherwise stay in state for good.
+// configuration no longer sets while state holds a keyword.
 type omittedVersionPlanModifier struct{}
 
 func (omittedVersionPlanModifier) Description(context.Context) string {
@@ -599,10 +555,8 @@ func isPluginVersionKeyword(version string) bool {
 	return version == pluginVersionSupported || version == pluginVersionLatest
 }
 
-// samePluginVersion reports whether two plugin versions denote the same
-// release. Jellyfin reports four-segment assembly versions (2.5.22.0) while a
-// configuration may carry the three-segment release (2.5.22), so the trailing
-// zero must not make them differ. An empty want matches anything.
+// samePluginVersion reports whether two plugin versions denote the same release, so
+// 2.5.22.0 matches 2.5.22. An empty want matches anything.
 func samePluginVersion(got, want string) bool {
 	if want == "" {
 		return true
@@ -649,14 +603,8 @@ func PluginRepositoryURL(pkgs []client.PackageInfo, name, version string) string
 	return ""
 }
 
-// resolvePluginVersion resolves the version for a plugin install.
-//
-//   - "supported" or unset for a known plugin → hardcoded supported release,
-//     in the build this server is offered
-//   - "latest" → newest version from the repository manifest, with a warning
-//     if its release is newer than the supported one (when one exists)
-//   - Any other value (e.g. "2.5.20.0") → used as-is
-//   - Unset for unknown plugins → resolves latest from the repository.
+// resolvePluginVersion resolves "supported", "latest" or an unset version to the version to
+// install, in the build this server is offered; any other value is used as-is.
 func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, version types.String) (string, error) {
 	supported := supportedVersionForPlugin(name)
 
@@ -718,11 +666,6 @@ func (r *PluginResource) resolveLatestVersion(ctx context.Context, name string) 
 
 // resolveSupportedBuild returns the build of the supported release that this
 // server is offered, or "" if the repositories do not offer the plugin.
-// JellyfinSecurity ships one build per server ABI under a single release
-// (2.6.3.0 for Jellyfin 10.11, 2.6.3.1 for 12.x) and Jellyfin lists only the
-// builds its ABI accepts, so the pinned build is not installable on the other
-// server line while its sibling is. Falling back to the pinned build when the
-// packages cannot be listed would plan a replacement on the other line.
 func (r *PluginResource) resolveSupportedBuild(ctx context.Context, name, supported string) (string, error) {
 	pkgs, err := r.client.GetAvailablePackages(ctx)
 	if err != nil {
@@ -755,8 +698,7 @@ func pickReleaseBuild(offered []client.VersionInfo, want string) string {
 }
 
 // pluginRelease drops the build segment from a four-segment plugin version
-// (2.6.3.1 → 2.6.3). For JellyfinSecurity that segment selects the server ABI,
-// so builds of one release carry the same configuration schema.
+// (2.6.3.1 → 2.6.3).
 func pluginRelease(version string) string {
 	parts := strings.Split(strings.TrimSpace(version), ".")
 	if len(parts) > 3 {

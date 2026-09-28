@@ -262,25 +262,25 @@ func TestUnitComplementReadsTheEnabledNamesInOrder(t *testing.T) {
 		}
 	}
 
-	// A server that fails to list its names still refreshes: the value keeps
-	// its prior value, and a warning says why.
 	failing := WithAvailable(context.Background(), func(context.Context, string, string) ([]string, error) { return nil, errors.New("offline") })
 	read, d := b.Flatten(context.Background(), doc(t, `{"Name": "n"}`), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
 		t.Fatal(d)
 	}
-	prior := with(t, read, "enabled", strs("X"))
-	got, d := b.Flatten(failing, doc(t, `{"Order": [], "Disabled": [], "Opts": [{"ItemType": "Movie", "FetcherOrder": []}]}`), object(t, prior))
-	if d.HasError() || d.WarningsCount() != 1 || !strings.Contains(d[0].Detail(), "offline") {
-		t.Errorf("a failed lookup is not reported once as a warning: %v", d)
-	}
-	if s := at(t, got, "enabled").String(); s != `["X"]` {
-		t.Errorf("after a failed lookup, enabled = %s, want its prior value", s)
-	}
+	t.Run("a failed lookup keeps the prior value with a warning", func(t *testing.T) {
+		prior := with(t, read, "enabled", strs("X"))
+		got, d := b.Flatten(failing, doc(t, `{"Order": [], "Disabled": [], "Opts": [{"ItemType": "Movie", "FetcherOrder": []}]}`), object(t, prior))
+		if d.HasError() || d.WarningsCount() != 1 || !strings.Contains(d[0].Detail(), "offline") {
+			t.Errorf("a failed lookup is not reported once as a warning: %v", d)
+		}
+		if s := at(t, got, "enabled").String(); s != `["X"]` {
+			t.Errorf("after a failed lookup, enabled = %s, want its prior value", s)
+		}
+	})
 	// After an apply that left the value unknown, the read has no previous
 	// value to keep and may not return an unknown one.
 	unknown := with(t, read, "enabled", types.ListUnknown(types.StringType))
-	got, d = b.Flatten(failing, doc(t, `{"Order": [], "Disabled": []}`), object(t, unknown))
+	got, d := b.Flatten(failing, doc(t, `{"Order": [], "Disabled": []}`), object(t, unknown))
 	if d.HasError() || at(t, got, "enabled").IsUnknown() {
 		t.Errorf("after a failed lookup, an unknown enabled reads as %s (%v), want a known value", at(t, got, "enabled"), d)
 	}

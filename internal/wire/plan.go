@@ -100,10 +100,7 @@ func keepNullsInList(ctx context.Context, pv attr.Value, got basetypes.ListValue
 }
 
 // keepUnwrittenComplements returns got with each Complement that the write
-// left alone set back to its planned value. A Complement reads the names the
-// server offers at the time of the read, so it reads another value after a
-// plugin that the same apply installs offers more names, although neither of
-// its keys changed; the next refresh reads that value instead.
+// left alone set back to its planned value.
 func keepUnwrittenComplements(ctx context.Context, n *node, planned, got basetypes.ObjectValue) basetypes.ObjectValue {
 	if planned.IsNull() || planned.IsUnknown() || got.IsNull() || got.IsUnknown() {
 		return got
@@ -171,9 +168,8 @@ func keepUnwrittenInElements(ctx context.Context, n *node, pv, gv attr.Value) at
 	return gv
 }
 
-// complementWrites reports whether writeShared writes f's keys, as it does
-// when f has a value and one of the attributes that share its keys has none,
-// such as while it is unknown.
+// complementWrites reports whether writeShared writes f's keys: f has a value
+// and a sharer has none.
 func complementWrites(f *Field, attrs map[string]attr.Value) bool {
 	if v := attrs[f.Name]; v == nil || v.IsNull() || v.IsUnknown() {
 		return false

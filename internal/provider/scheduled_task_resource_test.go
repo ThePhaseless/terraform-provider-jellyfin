@@ -73,7 +73,6 @@ resource "jellyfin_scheduled_task" "test" {
 `,
 				ExpectError: regexp.MustCompile(`must be between 0 and\s+863999999999`),
 			},
-			// ImportState.
 			{
 				ResourceName:      "jellyfin_scheduled_task.test",
 				ImportState:       true,

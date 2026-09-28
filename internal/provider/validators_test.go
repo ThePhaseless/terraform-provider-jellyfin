@@ -121,7 +121,6 @@ func TestNoSurroundingWhitespaceValidatorMatchesUnicodeIsSpace(t *testing.T) {
 				t.Errorf("%+q: rejected %t, want %t", value, got, want)
 			}
 		}
-		// .NET's . does not match \n, so Jellyfin rejects it inside a name too.
 		if got := rejects("a" + string(r) + "a"); got != (r == '\n') {
 			t.Errorf("%+q: rejected %t, want %t", "a"+string(r)+"a", got, r == '\n')
 		}

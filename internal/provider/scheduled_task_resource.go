@@ -113,8 +113,6 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 				Validators: []validator.String{
 					stringvalidator.LengthAtLeast(1),
 				},
-				// State from releases without key holds it as null, which
-				// UseStateForUnknown would plan, although apply reads the key.
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseNonNullStateForUnknown(),
 				},
@@ -130,9 +128,6 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			// The optional trigger attributes are not Computed because Jellyfin stores
-			// each trigger exactly as posted and never fills in fields, so an omitted
-			// attribute must plan as null rather than unknown.
 			"triggers": schema.ListNestedAttribute{
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
@@ -269,9 +264,8 @@ func (r *ScheduledTaskResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
-	// Only an import leaves task_id unset, with id holding the ID or key it
-	// was given.
-	if data.TaskID.IsNull() {
+	importedByIDOrKey := data.TaskID.IsNull()
+	if importedByIDOrKey {
 		id, d := r.lookUpTask(ctx, data.ID.ValueString(), true)
 		if d != nil {
 			resp.Diagnostics.Append(d)
@@ -326,16 +320,8 @@ func (r *ScheduledTaskResource) ModifyPlan(ctx context.Context, req resource.Mod
 	resp.Diagnostics.Append(r.planTaskForKey(ctx, req, resp)...)
 }
 
-// planTaskForKey plans task_id as the ID of the task a key configured alone
-// selects, and a replacement when that is not the task in the state. With
-// task_id also configured, task_id selects the task and key must be its key;
-// both may be set because terraform plan -generate-config-out writes both
-// from an imported state.
-//
-// Terraform plans each resource again in the refresh that precedes a destroy,
-// as a create when the refresh found its task gone, so a key that no task has
-// any more, such as that of a task a plugin or a Jellyfin upgrade removed,
-// also fails terraform destroy unless it runs with -refresh=false.
+// planTaskForKey plans task_id from a key configured alone (replacing on a
+// new task), or checks key against a configured task_id.
 func (r *ScheduledTaskResource) planTaskForKey(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) diag.Diagnostics {
 	var diags diag.Diagnostics
 	var key, taskID types.String
@@ -345,14 +331,11 @@ func (r *ScheduledTaskResource) planTaskForKey(ctx context.Context, req resource
 	case diags.HasError() || key.IsNull():
 		return diags
 	case key.IsUnknown() && taskID.IsNull():
-		// Terraform plans again at apply, once the key is known, and rejects
-		// that plan if it replaces what this one updates.
 		if !req.State.Raw.IsNull() {
 			resp.RequiresReplace.Append(path.Root("key"))
 		}
 		return diags
 	case key.IsUnknown() || taskID.IsUnknown() || r.client == nil:
-		// The plan Terraform makes at apply checks what is unknown now.
 		return diags
 	case !taskID.IsNull():
 		task, err := r.client.GetScheduledTask(ctx, taskID.ValueString())
@@ -385,9 +368,6 @@ func (r *ScheduledTaskResource) planTaskForKey(ctx context.Context, req resource
 		if diags.HasError() || strings.EqualFold(stored.ValueString(), id) {
 			return diags
 		}
-		// Terraform replaces only for a path whose value the plan changes, and
-		// the key keeps its value when its task gets a new ID, such as after
-		// the .NET type that runs the task is renamed.
 		resp.RequiresReplace.Append(path.Root("task_id"))
 	}
 	return append(diags, resp.Plan.SetAttribute(ctx, path.Root("task_id"), id)...)
@@ -401,10 +381,8 @@ func (r *ScheduledTaskResource) lookUpTask(ctx context.Context, ref string, byID
 	return findTask(tasks, ref, byID)
 }
 
-// findTask returns the ID of the one task ref selects, or an error saying why
-// none does. With byID, a task's ID matches ignoring case, as Jellyfin
-// matches it, and the ID returned keeps ref's spelling. A key matches exactly,
-// as the Jellyfin web client matches it; no Jellyfin endpoint takes one.
+// findTask returns the one task ref selects: by ID case-insensitively
+// (keeping ref's spelling), by key exactly.
 func findTask(tasks []client.ScheduledTask, ref string, byID bool) (string, diag.Diagnostic) {
 	var ids, keys []string
 	for _, t := range tasks {
@@ -496,7 +474,6 @@ func (r *ScheduledTaskResource) ImportState(ctx context.Context, req resource.Im
 }
 
 // missingTriggerAttributes returns the attributes the trigger's type requires that are null.
-// Jellyfin rejects a trigger without them with a bare "Error processing request." 400.
 func missingTriggerAttributes(t ScheduledTaskTriggerModel) []string {
 	var missing []string
 	switch t.Type.ValueString() {

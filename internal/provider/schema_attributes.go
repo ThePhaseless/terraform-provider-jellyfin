@@ -18,9 +18,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// The optional attributes below are also computed, so one the configuration
-// leaves unset reads the server's value, and each keeps its prior value while
-// unknown.
+// Optional attributes below are also computed: unset reads the server's
+// value, kept while unknown.
 
 func optionalString(desc string) schema.StringAttribute {
 	return schema.StringAttribute{
@@ -85,10 +84,8 @@ func optionalIntList(desc string) schema.ListAttribute {
 	return a
 }
 
-// The element attributes below belong to the objects of a list, and take no
-// UseStateForUnknown: it pairs the elements by index, so an element inserted
-// or removed would take another's values. Their list fills them by key with
-// useStateForUnknownByKey instead.
+// Element attributes skip UseStateForUnknown, which pairs elements by index;
+// their list fills them by key.
 
 func elementString(desc string) schema.StringAttribute {
 	a := optionalString(desc)

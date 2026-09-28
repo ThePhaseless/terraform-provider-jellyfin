@@ -20,15 +20,11 @@ var v038 = map[string]resource.ExternalProvider{
 
 const providerSource = "ThePhaseless/jellyfin"
 
-// testAccUpgradeFromV038 applies config with provider 0.3.8 and then plans it
-// with this provider, which must find nothing to change in the state 0.3.8
-// saved or in what 0.3.8 sent Jellyfin. This provider then runs the steps of
-// then.
+// testAccUpgradeFromV038 applies config with 0.3.8, expects this provider to
+// plan no change, then runs then.
 func testAccUpgradeFromV038(t *testing.T, config string, then ...resource.TestStep) {
 	t.Helper()
 
-	// The state 0.3.8 saves names the registry address; the in-process
-	// provider must answer to the same one for Terraform to plan it.
 	namespace, _, _ := strings.Cut(providerSource, "/")
 	t.Setenv(resource.EnvTfAccProviderNamespace, namespace)
 	steps := []resource.TestStep{
@@ -56,9 +52,7 @@ func testAccUpgradeFromV038(t *testing.T, config string, then ...resource.TestSt
 
 // testAccPutBackServerConfiguration posts back, once the test ends, the
 // configuration documents and the triggers of scheduled task taskID as the
-// server serves them now. Destroying a configuration resource or a scheduled
-// task only forgets it, so without this the tests that follow would run
-// against the values this one applied.
+// server serves them now.
 func testAccPutBackServerConfiguration(t *testing.T, taskID string) {
 	t.Helper()
 

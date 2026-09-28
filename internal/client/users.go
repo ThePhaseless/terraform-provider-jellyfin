@@ -30,9 +30,8 @@ type UserPolicy struct {
 	PasswordResetProviderID  string `json:"PasswordResetProviderId"`
 }
 
-// errBlankUserID stops a user update before it is sent: Jellyfin applies an
-// update whose userId is missing or only whitespace to the signed-in user,
-// which is the account the provider authenticates as.
+// errBlankUserID stops a user update before it is sent: Jellyfin applies one
+// whose userId is blank to the signed-in user, the provider's own account.
 var errBlankUserID = errors.New("user id is blank")
 
 // AuthResult represents the result of a user authentication.

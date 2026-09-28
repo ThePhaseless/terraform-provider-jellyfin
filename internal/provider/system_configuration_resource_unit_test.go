@@ -373,9 +373,8 @@ func TestUnitSystemConfigurationEntriesAndRenamedKeysCopyOnlyNonNullPriorValues(
 	}
 }
 
-// testUnitOfferingByItemType returns a context whose server offers, for each
-// "list/item type" key of offered, the names it maps to, and lists nothing
-// for any other item type.
+// testUnitOfferingByItemType serves offered by "list/item type" key; other
+// item types are not offered.
 func testUnitOfferingByItemType(offered map[string][]string) context.Context {
 	return wire.WithAvailable(context.Background(), func(_ context.Context, list, scope string) ([]string, error) {
 		names, ok := offered[list+"/"+scope]
@@ -386,9 +385,8 @@ func testUnitOfferingByItemType(offered map[string][]string) context.Context {
 	})
 }
 
-// testUnitServeAvailableOptions serves GET /Libraries/AvailableOptions from
-// the documents byContentType holds, and counts the requests for each content
-// type.
+// testUnitServeAvailableOptions serves /Libraries/AvailableOptions from
+// byContentType, counting requests.
 func testUnitServeAvailableOptions(byContentType map[string]string, asked map[string]int, mu *sync.Mutex) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()

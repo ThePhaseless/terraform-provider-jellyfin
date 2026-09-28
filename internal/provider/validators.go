@@ -26,9 +26,8 @@ func requiredIdentifierValidators() []validator.String {
 	}
 }
 
-// Jellyfin keeps a library as a directory named after it and replaces these
-// characters with spaces, so a name containing one would come back as a
-// different library.
+// Jellyfin replaces these characters with spaces in the library's directory,
+// so the library would come back under another name.
 var libraryNameCharactersValidator = stringvalidator.RegexMatches(
 	regexp.MustCompile(`^[^"<>|:*?\\/\x00-\x1f]*$`),
 	`must not contain " < > | : * ? \ / or control characters`,
@@ -49,9 +48,8 @@ func libraryNameValidators() []validator.String {
 	}
 }
 
-// unsetValidator rejects at plan time a value for an attribute that no
-// Jellyfin setting is behind. The server ignores the key and reads it back as
-// null, which Terraform reports only as an inconsistent result after apply.
+// unsetValidator rejects at plan time a value for an attribute no Jellyfin
+// setting is behind.
 type unsetValidator struct {
 	// summary heads the error, and reason says why the value cannot be set.
 	summary, reason string
