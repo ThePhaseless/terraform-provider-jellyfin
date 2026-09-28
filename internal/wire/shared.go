@@ -297,7 +297,13 @@ func (b *Binding) readComplement(ctx context.Context, d docField, doc map[string
 	case errors.Is(err, errNoAvailableFunc):
 		return nullOf(ctx, t), offeredNamesError(at, err)
 	case err != nil:
-		return prior, diag.Diagnostics{diag.NewWarningDiagnostic("Failed to read the names Jellyfin offers",
+		// A value planned unknown has no previous value to keep, and a read
+		// may not leave it unknown.
+		kept := prior
+		if kept.IsUnknown() {
+			kept = nullOf(ctx, t)
+		}
+		return kept, diag.Diagnostics{diag.NewWarningDiagnostic("Failed to read the names Jellyfin offers",
 			"The Jellyfin server did not say which providers it offers, so the lists of enabled providers keep their previous values: "+err.Error())}
 	case !listed:
 		return nullOf(ctx, t), nil

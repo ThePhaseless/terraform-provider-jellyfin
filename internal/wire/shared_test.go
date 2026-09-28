@@ -277,6 +277,13 @@ func TestUnitComplementReadsTheEnabledNamesInOrder(t *testing.T) {
 	if s := at(t, got, "enabled").String(); s != `["X"]` {
 		t.Errorf("after a failed lookup, enabled = %s, want its prior value", s)
 	}
+	// After an apply that left the value unknown, the read has no previous
+	// value to keep and may not return an unknown one.
+	unknown := with(t, read, "enabled", types.ListUnknown(types.StringType))
+	got, d = b.Flatten(failing, doc(t, `{"Order": [], "Disabled": []}`), object(t, unknown))
+	if d.HasError() || at(t, got, "enabled").IsUnknown() {
+		t.Errorf("after a failed lookup, an unknown enabled reads as %s (%v), want a known value", at(t, got, "enabled"), d)
+	}
 	if _, d := b.Flatten(context.Background(), doc(t, `{"Order": []}`), types.ObjectNull(b.AttrTypes)); !d.HasError() || !strings.Contains(d[0].Detail(), "bug in the provider") {
 		t.Errorf("a read without an AvailableFunc is not reported: %v", d)
 	}
