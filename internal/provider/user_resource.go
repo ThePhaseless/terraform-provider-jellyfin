@@ -242,6 +242,10 @@ func userPolicyAttributes() map[string]schema.Attribute {
 		"blocked_tags":                  optionalStringList("Tags that are blocked for the user."),
 		"allowed_tags":                  optionalStringList("Tags that are explicitly allowed for the user."),
 		"enable_user_preference_access": optionalBool("Whether the user can access their own preferences."),
+		// A schedule's attributes take no UseStateForUnknown, which pairs
+		// list elements by index: removing a schedule would plan the next one
+		// with its hours. The list fills them from the prior schedule with the
+		// same day and hours instead.
 		"access_schedules": schema.ListNestedAttribute{
 			NestedObject: schema.NestedAttributeObject{
 				Attributes: map[string]schema.Attribute{
@@ -250,12 +254,9 @@ func userPolicyAttributes() map[string]schema.Attribute {
 						MarkdownDescription: "Day of week for the schedule.",
 						Optional:            true,
 						Computed:            true,
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.UseStateForUnknown(),
-						},
 					},
-					"start_hour": optionalFloat("Start hour of the schedule (0-24)."),
-					"end_hour":   optionalFloat("End hour of the schedule (0-24)."),
+					"start_hour": withoutPlanModifiers(optionalFloat("Start hour of the schedule (0-24).")),
+					"end_hour":   withoutPlanModifiers(optionalFloat("End hour of the schedule (0-24).")),
 				},
 			},
 			Description:         "Access schedules restricting when the user can use the server.",
@@ -264,6 +265,12 @@ func userPolicyAttributes() map[string]schema.Attribute {
 			Computed:            true,
 			PlanModifiers: []planmodifier.List{
 				listplanmodifier.UseStateForUnknown(),
+				useStateForUnknownByKey(
+					[]string{"day_of_week", "start_hour", "end_hour"},
+					[]string{"day_of_week", "start_hour"},
+					[]string{"day_of_week", "end_hour"},
+					[]string{"day_of_week"},
+				),
 			},
 		},
 		"block_unrated_items":                  optionalStringList("Item types that are blocked when unrated."),
@@ -365,6 +372,11 @@ func (r *UserResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 			},
 		},
 	}
+}
+
+func withoutPlanModifiers(a schema.Float64Attribute) schema.Float64Attribute {
+	a.PlanModifiers = nil
+	return a
 }
 
 // Jellyfin reads an ID in any of .NET's Guid spellings but lists it as 32

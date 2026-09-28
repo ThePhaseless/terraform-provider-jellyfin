@@ -14,8 +14,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
@@ -183,5 +186,50 @@ func TestUnitUserPolicyTakesIDsAsJellyfinListsThem(t *testing.T) {
 				t.Errorf("%s = [%q]: error %t, want %t", name, id, resp.Diagnostics.HasError(), want)
 			}
 		}
+	}
+}
+
+// Removing a schedule must not plan the next one with its hours: an hour a
+// schedule leaves unset comes from the prior schedule with the same day.
+func TestUnitUserAccessSchedulesPlanByDay(t *testing.T) {
+	ctx := context.Background()
+	s := schemaOf(&UserResource{})
+	policy, ok := s.Attributes["policy"].(schema.SingleNestedAttribute)
+	if !ok {
+		t.Fatal("policy is not a nested object")
+	}
+	schedules, ok := policy.Attributes["access_schedules"].(schema.ListNestedAttribute)
+	if !ok {
+		t.Fatal("access_schedules is not a nested list")
+	}
+	elemType, ok := schedules.NestedObject.Type().(types.ObjectType)
+	if !ok {
+		t.Fatal("access_schedules holds no objects")
+	}
+	schedule := func(day string, start, end attr.Value) attr.Value {
+		return types.ObjectValueMust(elemType.AttrTypes, map[string]attr.Value{"day_of_week": types.StringValue(day), "start_hour": start, "end_hour": end})
+	}
+	state := types.ListValueMust(elemType, []attr.Value{
+		schedule("Monday", types.Float64Value(8), types.Float64Value(12)),
+		schedule("Tuesday", types.Float64Value(9), types.Float64Value(17)),
+	})
+	config := types.ListValueMust(elemType, []attr.Value{schedule("Tuesday", types.Float64Value(9), types.Float64Null())})
+	plan := types.ListValueMust(elemType, []attr.Value{schedule("Tuesday", types.Float64Value(9), types.Float64Unknown())})
+
+	existing := tftypes.NewValue(tftypes.Object{}, map[string]tftypes.Value{})
+	resp := planmodifier.ListResponse{PlanValue: plan}
+	for _, m := range schedules.PlanModifiers {
+		m.PlanModifyList(ctx, planmodifier.ListRequest{
+			Path:        path.Root("policy").AtName("access_schedules"),
+			State:       tfsdk.State{Raw: existing},
+			Plan:        tfsdk.Plan{Raw: existing},
+			ConfigValue: config,
+			PlanValue:   resp.PlanValue,
+			StateValue:  state,
+		}, &resp)
+	}
+	got, ok := resp.PlanValue.Elements()[0].(types.Object)
+	if !ok || !got.Attributes()["end_hour"].Equal(types.Float64Value(17)) {
+		t.Errorf("planned %s, want Tuesday's end hour 17", resp.PlanValue)
 	}
 }
