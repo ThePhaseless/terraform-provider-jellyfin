@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -221,6 +222,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 			"SortRemoveWords":               []string{"the", "a"},
 			"MetadataOptions": []map[string]interface{}{
 				{"ItemType": "Movie", "DisabledMetadataFetchers": []string{"OMDb"}, "ImageFetcherOrder": nil},
+				{"ItemType": "Person", "DisabledMetadataFetchers": []string{"TheMovieDb"}, "MetadataFetcherOrder": []string{}},
 			},
 			"TrickplayOptions": map[string]interface{}{
 				"Interval":         10000,
@@ -586,6 +588,11 @@ func TestGenerateSingletonConfigs(t *testing.T) {
     {
       item_type         = "Movie"
       metadata_fetchers = ["TheMovieDb"]
+    },
+    {
+      disabled_metadata_fetchers = ["TheMovieDb"]
+      item_type                  = "Person"
+      metadata_fetcher_order     = []
     },
   ]
   server_name       = "Test Server"
@@ -1201,7 +1208,8 @@ func terraformFmtCheck(t *testing.T, dir string) {
 
 // seedFixtures gives the server what the importer has to handle for the
 // generated files to validate, and puts the server back when the test ends:
-// strings that HCL would interpolate or reject unless escaped, API keys whose
+// strings that HCL would interpolate or reject unless escaped, metadata
+// options for an item type Jellyfin lists no fetchers for, API keys whose
 // names sanitize to the same resource name or to its suffixed form, and a
 // music videos library and one without a collection type, which the importer
 // writes as mixed.
@@ -1240,6 +1248,35 @@ func seedFixtures(t *testing.T, c *client.Client) {
 	}
 	if err := c.UpdateBrandingConfiguration(ctx, &client.BrandingConfiguration{RawJSON: string(seeded)}); err != nil {
 		t.Fatalf("seeding branding configuration: %v", err)
+	}
+
+	system, err := c.GetSystemConfiguration(ctx)
+	if err != nil {
+		t.Fatalf("reading system configuration: %v", err)
+	}
+	restore = append(restore, func(c *client.Client) error {
+		return c.UpdateSystemConfiguration(ctx, &client.SystemConfiguration{RawJSON: system.RawJSON})
+	})
+	var systemDoc map[string]interface{}
+	if err := json.Unmarshal([]byte(system.RawJSON), &systemDoc); err != nil {
+		t.Fatalf("parsing system configuration: %v", err)
+	}
+	options, _ := systemDoc["MetadataOptions"].([]interface{})
+	systemDoc["MetadataOptions"] = append(options, map[string]interface{}{
+		"ItemType":                 "Person",
+		"DisabledMetadataSavers":   []string{},
+		"LocalMetadataReaderOrder": []string{},
+		"DisabledMetadataFetchers": []string{"TheMovieDb"},
+		"MetadataFetcherOrder":     []string{},
+		"DisabledImageFetchers":    []string{"TheMovieDb"},
+		"ImageFetcherOrder":        []string{},
+	})
+	seededSystem, err := json.Marshal(systemDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.UpdateSystemConfiguration(ctx, &client.SystemConfiguration{RawJSON: string(seededSystem)}); err != nil {
+		t.Fatalf("seeding system configuration: %v", err)
 	}
 
 	keysBefore, err := c.GetAPIKeys(ctx)
@@ -1372,6 +1409,10 @@ func TestAccImportToolE2E(t *testing.T) {
 		if !strings.Contains(resourcesStr, fmt.Sprintf(`resource "%s" "this"`, rt)) {
 			t.Errorf("resources.tf should contain %s resource block", rt)
 		}
+	}
+
+	if !regexp.MustCompile(`disabled_metadata_fetchers\s+=\s+\["TheMovieDb"\]`).MatchString(resourcesStr) {
+		t.Error("resources.tf should keep the disabled metadata fetchers of the seeded Person metadata options")
 	}
 
 	// All import blocks should have 'to' and 'id' fields.

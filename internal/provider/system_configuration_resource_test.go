@@ -280,6 +280,17 @@ func TestAccSystemConfigurationFetchers(t *testing.T) {
 					}),
 				),
 			},
+			// Jellyfin lists no fetchers for Person, so metadata_fetchers
+			// reads as null for it.
+			{
+				Config: testAccSystemConfigurationFetchersConfig(`
+    item_type                  = "Person"
+    disabled_metadata_fetchers = ["TheMovieDb"]`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("jellyfin_system_configuration.test", "metadata_options.0.metadata_fetchers.#"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "metadata_options.0.disabled_metadata_fetchers.0", "TheMovieDb"),
+				),
+			},
 		},
 	})
 }

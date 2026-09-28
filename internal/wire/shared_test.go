@@ -203,7 +203,7 @@ func TestUnitComplementReadsTheEnabledNamesInOrder(t *testing.T) {
 		{"ordered, disabled and new names", `{"Order": ["B", "A", "C"], "Disabled": ["c"]}`, map[string][]string{"": {"A", "B", "C", "E"}}, `["B","A","E"]`, 1},
 		{"a name the server stopped offering", `{"Order": ["Gone", "A"], "Disabled": []}`, map[string][]string{"": {"A"}}, `["Gone","A"]`, 1},
 		{"neither key", `{"Name": "n"}`, nil, `<null>`, 0},
-		{"names not listed", `{"Order": ["B", "A"], "Disabled": ["A"]}`, nil, `["B"]`, 1},
+		{"names not listed", `{"Order": ["B", "A"], "Disabled": ["A"]}`, nil, `<null>`, 1},
 	} {
 		var asked []string
 		ctx := WithAvailable(context.Background(), offering(c.offered, &asked))
@@ -301,7 +301,6 @@ func TestUnitComplementVersionErrorNamesTheKeyItTakesItsVersionFrom(t *testing.T
 	}
 	m := with(t, model, "opts[0].fetcher_order", types.ListNull(types.StringType))
 	m = with(t, m, "opts[0].disabled_fetchers", types.ListNull(types.StringType))
-	m = with(t, m, "types", types.ListNull(b.AttrTypes["types"].(types.ListType).ElemType))
 	diags := b.VersionErrors(context.Background(), configOf(t, sharedAttrs(), m), func() (string, error) { return "1.9", nil })
 	want := "opts[0].fetchers | Unsupported Jellyfin server version | opts[0].fetchers requires Jellyfin 2.0 or later: the server runs Jellyfin 1.9, which has no FetcherOrder field, so it would discard the value. Remove opts[0].fetchers from the configuration or upgrade the server."
 	if got := strings.Join(versionErrorLines(diags), "\n"); got != want {

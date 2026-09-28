@@ -18,26 +18,35 @@ import (
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
+// offersProviders is a wireBound resource whose Read asks the server which
+// providers it offers, besides reading the document.
+type offersProviders interface {
+	offered(c *client.Client) wire.AvailableFunc
+}
+
+func resourceNamed(ctx context.Context, resourceType string) (resource.Resource, error) {
+	for _, newResource := range New("import")().Resources(ctx) {
+		r := newResource()
+		var meta resource.MetadataResponse
+		r.Metadata(ctx, resource.MetadataRequest{ProviderTypeName: "jellyfin"}, &meta)
+		if meta.TypeName == resourceType {
+			return r, nil
+		}
+	}
+	return nil, fmt.Errorf("the provider has no resource %s", resourceType)
+}
+
 // ReadForImport returns the schema of resourceType and the values that
 // terraform import with importID gives its attributes once the Read that
 // follows has read raw, the JSON document Jellyfin serves for the resource.
 // Only resources that read a Jellyfin document through a wire binding have
 // one; an attribute the Read sets without the document, such as a computed
 // id, holds what ImportState gave it. c answers what the Read asks the server
-// besides the document: the providers it offers each item type.
+// besides the document, such as the providers it offers each item type.
 func ReadForImport(ctx context.Context, c *client.Client, resourceType, importID, raw string) (schema.Schema, types.Object, error) {
-	var r resource.Resource
-	for _, newResource := range New("import")().Resources(ctx) {
-		candidate := newResource()
-		var meta resource.MetadataResponse
-		candidate.Metadata(ctx, resource.MetadataRequest{ProviderTypeName: "jellyfin"}, &meta)
-		if meta.TypeName == resourceType {
-			r = candidate
-			break
-		}
-	}
-	if r == nil {
-		return schema.Schema{}, types.Object{}, fmt.Errorf("the provider has no resource %s", resourceType)
+	r, err := resourceNamed(ctx, resourceType)
+	if err != nil {
+		return schema.Schema{}, types.Object{}, err
 	}
 	bound, isBound := r.(wireBound)
 	importer, imports := r.(resource.ResourceWithImportState)
@@ -69,9 +78,50 @@ func ReadForImport(ctx context.Context, c *client.Client, resourceType, importID
 	if err != nil {
 		return s, types.Object{}, fmt.Errorf("reading %s: %w", resourceType, err)
 	}
-	got, diags := b.Flatten(wire.WithAvailable(ctx, newOfferedProviders(c).byItemType), doc, prior)
+	if o, ok := r.(offersProviders); ok {
+		ctx = wire.WithAvailable(ctx, o.offered(c))
+	}
+	got, diags := b.Flatten(ctx, doc, prior)
 	if diags.HasError() {
 		return s, types.Object{}, fmt.Errorf("reading %s: %v", resourceType, diags)
 	}
 	return s, got, nil
+}
+
+// SharedKeys maps, by resource type, the dotted path of each attribute whose
+// Jellyfin keys another attribute of the same object also writes, such as a
+// deprecated attribute its replacement now writes, to the name of that
+// attribute.
+func SharedKeys(ctx context.Context) (map[string]map[string]string, error) {
+	out := map[string]map[string]string{}
+	var walk func(shared map[string]string, b *wire.Binding)
+	walk = func(shared map[string]string, b *wire.Binding) {
+		for _, f := range b.Fields {
+			for _, s := range f.Shares {
+				shared[s.Path] = f.Name
+			}
+			if f.Elem != nil {
+				walk(shared, f.Elem)
+			}
+		}
+	}
+	for _, newResource := range New("import")().Resources(ctx) {
+		r := newResource()
+		bound, ok := r.(wireBound)
+		if !ok {
+			continue
+		}
+		b, err := bound.Wire()
+		if err != nil {
+			return nil, err
+		}
+		var meta resource.MetadataResponse
+		r.Metadata(ctx, resource.MetadataRequest{ProviderTypeName: "jellyfin"}, &meta)
+		shared := map[string]string{}
+		walk(shared, b)
+		if len(shared) > 0 {
+			out[meta.TypeName] = shared
+		}
+	}
+	return out, nil
 }

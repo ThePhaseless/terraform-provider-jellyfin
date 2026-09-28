@@ -35,6 +35,7 @@ var (
 	_ resource.ResourceWithImportState = &SystemConfigurationResource{}
 	_ resource.ResourceWithModifyPlan  = &SystemConfigurationResource{}
 	_ wireBound                        = &SystemConfigurationResource{}
+	_ offersProviders                  = &SystemConfigurationResource{}
 )
 
 // NewSystemConfigurationResource creates a new system configuration resource.
@@ -112,6 +113,10 @@ var systemWire = sync.OnceValues(func() (*wire.Binding, error) {
 })
 
 func (r *SystemConfigurationResource) Wire() (*wire.Binding, error) { return systemWire() }
+
+func (r *SystemConfigurationResource) offered(c *client.Client) wire.AvailableFunc {
+	return newOfferedProviders(c).byItemType
+}
 
 func (r *SystemConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_system_configuration"
@@ -367,7 +372,7 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 }
 
 func itemTypeFetchersDescription(kind, disabledAttr, orderAttr string) string {
-	return fmt.Sprintf("Enabled %[1]s fetchers for `item_type`, in priority order: Jellyfin asks the first one first and disables every other %[1]s fetcher it offers for the item type. Jellyfin applies them to items whose library has no `type_options` entry for their type. Each name must match one the server offers exactly, so it works only for an item type whose fetchers Jellyfin lists, such as Movie or Series but not Person. Jellyfin enables any %[1]s fetcher installed later, which then shows up as a change to this list. Conflicts with `%[2]s` and `%[3]s`, which it replaces.", kind, disabledAttr, orderAttr)
+	return fmt.Sprintf("Enabled %[1]s fetchers for `item_type`, in priority order: Jellyfin asks the first one first and disables every other %[1]s fetcher it offers for the item type. Jellyfin applies them to items whose library has no `type_options` entry for their type. Each name must match one the server offers exactly, so it works only for an item type whose fetchers Jellyfin lists, such as Movie or Series; for any other, such as Person, it reads as null and setting it is an error, and `%[2]s` and `%[3]s` still apply. Jellyfin enables any %[1]s fetcher installed later, which then shows up as a change to this list. Conflicts with `%[2]s` and `%[3]s`, which it replaces.", kind, disabledAttr, orderAttr)
 }
 
 func itemTypeFetchersDeprecation(kind string) string {
@@ -449,7 +454,7 @@ func (r *SystemConfigurationResource) apply(ctx context.Context, data *SystemCon
 	if b == nil {
 		return
 	}
-	ctx = wire.WithAvailable(ctx, newOfferedProviders(r.client).byItemType)
+	ctx = wire.WithAvailable(ctx, r.offered(r.client))
 
 	current, err := r.client.GetSystemConfiguration(ctx)
 	if err != nil {
@@ -495,7 +500,7 @@ func (r *SystemConfigurationResource) read(ctx context.Context, data *SystemConf
 	if b == nil {
 		return
 	}
-	ctx = wire.WithAvailable(ctx, newOfferedProviders(r.client).byItemType)
+	ctx = wire.WithAvailable(ctx, r.offered(r.client))
 
 	current, err := r.client.GetSystemConfiguration(ctx)
 	if err != nil {

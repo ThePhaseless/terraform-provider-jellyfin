@@ -25,8 +25,8 @@ import (
 type AvailableFunc func(ctx context.Context, offered, scope string) ([]string, error)
 
 // ErrNotOffered is what an AvailableFunc wraps when the server does not list
-// the names it offers for a scope: a read then takes the names the keys hold,
-// and a write fails, as it cannot tell which names to disable.
+// the names it offers for a scope: a read then reads null, and a write fails,
+// as neither can tell which names Jellyfin enables.
 var ErrNotOffered = errors.New("the server does not list the names it offers")
 
 type availableKey struct{}
@@ -137,9 +137,17 @@ func (b *Binding) writeShared(ctx context.Context, doc map[string]json.RawMessag
 		if diags.HasError() {
 			return diags
 		}
-		offered, diags := offeredNames(ctx, f, scope, at, true)
+		offered, listed, diags := offeredNames(ctx, f, scope, at)
 		if diags.HasError() {
 			return diags
+		}
+		if !listed {
+			var owners []string
+			for _, s := range f.Shares {
+				owners = append(owners, s.Name)
+			}
+			return diag.Diagnostics{diag.NewAttributeErrorDiagnostic(at, "Offered names unknown",
+				fmt.Sprintf("The Jellyfin server does not list the %s it offers%s, so %s cannot tell which to disable. Set %s instead.", f.Offered, forScope(scope), at, strings.Join(owners, " and ")))}
 		}
 		for _, n := range names {
 			if !slices.Contains(offered, n) {
@@ -185,29 +193,22 @@ func (b *Binding) writtenScope(obj types.Object, f *Field, at path.Path) (string
 	return s.ValueString(), nil
 }
 
-// offeredNames asks the context's AvailableFunc. A read takes a server that
-// does not list the names as offering none, which a write cannot.
-func offeredNames(ctx context.Context, f *Field, scope string, at path.Path, write bool) ([]string, diag.Diagnostics) {
+// offeredNames asks the context's AvailableFunc; listed is false when the
+// server does not list the names it offers for scope.
+func offeredNames(ctx context.Context, f *Field, scope string, at path.Path) (offered []string, listed bool, diags diag.Diagnostics) {
 	available, ok := ctx.Value(availableKey{}).(AvailableFunc)
 	if !ok || available == nil {
-		return nil, diag.Diagnostics{diag.NewErrorDiagnostic("Missing offered names",
+		return nil, false, diag.Diagnostics{diag.NewErrorDiagnostic("Missing offered names",
 			fmt.Sprintf("%s needs the names the Jellyfin server offers, and the provider did not ask for them. This is a bug in the provider.", at))}
 	}
 	offered, err := available(ctx, f.Offered, scope)
 	switch {
 	case err == nil:
-		return offered, nil
-	case !errors.Is(err, ErrNotOffered):
-		return nil, diag.Diagnostics{diag.NewAttributeErrorDiagnostic(at, "Failed to read the names Jellyfin offers", err.Error())}
-	case write:
-		var owners []string
-		for _, s := range f.Shares {
-			owners = append(owners, s.Name)
-		}
-		return nil, diag.Diagnostics{diag.NewAttributeErrorDiagnostic(at, "Offered names unknown",
-			fmt.Sprintf("The Jellyfin server does not list the %s it offers%s, so %s cannot tell which to disable. Set %s instead.", f.Offered, forScope(scope), at, strings.Join(owners, " and ")))}
+		return offered, true, nil
+	case errors.Is(err, ErrNotOffered):
+		return nil, false, nil
 	}
-	return nil, nil
+	return nil, false, diag.Diagnostics{diag.NewAttributeErrorDiagnostic(at, "Failed to read the names Jellyfin offers", err.Error())}
 }
 
 func forScope(scope string) string {
@@ -231,7 +232,7 @@ func notOffered(at path.Path, f *Field, name, scope string, offered []string) di
 }
 
 // readComplement reads what d's Complement writes, or null when the server
-// serves neither of its keys.
+// serves neither of its keys or does not list the names it offers.
 func (b *Binding) readComplement(ctx context.Context, d docField, doc map[string]json.RawMessage, t attr.Type, at path.Path) (attr.Value, diag.Diagnostics) {
 	f := d.f
 	lists := make([][]string, len(f.Shares))
@@ -260,8 +261,8 @@ func (b *Binding) readComplement(ctx context.Context, d docField, doc map[string
 			_ = json.Unmarshal(raw, &scope)
 		}
 	}
-	offered, diags := offeredNames(ctx, f, scope, at, false)
-	if diags.HasError() {
+	offered, listed, diags := offeredNames(ctx, f, scope, at)
+	if diags.HasError() || !listed {
 		return nullOf(ctx, t), diags
 	}
 	return stringList(enabledOf(lists[0], lists[1], offered)), nil
