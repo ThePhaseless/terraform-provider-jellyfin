@@ -45,7 +45,7 @@ func (c *Client) GetScheduledTask(ctx context.Context, id string) (*ScheduledTas
 }
 
 // UpdateScheduledTaskTriggers updates the triggers for a scheduled task.
-func (c *Client) UpdateScheduledTaskTriggers(ctx context.Context, id string, triggersJSON string) error {
+func (c *Client) UpdateScheduledTaskTriggers(ctx context.Context, id, triggersJSON string) error {
 	if err := c.postRaw(ctx, fmt.Sprintf("/ScheduledTasks/%s/Triggers", url.PathEscape(id)), triggersJSON); err != nil {
 		return fmt.Errorf("updating triggers for task %s: %w", id, err)
 	}

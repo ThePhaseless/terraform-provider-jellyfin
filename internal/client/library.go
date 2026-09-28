@@ -57,14 +57,13 @@ func (c *Client) AddVirtualFolder(ctx context.Context, name, collectionType stri
 
 	var body []byte
 	if libraryOptions != nil {
-		requestBody := struct {
+		var err error
+		body, err = json.Marshal(struct {
 			LibraryOptions *LibraryOptions `json:"LibraryOptions"`
-		}{LibraryOptions: libraryOptions}
-		jsonBody, err := json.Marshal(requestBody)
+		}{LibraryOptions: libraryOptions})
 		if err != nil {
 			return fmt.Errorf("marshaling virtual folder %s request: %w", name, err)
 		}
-		body = jsonBody
 	}
 
 	if err := c.post(ctx, apiPath, body); err != nil {
@@ -105,7 +104,7 @@ func (c *Client) UpdateVirtualFolder(ctx context.Context, itemID string, library
 		return fmt.Errorf("marshaling library options for virtual folder %s: %w", itemID, err)
 	}
 
-	if err := c.postRaw(ctx, "/Library/VirtualFolders/LibraryOptions", string(body)); err != nil {
+	if err := c.post(ctx, "/Library/VirtualFolders/LibraryOptions", body); err != nil {
 		return fmt.Errorf("updating virtual folder %s: %w", itemID, err)
 	}
 	return nil

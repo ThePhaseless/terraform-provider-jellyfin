@@ -62,9 +62,7 @@ func newTransport() http.RoundTripper {
 }
 
 func (c *Client) doRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
-	url := c.BaseURL + path
-
-	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, body)
 	if err != nil {
 		return nil, fmt.Errorf("creating %s request for %s: %w", method, path, err)
 	}
@@ -94,8 +92,8 @@ func (c *Client) send(ctx context.Context, method, path string, body io.Reader, 
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &HTTPError{Method: method, Path: path, StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)}
+	if err := checkStatus(method, path, resp); err != nil {
+		return err
 	}
 	if read == nil {
 		return nil
@@ -124,7 +122,7 @@ func (c *Client) post(ctx context.Context, path string, body []byte) error {
 	return c.send(ctx, http.MethodPost, path, bodyReader(body), nil)
 }
 
-func (c *Client) postRaw(ctx context.Context, path string, rawJSON string) error {
+func (c *Client) postRaw(ctx context.Context, path, rawJSON string) error {
 	return c.send(ctx, http.MethodPost, path, strings.NewReader(rawJSON), nil)
 }
 
@@ -147,10 +145,13 @@ func decodeInto(target any) func(io.Reader) error {
 	return func(r io.Reader) error { return json.NewDecoder(r).Decode(target) }
 }
 
-func readResponseBody(body io.Reader) string {
-	bodyBytes, err := io.ReadAll(body)
-	if err != nil {
-		return fmt.Sprintf("failed to read response body: %v", err)
+func checkStatus(method, path string, resp *http.Response) error {
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
 	}
-	return string(bodyBytes)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		body = fmt.Appendf(nil, "failed to read response body: %v", err)
+	}
+	return &HTTPError{Method: method, Path: path, StatusCode: resp.StatusCode, Body: string(body)}
 }

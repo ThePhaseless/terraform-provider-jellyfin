@@ -4,7 +4,6 @@
 package client
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,7 +11,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"slices"
 	"testing"
 )
 
@@ -30,7 +28,7 @@ func TestGetVirtualFoldersUsesJellyfinItemIDCasing(t *testing.T) {
 	}))
 	defer server.Close()
 
-	folders, err := NewClient(server.URL, "test-key").GetVirtualFolders(context.Background())
+	folders, err := NewClient(server.URL, "test-key").GetVirtualFolders(t.Context())
 	if err != nil {
 		t.Fatalf("GetVirtualFolders() error = %v", err)
 	}
@@ -43,7 +41,7 @@ func TestGetAvailablePackagesUsesJellyfinRepositoryURLCasing(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"name": "MusicBrainz",
 				"versions": []map[string]string{
@@ -57,7 +55,7 @@ func TestGetAvailablePackagesUsesJellyfinRepositoryURLCasing(t *testing.T) {
 	}))
 	defer server.Close()
 
-	packages, err := NewClient(server.URL, "test-key").GetAvailablePackages(context.Background())
+	packages, err := NewClient(server.URL, "test-key").GetAvailablePackages(t.Context())
 	if err != nil {
 		t.Fatalf("GetAvailablePackages() error = %v", err)
 	}
@@ -71,15 +69,15 @@ func TestInstallPluginUsesJellyfinRepositoryURLQueryCasing(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Query().Get("repositoryUrl"); got != "https://repo.example/manifest.json" {
-			t.Fatalf("repositoryUrl query = %q, want %q", got, "https://repo.example/manifest.json")
+			t.Errorf("repositoryUrl query = %q, want %q", got, "https://repo.example/manifest.json")
 		}
 		if got := r.URL.Query().Get("repositoryURL"); got != "" {
-			t.Fatalf("repositoryURL query = %q, want empty", got)
+			t.Errorf("repositoryURL query = %q, want empty", got)
 		}
 	}))
 	defer server.Close()
 
-	if err := NewClient(server.URL, "test-key").InstallPlugin(context.Background(), "MusicBrainz", "14.0.0.0", "https://repo.example/manifest.json"); err != nil {
+	if err := NewClient(server.URL, "test-key").InstallPlugin(t.Context(), "MusicBrainz", "14.0.0.0", "https://repo.example/manifest.json"); err != nil {
 		t.Fatalf("InstallPlugin() error = %v", err)
 	}
 }
@@ -89,7 +87,7 @@ func TestUserAndAuthResponsesUseJellyfinIDCasing(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/Users", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"Id":   "user-1",
 				"Name": "admin",
@@ -110,7 +108,7 @@ func TestUserAndAuthResponsesUseJellyfinIDCasing(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, "test-key")
-	users, err := client.GetUsers(context.Background())
+	users, err := client.GetUsers(t.Context())
 	if err != nil {
 		t.Fatalf("GetUsers() error = %v", err)
 	}
@@ -121,7 +119,7 @@ func TestUserAndAuthResponsesUseJellyfinIDCasing(t *testing.T) {
 		t.Fatalf("PasswordResetProviderID = %q, want %q", got, "password-reset-provider")
 	}
 
-	auth, err := client.AuthenticateByName(context.Background(), "admin", "password")
+	auth, err := client.AuthenticateByName(t.Context(), "admin", "password")
 	if err != nil {
 		t.Fatalf("AuthenticateByName() error = %v", err)
 	}
@@ -139,7 +137,7 @@ func TestAuthenticateByNameRejectionCarriesStatusCode(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := NewClient(server.URL, "").AuthenticateByName(context.Background(), "viewer", "wrong")
+	_, err := NewClient(server.URL, "").AuthenticateByName(t.Context(), "viewer", "wrong")
 	var httpErr *HTTPError
 	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("AuthenticateByName() error = %v, want an HTTPError with status 401", err)
@@ -150,10 +148,10 @@ func TestGetUserPolicyRawKeepsFieldsMissingFromUserPolicy(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
+		writeJSON(t, w, map[string]any{
 			"Id":   "user-1",
 			"Name": "viewer",
-			"Policy": map[string]interface{}{
+			"Policy": map[string]any{
 				"MaxParentalRating":    10,
 				"MaxParentalSubRating": 2,
 			},
@@ -161,7 +159,7 @@ func TestGetUserPolicyRawKeepsFieldsMissingFromUserPolicy(t *testing.T) {
 	}))
 	defer server.Close()
 
-	raw, err := NewClient(server.URL, "test-key").GetUserPolicyRaw(context.Background(), "user-1")
+	raw, err := NewClient(server.URL, "test-key").GetUserPolicyRaw(t.Context(), "user-1")
 	if err != nil {
 		t.Fatalf("GetUserPolicyRaw() error = %v", err)
 	}
@@ -194,7 +192,7 @@ func TestUpdateUserRawPostsBodyToUsersWithUserIDQuery(t *testing.T) {
 	defer server.Close()
 
 	userJSON := `{"Id":"user-1","Name":"renamed","Configuration":{"SubtitleLanguagePreference":"fre"}}`
-	if err := NewClient(server.URL, "test-key").UpdateUserRaw(context.Background(), "user-1", userJSON); err != nil {
+	if err := NewClient(server.URL, "test-key").UpdateUserRaw(t.Context(), "user-1", userJSON); err != nil {
 		t.Fatalf("UpdateUserRaw() error = %v", err)
 	}
 
@@ -210,7 +208,7 @@ func TestUpdateUserPasswordPostsPasswordsToUsersPasswordWithUserIDQuery(t *testi
 	t.Parallel()
 
 	var gotMethod, gotPath, gotUserID string
-	var gotBody map[string]json.RawMessage
+	var gotBody map[string]string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod, gotPath, gotUserID = r.Method, r.URL.Path, r.URL.Query().Get("userId")
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
@@ -220,21 +218,15 @@ func TestUpdateUserPasswordPostsPasswordsToUsersPasswordWithUserIDQuery(t *testi
 	}))
 	defer server.Close()
 
-	if err := NewClient(server.URL, "test-key").UpdateUserPassword(context.Background(), "user-1", "old", "new"); err != nil {
+	if err := NewClient(server.URL, "test-key").UpdateUserPassword(t.Context(), "user-1", "old", "new"); err != nil {
 		t.Fatalf("UpdateUserPassword() error = %v", err)
 	}
 
 	if gotMethod != http.MethodPost || gotPath != "/Users/Password" || gotUserID != "user-1" {
 		t.Fatalf("expected POST /Users/Password?userId=user-1, got %s %s with userId %q", gotMethod, gotPath, gotUserID)
 	}
-	want := map[string]string{"CurrentPw": `"old"`, "NewPw": `"new"`}
-	if len(gotBody) != len(want) {
-		t.Fatalf("body has fields %v, want only CurrentPw and NewPw", slices.Sorted(maps.Keys(gotBody)))
-	}
-	for field, value := range want {
-		if got := string(gotBody[field]); got != value {
-			t.Errorf("%s = %s, want %s", field, got, value)
-		}
+	if want := map[string]string{"CurrentPw": "old", "NewPw": "new"}; !maps.Equal(gotBody, want) {
+		t.Fatalf("body = %v, want %v", gotBody, want)
 	}
 }
 
@@ -249,10 +241,10 @@ func TestUserUpdatesRejectBlankIDWithoutSendingRequest(t *testing.T) {
 
 	c := NewClient(server.URL, "test-key")
 	for _, id := range []string{"", " ", "\t"} {
-		if err := c.UpdateUserRaw(context.Background(), id, `{"Name":"renamed"}`); !errors.Is(err, errBlankUserID) {
+		if err := c.UpdateUserRaw(t.Context(), id, `{"Name":"renamed"}`); !errors.Is(err, errBlankUserID) {
 			t.Errorf("UpdateUserRaw(%q) error = %v, want errBlankUserID", id, err)
 		}
-		if err := c.UpdateUserPassword(context.Background(), id, "", "new"); !errors.Is(err, errBlankUserID) {
+		if err := c.UpdateUserPassword(t.Context(), id, "", "new"); !errors.Is(err, errBlankUserID) {
 			t.Errorf("UpdateUserPassword(%q) error = %v, want errBlankUserID", id, err)
 		}
 	}
@@ -273,7 +265,7 @@ func TestGetScheduledTaskKeepsTheServedDocumentAndReportsAMissingTask(t *testing
 	defer server.Close()
 
 	c := NewClient(server.URL, "test-key")
-	task, err := c.GetScheduledTask(context.Background(), "task-1")
+	task, err := c.GetScheduledTask(t.Context(), "task-1")
 	if err != nil {
 		t.Fatalf("GetScheduledTask() error = %v", err)
 	}
@@ -284,7 +276,7 @@ func TestGetScheduledTaskKeepsTheServedDocumentAndReportsAMissingTask(t *testing
 		t.Errorf("task = %+v, want Id task-1 with one trigger", task)
 	}
 
-	if _, err := c.GetScheduledTask(context.Background(), "missing"); !IsNotFound(err) {
+	if _, err := c.GetScheduledTask(t.Context(), "missing"); !IsNotFound(err) {
 		t.Errorf("GetScheduledTask(missing) error = %v, want a not-found error", err)
 	}
 }
@@ -299,7 +291,7 @@ func TestRestartServerPostsSystemRestart(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if err := NewClient(server.URL, "test-key").RestartServer(context.Background()); err != nil {
+	if err := NewClient(server.URL, "test-key").RestartServer(t.Context()); err != nil {
 		t.Fatalf("RestartServer() error = %v", err)
 	}
 
@@ -348,7 +340,7 @@ func TestDirectoryExistsAsksValidatePathForADirectory(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			got, err := c.DirectoryExists(context.Background(), test.path)
+			got, err := c.DirectoryExists(t.Context(), test.path)
 			if (err != nil) != test.wantErr {
 				t.Fatalf("DirectoryExists(%q) error = %v, wantErr %t", test.path, err, test.wantErr)
 			}
@@ -378,7 +370,7 @@ func TestGetAvailableLibraryOptionsAsksForTheContentType(t *testing.T) {
 	}))
 	defer server.Close()
 
-	got, err := NewClient(server.URL, "test-key").GetAvailableLibraryOptions(context.Background(), "movies")
+	got, err := NewClient(server.URL, "test-key").GetAvailableLibraryOptions(t.Context(), "movies")
 	if err != nil {
 		t.Fatalf("GetAvailableLibraryOptions() error = %v", err)
 	}
@@ -396,11 +388,11 @@ func TestGetAvailableLibraryOptionsAsksForTheContentType(t *testing.T) {
 	}
 }
 
-func writeJSON(t *testing.T, w http.ResponseWriter, v interface{}) {
+func writeJSON(t *testing.T, w http.ResponseWriter, v any) {
 	t.Helper()
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		t.Fatalf("encoding response: %v", err)
+		t.Errorf("encoding response: %v", err)
 	}
 }

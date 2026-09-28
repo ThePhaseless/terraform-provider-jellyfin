@@ -113,7 +113,7 @@ func (c *Client) GetPluginConfiguration(ctx context.Context, pluginID string) (s
 }
 
 // UpdatePluginConfiguration updates the configuration for a plugin with raw JSON.
-func (c *Client) UpdatePluginConfiguration(ctx context.Context, pluginID string, configJSON string) error {
+func (c *Client) UpdatePluginConfiguration(ctx context.Context, pluginID, configJSON string) error {
 	path := fmt.Sprintf("/Plugins/%s/Configuration", url.PathEscape(pluginID))
 	if err := c.postRaw(ctx, path, configJSON); err != nil {
 		return fmt.Errorf("updating configuration for plugin %s: %w", pluginID, err)

@@ -160,8 +160,8 @@ func (c *Client) AuthenticateByName(ctx context.Context, username, password stri
 		return nil, fmt.Errorf("marshaling auth request: %w", err)
 	}
 
-	url := c.BaseURL + "/Users/AuthenticateByName"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
+	const path = "/Users/AuthenticateByName"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("creating auth request: %w", err)
 	}
@@ -175,8 +175,8 @@ func (c *Client) AuthenticateByName(ctx context.Context, username, password stri
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("authentication failed for user %s: %w", username, &HTTPError{Method: http.MethodPost, Path: "/Users/AuthenticateByName", StatusCode: resp.StatusCode, Body: readResponseBody(resp.Body)})
+	if err := checkStatus(http.MethodPost, path, resp); err != nil {
+		return nil, fmt.Errorf("authentication failed for user %s: %w", username, err)
 	}
 
 	var result AuthResult

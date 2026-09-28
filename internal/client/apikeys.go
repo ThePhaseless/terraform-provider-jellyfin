@@ -15,14 +15,11 @@ type APIKey struct {
 	AppName     string `json:"AppName"`
 }
 
-// APIKeyList represents the response from listing API keys.
-type APIKeyList struct {
-	Items []APIKey `json:"Items"`
-}
-
 // GetAPIKeys retrieves all API keys.
 func (c *Client) GetAPIKeys(ctx context.Context) ([]APIKey, error) {
-	var keyList APIKeyList
+	var keyList struct {
+		Items []APIKey `json:"Items"`
+	}
 	if err := c.getJSON(ctx, "/Auth/Keys", &keyList); err != nil {
 		return nil, fmt.Errorf("getting API keys: %w", err)
 	}
