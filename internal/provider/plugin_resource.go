@@ -336,6 +336,11 @@ func (r *PluginResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	}
 }
 
+func (r *PluginResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), req.ID)...)
+}
+
 // uninstall removes every listed version Jellyfin lets users uninstall, other than one a
 // jellyfin_plugin created this run, and returns the bundled versions it cannot remove.
 func (r *PluginResource) uninstall(ctx context.Context, id string) ([]client.InstalledPlugin, error) {
@@ -496,11 +501,6 @@ func notOfferedHint(err error, name, version string) string {
 		return ""
 	}
 	return fmt.Sprintf("\n\nNo enabled plugin repository offers %s %s for this server's Jellyfin version. Check the version as the repository lists it (four parts, such as 13.0.0.0), and the repository_url.", name, version)
-}
-
-func (r *PluginResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), req.ID)...)
 }
 
 // findInstalledPlugin returns the entry GET /Plugins lists for name at
