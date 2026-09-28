@@ -248,6 +248,7 @@ func TestUnitComplementReadsTheEnabledNamesInOrder(t *testing.T) {
 		{"a name the server stopped offering", `{"Order": ["Gone", "A"], "Disabled": []}`, map[string][]string{"": {"A"}}, `["Gone","A"]`, 1},
 		{"neither key", `{"Name": "n"}`, nil, `<null>`, 0},
 		{"names not listed", `{"Order": ["B", "A"], "Disabled": ["A"]}`, nil, `<null>`, 1},
+		{"an order that is not a list of strings", `{"Order": ["B", 1, "A"], "Disabled": ["C"]}`, map[string][]string{"": {"A", "B", "C"}}, `["A","B"]`, 1},
 	} {
 		var asked []string
 		ctx := WithAvailable(context.Background(), offering(c.offered, &asked))
@@ -260,12 +261,38 @@ func TestUnitComplementReadsTheEnabledNamesInOrder(t *testing.T) {
 		}
 	}
 
+	// A server that fails to list its names still refreshes: the value keeps
+	// its prior value, and a warning says why.
 	failing := WithAvailable(context.Background(), func(context.Context, string, string) ([]string, error) { return nil, errors.New("offline") })
-	if _, d := b.Flatten(failing, doc(t, `{"Order": []}`), types.ObjectNull(b.AttrTypes)); !d.HasError() || !strings.Contains(d[0].Detail(), "offline") {
-		t.Errorf("a failed lookup is not reported: %v", d)
+	read, d := b.Flatten(context.Background(), doc(t, `{"Name": "n"}`), types.ObjectNull(b.AttrTypes))
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	prior := with(t, read, "enabled", strs("X"))
+	got, d := b.Flatten(failing, doc(t, `{"Order": [], "Disabled": [], "Opts": [{"ItemType": "Movie", "FetcherOrder": []}]}`), object(t, prior))
+	if d.HasError() || d.WarningsCount() != 1 || !strings.Contains(d[0].Detail(), "offline") {
+		t.Errorf("a failed lookup is not reported once as a warning: %v", d)
+	}
+	if s := at(t, got, "enabled").String(); s != `["X"]` {
+		t.Errorf("after a failed lookup, enabled = %s, want its prior value", s)
 	}
 	if _, d := b.Flatten(context.Background(), doc(t, `{"Order": []}`), types.ObjectNull(b.AttrTypes)); !d.HasError() || !strings.Contains(d[0].Detail(), "bug in the provider") {
 		t.Errorf("a read without an AvailableFunc is not reported: %v", d)
+	}
+}
+
+func TestUnitComplementWriteReportsAFailedLookup(t *testing.T) {
+	b := sharedBinding(t)
+	model, d := b.Flatten(WithAvailable(context.Background(), offering(nil, new([]string))), doc(t, `{"Name": "n"}`), types.ObjectNull(b.AttrTypes))
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	m := with(t, model, "enabled", strs("A"))
+	m = with(t, m, "order", types.ListUnknown(types.StringType))
+	m = with(t, m, "disabled", types.ListUnknown(types.StringType))
+	failing := WithAvailable(context.Background(), func(context.Context, string, string) ([]string, error) { return nil, errors.New("offline") })
+	if d := b.Overlay(failing, doc(t, `{"Name": "n"}`), object(t, m)); !d.HasError() || !strings.Contains(d[0].Detail(), "offline") {
+		t.Errorf("a failed lookup is not reported as the reason the write fails: %v", d)
 	}
 }
 

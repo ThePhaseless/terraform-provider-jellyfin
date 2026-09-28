@@ -144,9 +144,9 @@ func (b *Binding) writeShared(ctx context.Context, doc map[string]json.RawMessag
 			return diag.Diagnostics{diag.NewAttributeErrorDiagnostic(at, "Missing "+f.Scope.Name,
 				fmt.Sprintf("%s is written for the %s next to it, so set %s.", at, f.Scope.Name, f.Scope.Name))}
 		}
-		offered, listed, diags := offeredNames(ctx, f, scope, at)
-		if diags.HasError() {
-			return diags
+		offered, listed, err := offeredNames(ctx, f, scope)
+		if err != nil {
+			return offeredNamesError(at, err)
 		}
 		if !listed {
 			return diag.Diagnostics{notListed(at, f, scope)}
@@ -161,9 +161,9 @@ func (b *Binding) writeShared(ctx context.Context, doc map[string]json.RawMessag
 	} else {
 		var offered []string
 		if f.Offered != "" && scoped {
-			offered, _, diags = offeredNames(ctx, f, scope, at)
-			if diags.HasError() {
-				return diags
+			var err error
+			if offered, _, err = offeredNames(ctx, f, scope); err != nil {
+				return offeredNamesError(at, err)
 			}
 		}
 		values = [][]string{ordered(names, servedStrings(ctx, doc, targets[0].keyPath, at), offered)}
@@ -203,22 +203,33 @@ func (b *Binding) scopeOf(obj types.Object, f *Field) (scope string, scoped bool
 	return s.ValueString(), true, nil
 }
 
+// errNoAvailableFunc is what offeredNames returns when the context carries no
+// AvailableFunc, which is a bug in the provider.
+var errNoAvailableFunc = errors.New("the provider did not ask for the names the Jellyfin server offers")
+
 // offeredNames asks the context's AvailableFunc; listed is false when the
 // server does not list the names it offers for scope.
-func offeredNames(ctx context.Context, f *Field, scope string, at path.Path) (offered []string, listed bool, diags diag.Diagnostics) {
+func offeredNames(ctx context.Context, f *Field, scope string) (offered []string, listed bool, err error) {
 	available, ok := ctx.Value(availableKey{}).(AvailableFunc)
 	if !ok || available == nil {
-		return nil, false, diag.Diagnostics{diag.NewErrorDiagnostic("Missing offered names",
-			fmt.Sprintf("%s needs the names the Jellyfin server offers, and the provider did not ask for them. This is a bug in the provider.", at))}
+		return nil, false, errNoAvailableFunc
 	}
-	offered, err := available(ctx, f.Offered, scope)
+	offered, err = available(ctx, f.Offered, scope)
 	switch {
 	case err == nil:
 		return offered, true, nil
 	case errors.Is(err, ErrNotOffered):
 		return nil, false, nil
 	}
-	return nil, false, diag.Diagnostics{diag.NewAttributeErrorDiagnostic(at, "Failed to read the names Jellyfin offers", err.Error())}
+	return nil, false, err
+}
+
+func offeredNamesError(at path.Path, err error) diag.Diagnostics {
+	if errors.Is(err, errNoAvailableFunc) {
+		return diag.Diagnostics{diag.NewErrorDiagnostic("Missing offered names",
+			fmt.Sprintf("%s needs the names the Jellyfin server offers, and the provider did not ask for them. This is a bug in the provider.", at))}
+	}
+	return diag.Diagnostics{diag.NewAttributeErrorDiagnostic(at, "Failed to read the names Jellyfin offers", err.Error())}
 }
 
 func forScope(scope string) string {
@@ -251,8 +262,10 @@ func notOffered(at path.Path, f *Field, name, scope string, offered []string) di
 }
 
 // readComplement reads what d's Complement writes, or null when the server
-// serves neither of its keys or does not list the names it offers.
-func (b *Binding) readComplement(ctx context.Context, d docField, doc map[string]json.RawMessage, t attr.Type, at path.Path) (attr.Value, diag.Diagnostics) {
+// serves neither of its keys or does not list the names it offers. When the
+// server fails to say which names it offers, the value keeps prior with a
+// warning, so that a refresh still reads every other attribute.
+func (b *Binding) readComplement(ctx context.Context, d docField, doc map[string]json.RawMessage, prior attr.Value, t attr.Type, at path.Path) (attr.Value, diag.Diagnostics) {
 	f := d.f
 	lists := make([][]string, len(f.Shares))
 	found := false
@@ -261,11 +274,9 @@ func (b *Binding) readComplement(ctx context.Context, d docField, doc map[string
 		if !ok {
 			return nullOf(ctx, t), missingShare(f)
 		}
-		raw, ok := lookupPath(ctx, doc, sd.keyPath, at)
-		if !ok || isNull(raw) || json.Unmarshal(raw, &lists[i]) != nil {
-			continue
+		if names, ok := servedList(ctx, doc, sd.keyPath, at); ok {
+			lists[i], found = names, true
 		}
-		found = true
 	}
 	if !found || len(lists) != 2 {
 		return nullOf(ctx, t), nil
@@ -280,19 +291,33 @@ func (b *Binding) readComplement(ctx context.Context, d docField, doc map[string
 			_ = json.Unmarshal(raw, &scope)
 		}
 	}
-	offered, listed, diags := offeredNames(ctx, f, scope, at)
-	if diags.HasError() || !listed {
-		return nullOf(ctx, t), diags
+	offered, listed, err := offeredNames(ctx, f, scope)
+	switch {
+	case errors.Is(err, errNoAvailableFunc):
+		return nullOf(ctx, t), offeredNamesError(at, err)
+	case err != nil:
+		return prior, diag.Diagnostics{diag.NewWarningDiagnostic("Failed to read the names Jellyfin offers",
+			"The Jellyfin server did not say which providers it offers, so the lists of enabled providers keep their previous values: "+err.Error())}
+	case !listed:
+		return nullOf(ctx, t), nil
 	}
 	return stringList(enabledOf(lists[0], lists[1], offered)), nil
 }
 
-func servedStrings(ctx context.Context, doc map[string]json.RawMessage, keyPath []string, at path.Path) []string {
-	var out []string
-	if raw, ok := lookupPath(ctx, doc, keyPath, at); ok && !isNull(raw) {
-		_ = json.Unmarshal(raw, &out)
+// servedList returns the list of strings the server serves at keyPath, or
+// false when it serves none there.
+func servedList(ctx context.Context, doc map[string]json.RawMessage, keyPath []string, at path.Path) ([]string, bool) {
+	raw, ok := lookupPath(ctx, doc, keyPath, at)
+	var names []string
+	if !ok || isNull(raw) || json.Unmarshal(raw, &names) != nil {
+		return nil, false
 	}
-	return out
+	return names, true
+}
+
+func servedStrings(ctx context.Context, doc map[string]json.RawMessage, keyPath []string, at path.Path) []string {
+	names, _ := servedList(ctx, doc, keyPath, at)
+	return names
 }
 
 // Jellyfin matches enabled and disabled names ignoring case, but ranks by the

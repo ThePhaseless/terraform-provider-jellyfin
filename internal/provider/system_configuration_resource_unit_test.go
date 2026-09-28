@@ -523,3 +523,44 @@ func TestUnitSystemApplyWritesTheKeysItsFetchersShare(t *testing.T) {
 		t.Errorf("asked for the movies options %d times, want once for the read and once for the apply", asked["movies"])
 	}
 }
+
+// A server that fails to list its providers is asked once per operation, and
+// the refresh still reads the rest of the configuration.
+func TestUnitSystemReadSurvivesAFailingOfferedProvidersLookup(t *testing.T) {
+	const served = `{"ServerName": "s", "MetadataOptions": [
+		{"ItemType": "Movie", "DisabledMetadataFetchers": [], "MetadataFetcherOrder": [], "DisabledImageFetchers": [], "ImageFetcherOrder": []},
+		{"ItemType": "Series", "DisabledMetadataFetchers": [], "MetadataFetcherOrder": [], "DisabledImageFetchers": [], "ImageFetcherOrder": []}]}`
+	var mu sync.Mutex
+	asked := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/Libraries/AvailableOptions":
+			mu.Lock()
+			asked++
+			mu.Unlock()
+			http.Error(w, "a metadata plugin threw", http.StatusInternalServerError)
+		case "/System/Configuration":
+			_, _ = io.WriteString(w, served)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	r := NewSystemConfigurationResource()
+	resp := readAgainst(t, r, client.NewClient(srv.URL, "k"), tfsdk.State(planRead(t, r, `{"ServerName": "old"}`)))
+	if resp.Diagnostics.HasError() || resp.Diagnostics.WarningsCount() != 1 {
+		t.Fatalf("read diagnostics = %v, want one warning", resp.Diagnostics)
+	}
+	var serverName types.String
+	resp.Diagnostics.Append(resp.State.GetAttribute(context.Background(), path.Root("server_name"), &serverName)...)
+	if serverName.ValueString() != "s" {
+		t.Errorf("server_name = %s, want the served name", serverName)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if asked != 1 {
+		t.Errorf("asked for the offered providers %d times, want once", asked)
+	}
+}

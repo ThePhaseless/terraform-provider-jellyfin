@@ -149,7 +149,7 @@ func (b *Binding) readField(ctx context.Context, d docField, doc map[string]json
 	case ModeNeverSent:
 		return nullOf(ctx, t), nil
 	case ModeComplement:
-		return b.readComplement(ctx, d, doc, t, at)
+		return b.readComplement(ctx, d, doc, prior, t, at)
 	}
 	keyTrail := trailOf(trail, d.keyPath)
 	var diags diag.Diagnostics

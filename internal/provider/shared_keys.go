@@ -22,29 +22,33 @@ import (
 )
 
 // offeredProviders answers wire.AvailableFunc from GET
-// /Libraries/AvailableOptions, asking once per content type.
+// /Libraries/AvailableOptions, asking once per content type. A failed request
+// is remembered too, so a server that cannot answer is asked once, not once
+// for every list that needs the answer.
 type offeredProviders struct {
 	c      *client.Client
-	served map[string]*client.AvailableLibraryOptions
+	served map[string]servedOptions
+}
+
+type servedOptions struct {
+	options *client.AvailableLibraryOptions
+	err     error
 }
 
 func newOfferedProviders(c *client.Client) *offeredProviders {
-	return &offeredProviders{c: c, served: map[string]*client.AvailableLibraryOptions{}}
+	return &offeredProviders{c: c, served: map[string]servedOptions{}}
 }
 
 func (o *offeredProviders) forContentType(ctx context.Context, contentType string) (*client.AvailableLibraryOptions, error) {
 	if served, ok := o.served[contentType]; ok {
-		return served, nil
+		return served.options, served.err
 	}
 	if o.c == nil {
 		return nil, fmt.Errorf("no Jellyfin client to ask which providers the server offers")
 	}
-	served, err := o.c.GetAvailableLibraryOptions(ctx, contentType)
-	if err != nil {
-		return nil, err
-	}
-	o.served[contentType] = served
-	return served, nil
+	options, err := o.c.GetAvailableLibraryOptions(ctx, contentType)
+	o.served[contentType] = servedOptions{options: options, err: err}
+	return options, err
 }
 
 func optionNames(options []client.AvailableOption) []string {
