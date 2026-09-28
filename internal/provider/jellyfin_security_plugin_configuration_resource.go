@@ -231,7 +231,9 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 	enrollmentDeadline.Validators = []validator.String{
 		stringvalidator.RegexMatches(isoDateTimePattern, "must be an ISO 8601 date-time such as 2030-01-01T00:00:00Z, or empty"),
 	}
-	enrollmentDeadline.PlanModifiers = append(enrollmentDeadline.PlanModifiers, sameInstantPlanModifier{})
+	// State from before a missing deadline read as "" holds it as null, which
+	// UseStateForUnknown would plan, although apply reads "".
+	enrollmentDeadline.PlanModifiers = []planmodifier.String{stringplanmodifier.UseNonNullStateForUnknown(), sameInstantPlanModifier{}}
 
 	resp.Schema = schema.Schema{
 		Description:         "Manages the JellyfinSecurity plugin configuration with typed attributes.",

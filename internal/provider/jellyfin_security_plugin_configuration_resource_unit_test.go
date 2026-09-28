@@ -622,6 +622,22 @@ func TestUnitSecurityPluginEnrollmentDeadlineClears(t *testing.T) {
 		t.Fatal("enrollment_deadline is not a string attribute")
 	}
 	testUnitAssertStringValidation(t, a, map[string]bool{"": false, "2030-01-01T00:00:00Z": false, "tomorrow": true})
+
+	// State from releases that read no deadline as null plans it unknown,
+	// as apply reads it as "".
+	resp := planmodifier.StringResponse{PlanValue: types.StringUnknown()}
+	for _, m := range a.PlanModifiers {
+		m.PlanModifyString(ctx, planmodifier.StringRequest{
+			Path:        path.Root("enrollment_deadline"),
+			State:       tfsdk.State{Raw: tftypes.NewValue(tftypes.Object{}, map[string]tftypes.Value{})},
+			ConfigValue: types.StringNull(),
+			PlanValue:   resp.PlanValue,
+			StateValue:  types.StringNull(),
+		}, &resp)
+	}
+	if !resp.PlanValue.IsUnknown() {
+		t.Errorf("a null prior deadline plans %s, want unknown", resp.PlanValue)
+	}
 }
 
 // A list the plugin stores joined into one string must not hold values that
