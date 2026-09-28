@@ -219,10 +219,8 @@ func getPublicSystemInfo(ctx context.Context, c *client.Client) (*client.PublicS
 		}
 		lastErr = err
 
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(startupStatusDelay):
+		if err := pause(ctx, startupStatusDelay); err != nil {
+			return nil, err
 		}
 	}
 
