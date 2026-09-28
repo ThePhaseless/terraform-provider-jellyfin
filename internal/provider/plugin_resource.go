@@ -202,13 +202,8 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 
 	if installed == nil {
 		if err := r.client.InstallPlugin(ctx, data.Name.ValueString(), resolvedVersion, data.RepositoryURL.ValueString()); err != nil {
-			// If the install failed because the plugin is already installed
-			// (e.g. a concurrent install raced ahead of us), treat it as
-			// success and reconcile via the installed list below.
-			if !client.IsNotFound(err) {
-				resp.Diagnostics.AddError("Failed to install plugin", err.Error())
-				return
-			}
+			resp.Diagnostics.AddError("Failed to install plugin", err.Error()+notOfferedHint(err, data.Name.ValueString(), resolvedVersion))
+			return
 		}
 
 		installed, err = r.waitForPlugin(ctx, data.Name.ValueString(), resolvedVersion, pluginInstallTimeout)
@@ -518,12 +513,24 @@ func (r *PluginResource) waitForPlugin(ctx context.Context, name, version string
 			seen = p.Version
 		}
 		tflog.Debug(ctx, "Waiting for plugin to appear", map[string]interface{}{"plugin": name, "version": version, "seen": seen})
-		time.Sleep(pluginPollInterval)
+		if err := pause(ctx, min(pluginPollInterval, time.Until(deadline))); err != nil {
+			return nil, err
+		}
 	}
 	if seen != "" {
 		return nil, fmt.Errorf("plugin %q is installed at %s but %s did not appear within %s", name, seen, version, timeout)
 	}
 	return nil, fmt.Errorf("plugin %q did not appear within %s", name, timeout)
+}
+
+// notOfferedHint explains the 404 Jellyfin answers an install with when none
+// of its enabled repositories offers the package at that version for this
+// server; it installs a version that is already installed again.
+func notOfferedHint(err error, name, version string) string {
+	if !client.IsNotFound(err) {
+		return ""
+	}
+	return fmt.Sprintf("\n\nNo enabled plugin repository offers %s %s for this server's Jellyfin version. Check the version as the repository lists it (four parts, such as 13.0.0.0), and the repository_url.", name, version)
 }
 
 func (r *PluginResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {

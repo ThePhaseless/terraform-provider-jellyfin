@@ -45,6 +45,8 @@ type fakePluginServer struct {
 	// packagesStatus, when set, is what GET /Packages answers instead of the
 	// packages.
 	packagesStatus int
+	// installStatus, when set, replaces the 204 an install answers with.
+	installStatus int
 }
 
 func (f *fakePluginServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -78,8 +80,11 @@ func (f *fakePluginServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		status := http.StatusNoContent
-		if r.Method == http.MethodDelete {
+		switch {
+		case r.Method == http.MethodDelete:
 			status = f.uninstall(strings.TrimPrefix(r.URL.Path, "/Plugins/"))
+		case f.installStatus != 0:
+			status = f.installStatus
 		}
 		if f.inFlight > 1 {
 			status = http.StatusBadRequest
@@ -426,5 +431,44 @@ func TestUnitPluginWaitIgnoresVersionPendingDeletion(t *testing.T) {
 
 	if p, err := r.waitForPlugin(context.Background(), "Bookshelf", "13.0.0.0", time.Millisecond); err == nil {
 		t.Fatalf("waitForPlugin returned %+v, want an error while only a version pending deletion is listed", p)
+	}
+}
+
+// Jellyfin answers an install with 404 when no enabled repository offers the
+// package at that version for the server, which Create reports at once
+// instead of waiting for a plugin that never appears.
+func TestUnitPluginCreateReportsAVersionNoRepositoryOffers(t *testing.T) {
+	fake := &fakePluginServer{installStatus: http.StatusNotFound}
+	r := newFakePluginResource(t, fake)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	resourceSchema := pluginResourceSchema(t)
+	resp := &resource.CreateResponse{State: tfsdk.State{Schema: resourceSchema, Raw: tftypes.NewValue(resourceSchema.Type().TerraformType(ctx), nil)}}
+	r.Create(ctx, resource.CreateRequest{Plan: pluginResourcePlan(t, PluginResourceModel{
+		ID:               types.StringUnknown(),
+		Name:             types.StringValue("Bookshelf"),
+		Version:          types.StringValue("13.0.0"),
+		InstalledVersion: types.StringUnknown(),
+		RepositoryURL:    types.StringValue(stableRepoURL),
+	})}, resp)
+	if !resp.Diagnostics.HasError() || !strings.Contains(resp.Diagnostics.Errors()[0].Detail(), "No enabled plugin repository offers Bookshelf 13.0.0") {
+		t.Errorf("Create diagnostics = %v, want the version reported as not offered", resp.Diagnostics)
+	}
+	if ctx.Err() != nil {
+		t.Error("Create waited for the plugin instead of reporting the 404")
+	}
+}
+
+func TestUnitPluginWaitStopsWhenCancelled(t *testing.T) {
+	r := newFakePluginResource(t, &fakePluginServer{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	if _, err := r.waitForPlugin(ctx, "Bookshelf", "13.0.0.0", time.Minute); err == nil {
+		t.Fatal("waitForPlugin found a plugin nothing lists")
+	}
+	if elapsed := time.Since(start); elapsed >= pluginPollInterval {
+		t.Errorf("waitForPlugin returned after %s, not as soon as the context was cancelled", elapsed)
 	}
 }
