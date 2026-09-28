@@ -631,6 +631,18 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
+	// The options are written once the library exists, where a failure taints
+	// it and every later apply replaces it only to fail again. Writing them
+	// into an empty document first catches here what does not depend on the
+	// options the server serves, such as a subtitle fetcher it does not
+	// offer. The plan cannot check that: a plugin the same apply installs
+	// offers its fetchers only after the plan.
+	ctx = wire.WithAvailable(ctx, newOfferedProviders(r.client).forLibrary(data.CollectionType.ValueString()))
+	if d := b.OverlayModel(ctx, map[string]json.RawMessage{}, &data); d.HasError() {
+		resp.Diagnostics.Append(d...)
+		return
+	}
+
 	// Jellyfin does not refuse a duplicate name: it adds the library as
 	// "<name>2", and the lookup by name below would then adopt the existing
 	// library while the new one is left unmanaged.
@@ -656,7 +668,6 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 		resp.Diagnostics.AddError("Failed to read library after creation", err.Error())
 		return
 	}
-	ctx = wire.WithAvailable(ctx, newOfferedProviders(r.client).forLibrary(folder.CollectionType))
 
 	// Track the library before its options are applied: a failure below then
 	// leaves it in state as tainted, to be replaced, rather than on the server

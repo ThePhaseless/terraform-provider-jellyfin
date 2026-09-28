@@ -551,6 +551,31 @@ func TestAccLibraryResourceProviderLists(t *testing.T) {
 	})
 }
 
+func TestAccLibraryResourceCreateWithUnofferedSubtitleFetcherLeavesNoLibrary(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckNoLibraryNamed(t, "TestLists"),
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccLibraryProviderListsConfig(`subtitle_fetchers = ["Open Subtitles"]`),
+				ExpectError: regexp.MustCompile(`library_options.subtitle_fetchers\s+lists\s+"Open\s+Subtitles",\s+which\s+is\s+not\s+one\s+of\s+the\s+SubtitleFetchers\s+the\s+Jellyfin\s+server\s+offers:\s+none`),
+			},
+			{
+				PreConfig: func() {
+					if err := testAccCheckNoLibraryNamed(t, "TestLists")(nil); err != nil {
+						t.Fatal(err)
+					}
+				},
+				Config: testAccLibraryProviderListsConfig(`subtitle_fetchers = []`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction("jellyfin_library.test", plancheck.ResourceActionCreate)},
+				},
+			},
+		},
+	})
+}
+
 func testAccLibraryProviderListsConfig(options string) string {
 	return `
 resource "jellyfin_library" "test" {
