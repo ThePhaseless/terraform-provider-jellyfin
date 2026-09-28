@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -605,16 +606,41 @@ func (r *UserResource) applyPolicy(ctx context.Context, data *UserResourceModel,
 	if err != nil {
 		return fmt.Errorf("parsing existing policy: %w", err)
 	}
+	wasAdministrator := jsonTrue(baseMap[policyIsAdministrator])
 
 	if d := b.OverlayModel(ctx, baseMap, data); d.HasError() {
 		diags.Append(d...)
 		return fmt.Errorf("overlaying policy")
 	}
 
-	payloadBytes, err := json.Marshal(baseMap)
+	// Jellyfin refuses to disable an administrator, going by the flag the
+	// user holds before the write, so a policy that demotes and disables the
+	// user at once is posted in two steps: the demotion, then the rest.
+	if wasAdministrator && !jsonTrue(baseMap[policyIsAdministrator]) && jsonTrue(baseMap[policyIsDisabled]) {
+		demoted := maps.Clone(baseMap)
+		demoted[policyIsDisabled] = json.RawMessage("false")
+		if err := r.postPolicy(ctx, id, demoted); err != nil {
+			return err
+		}
+	}
+	return r.postPolicy(ctx, id, baseMap)
+}
+
+// The policy keys applyPolicy reads to order the writes Jellyfin accepts.
+const (
+	policyIsAdministrator = "IsAdministrator"
+	policyIsDisabled      = "IsDisabled"
+)
+
+func (r *UserResource) postPolicy(ctx context.Context, id string, policy map[string]json.RawMessage) error {
+	payloadBytes, err := json.Marshal(policy)
 	if err != nil {
 		return fmt.Errorf("marshaling policy: %w", err)
 	}
-
 	return r.client.UpdateUserPolicyRaw(ctx, id, string(payloadBytes))
+}
+
+func jsonTrue(raw json.RawMessage) bool {
+	var b bool
+	return json.Unmarshal(raw, &b) == nil && b
 }

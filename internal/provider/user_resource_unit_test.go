@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
@@ -105,5 +106,50 @@ func TestUnitUserRenameKeepsConfiguration(t *testing.T) {
 	}
 	if got := string(posted["Configuration"]); got != `{"SubtitleLanguagePreference":"fre"}` {
 		t.Errorf("Configuration = %s, want the one read from the server", got)
+	}
+}
+
+// Jellyfin refuses to disable a user that is an administrator before the
+// write, so demoting and disabling an administrator at once takes two posts.
+func TestUnitUserPolicyDemotesBeforeDisabling(t *testing.T) {
+	t.Parallel()
+
+	policy := map[string]any{"IsAdministrator": true, "IsDisabled": false, "EnableAllFolders": true}
+	var posts int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Users/user-1":
+			_ = json.NewEncoder(w).Encode(map[string]any{"Id": "user-1", "Name": "n", "Policy": policy})
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/user-1/Policy":
+			posts++
+			var posted map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
+				t.Errorf("decoding posted policy: %v", err)
+			}
+			if posted["IsDisabled"] == true && policy["IsAdministrator"] == true {
+				http.Error(w, "Administrators cannot be disabled.", http.StatusForbidden)
+				return
+			}
+			policy = posted
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	r := &UserResource{client: client.NewClient(server.URL, "k")}
+	data := UserResourceModel{
+		IsAdministrator:  types.BoolValue(false),
+		IsDisabled:       types.BoolValue(true),
+		EnableAllFolders: types.BoolValue(true),
+	}
+	var diags diag.Diagnostics
+	if err := r.applyPolicy(context.Background(), &data, "user-1", &diags); err != nil || diags.HasError() {
+		t.Fatalf("applyPolicy() error = %v, %v", err, diags)
+	}
+	if policy["IsAdministrator"] != false || policy["IsDisabled"] != true || posts != 2 {
+		t.Errorf("after %d posts the policy is %v, want a disabled user that is no administrator", posts, policy)
 	}
 }
