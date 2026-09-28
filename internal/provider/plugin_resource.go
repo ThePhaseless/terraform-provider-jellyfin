@@ -613,8 +613,8 @@ func samePluginVersion(got, want string) bool {
 	return release.Compare(got, want) == 0
 }
 
-// resolveRepositoryURL attempts to find the repository URL for a plugin by
-// querying the /Packages endpoint and matching on name and version.
+// resolveRepositoryURL finds the repository URL of the plugin name at
+// version from the packages the server offers, or returns "".
 func (r *PluginResource) resolveRepositoryURL(ctx context.Context, name, version string) string {
 	pkgs, err := r.client.GetAvailablePackages(ctx)
 	if err != nil {
@@ -624,23 +624,31 @@ func (r *PluginResource) resolveRepositoryURL(ctx context.Context, name, version
 		})
 		return ""
 	}
-
-	for _, pkg := range pkgs {
-		if pkg.Name == name {
-			for _, v := range pkg.Versions {
-				if v.Version == version && v.RepositoryURL != "" {
-					return v.RepositoryURL
-				}
-			}
-
-			tflog.Debug(ctx, "Could not resolve repository URL for plugin (exact version unavailable)", map[string]interface{}{
-				"plugin":  name,
-				"version": version,
-			})
-			return ""
-		}
+	repositoryURL := PluginRepositoryURL(pkgs, name, version)
+	if repositoryURL == "" {
+		tflog.Debug(ctx, "Could not resolve repository URL for plugin (exact version unavailable)", map[string]interface{}{
+			"plugin":  name,
+			"version": version,
+		})
 	}
+	return repositoryURL
+}
 
+// PluginRepositoryURL returns the repository URL jellyfin_plugin reads for
+// the plugin name at version: that of the first package pkgs lists with the
+// name, for its entry at exactly that version, or "".
+func PluginRepositoryURL(pkgs []client.PackageInfo, name, version string) string {
+	for _, pkg := range pkgs {
+		if pkg.Name != name {
+			continue
+		}
+		for _, v := range pkg.Versions {
+			if v.Version == version && v.RepositoryURL != "" {
+				return v.RepositoryURL
+			}
+		}
+		return ""
+	}
 	return ""
 }
 

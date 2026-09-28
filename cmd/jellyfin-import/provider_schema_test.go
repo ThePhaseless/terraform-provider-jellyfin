@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
@@ -110,13 +109,9 @@ func TestLibraryCollectionTypesMatchProviderValidator(t *testing.T) {
 				ConfigValue: types.StringValue(collectionType),
 			}, &resp)
 		}
-		if accepted := !resp.Diagnostics.HasError(); accepted != libraryCollectionTypes[collectionType] {
-			t.Errorf("jellyfin_library accepts %q: %t, but libraryCollectionTypes says %t", collectionType, accepted, libraryCollectionTypes[collectionType])
-		}
-	}
-	for collectionType := range libraryCollectionTypes {
-		if !slices.Contains(jellyfinTypes, collectionType) {
-			t.Errorf("libraryCollectionTypes has %q, which Jellyfin does not offer", collectionType)
+		_, imported := provider.LibraryCollectionType(collectionType)
+		if accepted := !resp.Diagnostics.HasError(); accepted != imported {
+			t.Errorf("jellyfin_library accepts %q: %t, but the importer imports it: %t", collectionType, accepted, imported)
 		}
 	}
 }

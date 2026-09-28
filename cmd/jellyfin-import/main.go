@@ -267,18 +267,6 @@ func (g *generator) generateUsers() ([]string, []string, error) {
 	return imports, resources, nil
 }
 
-// libraryCollectionTypes are the collection types jellyfin_library accepts.
-var libraryCollectionTypes = map[string]bool{
-	"movies":      true,
-	"tvshows":     true,
-	"music":       true,
-	"musicvideos": true,
-	"books":       true,
-	"homevideos":  true,
-	"boxsets":     true,
-	"mixed":       true,
-}
-
 func (g *generator) generateLibraries() ([]string, []string, error) {
 	folders, err := g.client.GetVirtualFolders(g.context())
 	if err != nil {
@@ -287,16 +275,11 @@ func (g *generator) generateLibraries() ([]string, []string, error) {
 
 	var imports, resources []string
 	for _, folder := range folders {
-		// Jellyfin's web UI creates a mixed library without a collection type;
-		// the provider reads that as mixed and rejects "".
-		collectionType := folder.CollectionType
-		if collectionType == "" {
-			collectionType = "mixed"
-		}
 		// collection_type is checked against a fixed list and replaces the
 		// library when it changes, so for any other type no configuration both
 		// passes validation and matches the imported state.
-		if !libraryCollectionTypes[collectionType] {
+		collectionType, accepted := provider.LibraryCollectionType(folder.CollectionType)
+		if !accepted {
 			g.warnf("skipping library %q: jellyfin_library does not accept its collection type %q", folder.Name, folder.CollectionType)
 			continue
 		}
@@ -413,22 +396,11 @@ func (g *generator) resolvePluginRepoURLs(plugins []client.InstalledPlugin) map[
 	if err != nil {
 		return result
 	}
-
 	for _, p := range plugins {
-		for _, pkg := range packages {
-			if pkg.Name != p.Name {
-				continue
-			}
-			for _, v := range pkg.Versions {
-				if v.Version == p.Version && v.RepositoryURL != "" {
-					result[p.ID] = v.RepositoryURL
-					break
-				}
-			}
-			break
+		if repositoryURL := provider.PluginRepositoryURL(packages, p.Name, p.Version); repositoryURL != "" {
+			result[p.ID] = repositoryURL
 		}
 	}
-
 	return result
 }
 

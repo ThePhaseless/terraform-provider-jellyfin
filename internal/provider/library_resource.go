@@ -250,6 +250,13 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 // spelling, so any other spelling would read back as a different value.
 var collectionTypes = []string{"movies", "tvshows", "music", "musicvideos", "homevideos", "boxsets", "books", "mixed"}
 
+// LibraryCollectionType returns the collection_type jellyfin_library reads for
+// a library Jellyfin lists with served, and whether the resource accepts it.
+func LibraryCollectionType(served string) (string, bool) {
+	collectionType := flattenCollectionType(served).ValueString()
+	return collectionType, slices.Contains(collectionTypes, collectionType)
+}
+
 // Jellyfin gives a library created without a collection type the same null
 // collection type as one created as mixed, and only its library listing tells
 // them apart, so reading it as an empty string would force a replacement that
