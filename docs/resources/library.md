@@ -79,8 +79,8 @@ Optional:
 - `cache_images_in_library` (Boolean, Deprecated) Whether images are cached in the library. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `chapter_image_interval_seconds` (Number, Deprecated) Chapter image interval in seconds. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `disabled` (Boolean) Whether the library is disabled, the inverse of Jellyfin's `Enabled` option.
-- `disabled_image_fetchers` (List of String, Deprecated) Disabled image fetchers. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
-- `disabled_metadata_fetchers` (List of String, Deprecated) Disabled metadata fetchers. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `disabled_image_fetchers` (List of String, Deprecated) Disabled image fetchers for the whole library; Jellyfin only has them per item type, where `image_fetchers` in `type_options` enables the fetchers it lists. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `disabled_metadata_fetchers` (List of String, Deprecated) Disabled metadata fetchers for the whole library; Jellyfin only has them per item type, where `metadata_fetchers` in `type_options` enables the fetchers it lists. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `disabled_metadata_savers` (List of String, Deprecated) Disabled metadata savers. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `disabled_subtitle_fetchers` (List of String, Deprecated) Disabled subtitle fetchers. Deprecated: list the enabled subtitle fetchers in priority order in `subtitle_fetchers` instead, which disables the rest. It will be removed in a future release.
 - `download_images_in_advance` (Boolean, Deprecated) Whether images are downloaded in advance. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
@@ -93,11 +93,11 @@ Optional:
 - `enable_realtime_monitor` (Boolean) Whether realtime monitoring is enabled.
 - `extract_chapters_during_library_scan` (Boolean) Whether chapter images are extracted during the library scan.
 - `extract_media_information_during_library_scan` (Boolean, Deprecated) Whether media information is extracted during library scan. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
-- `image_fetcher_order` (List of String, Deprecated) Image fetcher order for the whole library; Jellyfin only has it per item type, as `image_fetcher_order` in `type_options`. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `image_fetcher_order` (List of String, Deprecated) Image fetcher order for the whole library; Jellyfin only has it per item type, which `image_fetchers` in `type_options` sets. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `import_missing_episodes` (Boolean, Deprecated) Whether missing episodes are imported. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `local_metadata_reader_order` (List of String) Local metadata reader order.
 - `metadata_country_code` (String) Metadata country code.
-- `metadata_fetcher_order` (List of String, Deprecated) Metadata fetcher order for the whole library; Jellyfin only has it per item type, as `metadata_fetcher_order` in `type_options`. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `metadata_fetcher_order` (List of String, Deprecated) Metadata fetcher order for the whole library; Jellyfin only has it per item type, which `metadata_fetchers` in `type_options` sets. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `metadata_refresh_mode` (String, Deprecated) Metadata refresh mode. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `path_infos` (Attributes List) Path information entries. (see [below for nested schema](#nestedatt--library_options--path_infos))
 - `preferred_metadata_language` (String) Preferred metadata language.
