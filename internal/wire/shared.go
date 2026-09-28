@@ -186,7 +186,8 @@ func (b *Binding) writeShared(ctx context.Context, doc map[string]json.RawMessag
 }
 
 // scopeOf returns the value of f's scope attribute in obj, or "" when f has
-// none; scoped is false while that attribute is null or unknown.
+// none; scoped is false while that attribute is null, unknown or empty, as
+// the server lists no names for an empty scope.
 func (b *Binding) scopeOf(obj types.Object, f *Field) (scope string, scoped bool, diags diag.Diagnostics) {
 	if f.Scope == nil {
 		return "", true, nil
@@ -197,7 +198,7 @@ func (b *Binding) scopeOf(obj types.Object, f *Field) (scope string, scoped bool
 	}
 	sv, _ := valueAt(obj, sd.attrPath)
 	s, ok := sv.(types.String)
-	if !ok || s.IsNull() || s.IsUnknown() {
+	if !ok || s.IsNull() || s.IsUnknown() || s.ValueString() == "" {
 		return "", false, nil
 	}
 	return s.ValueString(), true, nil

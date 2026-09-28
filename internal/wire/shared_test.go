@@ -469,3 +469,29 @@ func TestUnitOrderedRanksEachServedOrOfferedSpellingOfANameWithIt(t *testing.T) 
 		}
 	}
 }
+
+// An entry whose scope is empty orders the names as they are: the server
+// lists no names for it, so Orders does not ask.
+func TestUnitOrdersAsksNothingForAnEmptyScope(t *testing.T) {
+	b := sharedBinding(t)
+	var asked []string
+	ctx := WithAvailable(context.Background(), offering(map[string][]string{"": {"A", "B"}}, &asked))
+	served := `{"Types": [{"Type": "", "Fetchers": ["B"], "FetcherOrder": ["B"]}]}`
+	model, d := b.Flatten(ctx, doc(t, served), types.ObjectNull(b.AttrTypes))
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	m := with(t, model, "types[0].fetchers", strs("a"))
+	m = with(t, m, "types[0].fetcher_order", types.ListUnknown(types.StringType))
+	got := doc(t, served)
+	if d := b.Overlay(ctx, got, object(t, m)); d.HasError() {
+		t.Fatal(d)
+	}
+	entry, ok := jsonValue(t, got["Types"], 0).(map[string]any)
+	if !ok {
+		t.Fatalf("wrote the entry %s", got["Types"])
+	}
+	if s := canonical(t, entry["FetcherOrder"]); s != `["a","B"]` || len(asked) != 0 {
+		t.Errorf("wrote the order %s after asking for %q, want [\"a\",\"B\"] without asking", s, asked)
+	}
+}
