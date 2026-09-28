@@ -10,6 +10,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/hashicorp/terraform-plugin-framework/provider"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 func TestConfigureClientBootstrapsUnconfiguredServer(t *testing.T) {
@@ -160,5 +164,34 @@ func writeProviderJSON(t *testing.T, w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		t.Fatalf("encoding response: %v", err)
+	}
+}
+
+// An endpoint unknown until apply must not fall back to JELLYFIN_ENDPOINT,
+// which may name another server.
+func TestConfigureRefusesUnknownConfiguration(t *testing.T) {
+	t.Setenv("JELLYFIN_ENDPOINT", "http://another-server.invalid")
+	t.Setenv("JELLYFIN_API_KEY", "key-of-another-server")
+	ctx := context.Background()
+	p := New("test")()
+	var schemaResp provider.SchemaResponse
+	p.Schema(ctx, provider.SchemaRequest{}, &schemaResp)
+	config := tfsdk.Config{Schema: schemaResp.Schema, Raw: tftypes.NewValue(schemaResp.Schema.Type().TerraformType(ctx), map[string]tftypes.Value{
+		"endpoint": tftypes.NewValue(tftypes.String, tftypes.UnknownValue),
+		"api_key":  tftypes.NewValue(tftypes.String, nil),
+		"username": tftypes.NewValue(tftypes.String, nil),
+		"password": tftypes.NewValue(tftypes.String, nil),
+	})}
+
+	var resp provider.ConfigureResponse
+	p.Configure(ctx, provider.ConfigureRequest{Config: config}, &resp)
+	if !resp.Diagnostics.HasError() || !strings.Contains(resp.Diagnostics.Errors()[0].Detail(), "endpoint is unknown until apply") || resp.ResourceData != nil {
+		t.Errorf("Configure() = %v with resource data %v, want an unknown endpoint refused", resp.Diagnostics, resp.ResourceData)
+	}
+
+	var deferred provider.ConfigureResponse
+	p.Configure(ctx, provider.ConfigureRequest{Config: config, ClientCapabilities: provider.ConfigureProviderClientCapabilities{DeferralAllowed: true}}, &deferred)
+	if deferred.Diagnostics.HasError() || deferred.Deferred == nil || deferred.Deferred.Reason != provider.DeferredReasonProviderConfigUnknown {
+		t.Errorf("Configure() with deferral allowed = %v, deferred %v, want the configuration deferred", deferred.Diagnostics, deferred.Deferred)
 	}
 }

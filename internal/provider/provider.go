@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -112,23 +114,38 @@ func (p *JellyfinProvider) Configure(ctx context.Context, req provider.Configure
 		return
 	}
 
+	// A value unknown until apply, such as the address of a server the same
+	// apply creates, must not fall back to the environment, which may name
+	// another server.
+	if unknown := unknownAttributes(data); len(unknown) > 0 {
+		if req.ClientCapabilities.DeferralAllowed {
+			resp.Deferred = &provider.Deferred{Reason: provider.DeferredReasonProviderConfigUnknown}
+			return
+		}
+		for _, name := range unknown {
+			resp.Diagnostics.AddAttributeError(path.Root(name), "Unknown Jellyfin provider configuration",
+				fmt.Sprintf("The provider's %s is unknown until apply, so the provider cannot connect to Jellyfin to plan. Apply the resources it depends on first, for example with -target, or set it to a value known at plan time.", name))
+		}
+		return
+	}
+
 	endpoint := os.Getenv("JELLYFIN_ENDPOINT")
-	if !data.Endpoint.IsNull() && !data.Endpoint.IsUnknown() {
+	if !data.Endpoint.IsNull() {
 		endpoint = data.Endpoint.ValueString()
 	}
 
 	apiKey := os.Getenv("JELLYFIN_API_KEY")
-	if !data.APIKey.IsNull() && !data.APIKey.IsUnknown() {
+	if !data.APIKey.IsNull() {
 		apiKey = data.APIKey.ValueString()
 	}
 
 	username := os.Getenv("JELLYFIN_USERNAME")
-	if !data.Username.IsNull() && !data.Username.IsUnknown() {
+	if !data.Username.IsNull() {
 		username = data.Username.ValueString()
 	}
 
 	password := os.Getenv("JELLYFIN_PASSWORD")
-	if !data.Password.IsNull() && !data.Password.IsUnknown() {
+	if !data.Password.IsNull() {
 		password = data.Password.ValueString()
 	}
 
@@ -158,6 +175,17 @@ func (p *JellyfinProvider) Configure(ctx context.Context, req provider.Configure
 
 	resp.DataSourceData = c
 	resp.ResourceData = c
+}
+
+func unknownAttributes(data JellyfinProviderModel) []string {
+	var unknown []string
+	for name, v := range map[string]types.String{"endpoint": data.Endpoint, "api_key": data.APIKey, "username": data.Username, "password": data.Password} {
+		if v.IsUnknown() {
+			unknown = append(unknown, name)
+		}
+	}
+	slices.Sort(unknown)
+	return unknown
 }
 
 func configureClient(ctx context.Context, endpoint, apiKey, username, password string) (*client.Client, *client.PublicSystemInfo, error) {
