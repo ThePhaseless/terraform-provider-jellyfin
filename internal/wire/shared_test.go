@@ -122,7 +122,7 @@ func TestUnitSharedKeysDescribe(t *testing.T) {
 	}
 }
 
-func TestUnitOrdersWritesTheOrderKeyOnlyWhileItsAttributeIsUnknown(t *testing.T) {
+func TestUnitOrdersWritesTheOrderKeyUnlessItsAttributeWritesIt(t *testing.T) {
 	b := sharedBinding(t)
 	served := `{"Types": [{"Type": "Movie", "Fetchers": ["A", "B"], "FetcherOrder": ["b", "C", "A"]}]}`
 	model, d := b.Flatten(context.Background(), doc(t, served), types.ObjectNull(b.AttrTypes))

@@ -96,7 +96,6 @@ func trailOf(trail string, keyPath []string) string {
 	return joinKeyPath(trail, strings.Join(keyPath, "."))
 }
 
-// writes reports whether writeField writes v, the value of f.
 func writes(f *Field, v attr.Value, merged bool) bool {
 	if !f.Mode.hasKey() || f.ReadOnly || v.IsUnknown() {
 		return false
