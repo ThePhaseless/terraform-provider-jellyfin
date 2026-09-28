@@ -52,7 +52,11 @@ func (p *JellyfinProvider) Metadata(_ context.Context, _ provider.MetadataReques
 
 func (p *JellyfinProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	const description = "The Jellyfin provider allows you to manage a Jellyfin media server instance. " +
-		"It supports managing users, libraries, plugins, system configuration, and initial setup."
+		"It manages users, API keys, libraries, plugin repositories, plugins, plugin configuration " +
+		"(with typed settings for the JellyfinSecurity plugin), scheduled task triggers, server restarts, " +
+		"and the system, encoding, networking, branding, Live TV, and metadata configuration. " +
+		"It reads server information through the jellyfin_system_info data source, " +
+		"and it completes the initial setup of a fresh server."
 	setting := func(desc string) schema.StringAttribute {
 		return schema.StringAttribute{
 			Description:         desc,
