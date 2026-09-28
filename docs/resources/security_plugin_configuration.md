@@ -91,7 +91,7 @@ variable "oidc_client_secret" {
 - `enable_password_recovery` (Boolean) Enable password recovery.
 - `enabled` (Boolean) Whether the plugin is enabled.
 - `enforcement_scope` (String) 2FA enforcement scope: Optional, Admins, or All.
-- `enrollment_deadline` (String) 2FA enrollment deadline as an ISO 8601 date-time, e.g. `2030-01-01T00:00:00Z`.
+- `enrollment_deadline` (String) 2FA enrollment deadline as an ISO 8601 date-time, e.g. `2030-01-01T00:00:00Z`, or an empty string for none, which clears a deadline set before.
 - `exempt_administrators_from_lockout` (Boolean) Exempt administrators from lockout.
 - `geo_ip_asn_db_path` (String) Path to GeoIP ASN database.
 - `geo_ip_city_db_path` (String) Path to GeoIP city database.

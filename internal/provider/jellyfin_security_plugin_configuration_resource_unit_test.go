@@ -593,3 +593,28 @@ func hasPlanModifiers(a rschema.Attribute) bool {
 	}
 	return false
 }
+
+// An empty enrollment_deadline clears the deadline: the plugin reads the
+// empty string as none and leaves the key out, which reads back as empty.
+func TestUnitSecurityPluginEnrollmentDeadlineClears(t *testing.T) {
+	ctx := context.Background()
+	b := testUnitSecurityPluginWire(t)
+	data := testUnitSecurityPluginRead(t, b, `{"EnrollmentDeadline":"2030-01-01T00:00:00Z"}`)
+	data.EnrollmentDeadline = types.StringValue("")
+	doc := map[string]json.RawMessage{"EnrollmentDeadline": json.RawMessage(`"2030-01-01T00:00:00Z"`)}
+	if d := b.OverlayModel(ctx, doc, &data); d.HasError() {
+		t.Fatal(d)
+	}
+	if got := string(doc["EnrollmentDeadline"]); got != `""` {
+		t.Errorf("wrote EnrollmentDeadline %s, want the empty string that clears it", got)
+	}
+	if got := testUnitSecurityPluginRead(t, b, `{}`).EnrollmentDeadline; !got.Equal(types.StringValue("")) {
+		t.Errorf("no deadline reads as %s, want the empty string", got)
+	}
+
+	a, ok := schemaOf(&JellyfinSecurityPluginConfigurationResource{}).Attributes["enrollment_deadline"].(rschema.StringAttribute)
+	if !ok {
+		t.Fatal("enrollment_deadline is not a string attribute")
+	}
+	testUnitAssertStringValidation(t, a, map[string]bool{"": false, "2030-01-01T00:00:00Z": false, "tomorrow": true})
+}

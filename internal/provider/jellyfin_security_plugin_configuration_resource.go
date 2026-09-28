@@ -33,7 +33,9 @@ import (
 
 const jellyfinSecurityPluginID = "94879a0c-da24-4eb1-aa06-f28b4b9333b1"
 
-var isoDateTimePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?$`)
+// isoDateTimePattern also takes an empty string, which the plugin reads as no
+// date-time and then leaves out of its configuration.
+var isoDateTimePattern = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?)?$`)
 
 var (
 	_ resource.Resource                = &JellyfinSecurityPluginConfigurationResource{}
@@ -149,6 +151,9 @@ var securityPluginWire = sync.OnceValues(func() (*wire.Binding, error) {
 		wire.Delimited("oidc_providers.role_library_mappings.library_ids", ","),
 		wire.CarryServed("oidc_providers", "CreatedAt", "id"),
 		wire.WithCodec("enrollment_deadline", sameInstantCodec{}),
+		// The plugin leaves out a deadline it has none of, which then reads
+		// as the empty string that clears one.
+		wire.ReadMissingAs("enrollment_deadline", types.StringValue("")),
 	}
 	// The plugin leaves these out when false.
 	for _, name := range []string{
@@ -313,9 +318,9 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 		return a
 	}
 
-	enrollmentDeadline := optionalString("2FA enrollment deadline as an ISO 8601 date-time, e.g. `2030-01-01T00:00:00Z`.")
+	enrollmentDeadline := optionalString("2FA enrollment deadline as an ISO 8601 date-time, e.g. `2030-01-01T00:00:00Z`, or an empty string for none, which clears a deadline set before.")
 	enrollmentDeadline.Validators = []validator.String{
-		stringvalidator.RegexMatches(isoDateTimePattern, "must be an ISO 8601 date-time such as 2030-01-01T00:00:00Z"),
+		stringvalidator.RegexMatches(isoDateTimePattern, "must be an ISO 8601 date-time such as 2030-01-01T00:00:00Z, or empty"),
 	}
 	enrollmentDeadline.PlanModifiers = append(enrollmentDeadline.PlanModifiers, sameInstantPlanModifier{})
 
