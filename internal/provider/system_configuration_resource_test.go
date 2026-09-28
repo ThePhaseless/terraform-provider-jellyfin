@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -164,10 +165,11 @@ resource "jellyfin_system_configuration" "test" {
 `
 }
 
-func TestAccSystemConfigurationFetchers(t *testing.T) {
-	testAccPreCheck(t)
-	c := testAccClient(t)
-	original, err := c.GetSystemConfiguration(t.Context())
+// testAccPutBackSystemConfiguration posts back, once the test ends, the
+// system configuration as the server serves it now.
+func testAccPutBackSystemConfiguration(t *testing.T) {
+	t.Helper()
+	original, err := testAccClient(t).GetSystemConfiguration(t.Context())
 	if err != nil {
 		t.Fatalf("reading the system configuration: %v", err)
 	}
@@ -176,6 +178,11 @@ func TestAccSystemConfigurationFetchers(t *testing.T) {
 			t.Errorf("putting back the system configuration: %v", err)
 		}
 	})
+}
+
+func TestAccSystemConfigurationFetchers(t *testing.T) {
+	testAccPreCheck(t)
+	testAccPutBackSystemConfiguration(t)
 
 	movie := tfjsonpath.New("metadata_options").AtSliceIndex(0)
 	resource.Test(t, resource.TestCase{
@@ -275,6 +282,72 @@ func TestAccSystemConfigurationFetchers(t *testing.T) {
 			},
 		},
 	})
+}
+
+// Terraform plans each metadata_options entry from the prior entry at the
+// same index, which holds another item type once entries are added, removed
+// or reordered.
+func TestAccSystemConfigurationFetchersOfMovedEntries(t *testing.T) {
+	testAccPreCheck(t)
+	testAccPutBackSystemConfiguration(t)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// The state holds the server's default entries, Book first.
+			{Config: testAccSystemConfigurationEntriesConfig()},
+			{
+				Config: testAccSystemConfigurationEntriesConfig(`{ item_type = "Movie", disabled_metadata_fetchers = ["The Open Movie Database"] }`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "metadata_options.#", "1"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "metadata_options.0.metadata_fetchers.#", "1"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "metadata_options.0.metadata_fetchers.0", "TheMovieDb"),
+					testAccCheckMovieMetadataOptions(t, map[string][]string{"DisabledMetadataFetchers": {"The Open Movie Database"}}),
+				),
+			},
+			{
+				Config: testAccSystemConfigurationEntriesConfig(
+					`{ item_type = "BoxSet", metadata_fetchers = ["TheMovieDb"] }`,
+					`{ item_type = "Movie", image_fetchers = ["Screen Grabber", "TheMovieDb"] }`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "metadata_options.0.disabled_metadata_fetchers.#", "0"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "metadata_options.0.image_fetchers.0", "TheMovieDb"),
+					testAccCheckMovieMetadataOptions(t, map[string][]string{
+						"DisabledImageFetchers": {"The Open Movie Database", "Embedded Image Extractor"},
+						"ImageFetcherOrder":     {"Screen Grabber", "TheMovieDb", "The Open Movie Database", "Embedded Image Extractor"},
+					}),
+				),
+			},
+			{
+				Config: testAccSystemConfigurationEntriesConfig(
+					`{ item_type = "Movie", disabled_metadata_fetchers = [], disabled_image_fetchers = [] }`,
+					`{ item_type = "BoxSet", disabled_metadata_fetchers = [], disabled_image_fetchers = [] }`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "metadata_options.0.item_type", "Movie"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "metadata_options.0.image_fetchers.#", "4"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "metadata_options.1.item_type", "BoxSet"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "metadata_options.1.metadata_fetchers.0", "TheMovieDb"),
+					testAccCheckMovieMetadataOptions(t, map[string][]string{"DisabledMetadataFetchers": {}, "DisabledImageFetchers": {}}),
+				),
+			},
+		},
+	})
+}
+
+func testAccSystemConfigurationEntriesConfig(entries ...string) string {
+	if len(entries) == 0 {
+		return `
+resource "jellyfin_system_configuration" "test" {}
+`
+	}
+	return `
+resource "jellyfin_system_configuration" "test" {
+  metadata_options = [
+    ` + strings.Join(entries, ",\n    ") + `,
+  ]
+}
+`
 }
 
 func testAccSystemConfigurationFetchersConfig(entry string) string {

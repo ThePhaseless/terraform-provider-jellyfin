@@ -99,8 +99,10 @@ func (o *offeredProviders) byItemType(ctx context.Context, offered, scope string
 
 // combinedStringList is an optional list that replaces the list attributes of
 // the same object named replaced, whose Jellyfin keys it writes, so it
-// conflicts with them.
-func combinedStringList(desc string, replaced ...string) schema.ListAttribute {
+// conflicts with them. It reads what those keys say for the item that scope,
+// a string attribute of the same object, names, or for the whole object when
+// scope is "".
+func combinedStringList(desc, scope string, replaced ...string) schema.ListAttribute {
 	conflicts := make([]path.Expression, len(replaced))
 	for i, r := range replaced {
 		conflicts[i] = path.MatchRelative().AtParent().AtName(r)
@@ -114,44 +116,67 @@ func combinedStringList(desc string, replaced ...string) schema.ListAttribute {
 		Validators:          []validator.List{listvalidator.ConflictsWith(conflicts...)},
 		PlanModifiers: []planmodifier.List{
 			listplanmodifier.UseNonNullStateForUnknown(),
-			unknownWhileSharedKeyChanges(replaced...),
+			unknownWhileSharedKeysChange{siblings: replaced, scope: scope, readsScope: true},
 		},
 	}
 }
 
-// replacedBy deprecates a, a list attribute that replacement now writes the
-// Jellyfin key of.
-func replacedBy(a schema.ListAttribute, deprecation, replacement string) schema.ListAttribute {
+// replacedBy deprecates a, a list attribute that replacement, scoped as
+// combinedStringList describes, now writes the Jellyfin key of.
+func replacedBy(a schema.ListAttribute, deprecation, scope, replacement string) schema.ListAttribute {
 	a.Description += " " + deprecation
 	a.MarkdownDescription += " " + deprecation
 	a.DeprecationMessage = deprecation
-	a.PlanModifiers = append(a.PlanModifiers, unknownWhileSharedKeyChanges(replacement))
+	a.PlanModifiers = append(a.PlanModifiers, unknownWhileSharedKeysChange{siblings: []string{replacement}, scope: scope})
 	return a
 }
 
-// unknownWhileSharedKeyChanges plans a list attribute that the configuration
-// leaves unset as unknown while one of the named attributes of the same object
-// is configured to a value other than its prior one. They write the same
-// Jellyfin keys, so the attribute reads back what that change makes of them;
-// once unknown, it also leaves the keys to the attribute that changes.
-func unknownWhileSharedKeyChanges(siblings ...string) planmodifier.List {
-	return unknownWhileSharedKeyChangesModifier{siblings: siblings}
+// unknownWhileSharedKeysChange plans a list attribute that the configuration
+// leaves unset as unknown while one of siblings, attributes of the same object
+// that write the same Jellyfin keys, is configured to a value other than its
+// prior one, or is configured while scope changes. Once unknown, the attribute
+// reads back what the sibling makes of the keys, and leaves the keys to it.
+//
+// A list element is planned from the prior element at the same index, which
+// belongs to another item once scope changes, so the prior value of a sibling
+// says nothing about the keys then. For the same reason an attribute that
+// readsScope, whose value the provider derives from the keys for the item
+// scope names, is unknown whenever scope changes.
+type unknownWhileSharedKeysChange struct {
+	siblings   []string
+	scope      string
+	readsScope bool
 }
 
-type unknownWhileSharedKeyChangesModifier struct {
-	siblings []string
+func (m unknownWhileSharedKeysChange) Description(_ context.Context) string {
+	d := "Unset, the value is unknown while " + strings.Join(m.siblings, " or ") + " changes"
+	if m.scope != "" {
+		d += ", or " + m.scope + " does"
+	}
+	return d + "."
 }
 
-func (m unknownWhileSharedKeyChangesModifier) Description(_ context.Context) string {
-	return "Unset, the value is unknown while " + strings.Join(m.siblings, " or ") + " changes."
-}
-
-func (m unknownWhileSharedKeyChangesModifier) MarkdownDescription(ctx context.Context) string {
+func (m unknownWhileSharedKeysChange) MarkdownDescription(ctx context.Context) string {
 	return m.Description(ctx)
 }
 
-func (m unknownWhileSharedKeyChangesModifier) PlanModifyList(ctx context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
+func (m unknownWhileSharedKeysChange) PlanModifyList(ctx context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
 	if !req.ConfigValue.IsNull() || req.State.Raw.IsNull() {
+		return
+	}
+	scopeChanges := false
+	if m.scope != "" {
+		p := req.Path.ParentPath().AtName(m.scope)
+		var configured, prior types.String
+		resp.Diagnostics.Append(req.Config.GetAttribute(ctx, p, &configured)...)
+		resp.Diagnostics.Append(req.State.GetAttribute(ctx, p, &prior)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		scopeChanges = !configured.IsNull() && !configured.Equal(prior)
+	}
+	if m.readsScope && scopeChanges {
+		resp.PlanValue = types.ListUnknown(req.PlanValue.ElementType(ctx))
 		return
 	}
 	for _, name := range m.siblings {
@@ -162,7 +187,7 @@ func (m unknownWhileSharedKeyChangesModifier) PlanModifyList(ctx context.Context
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		if !configured.IsNull() && !configured.Equal(prior) {
+		if !configured.IsNull() && (scopeChanges || !configured.Equal(prior)) {
 			resp.PlanValue = types.ListUnknown(req.PlanValue.ElementType(ctx))
 			return
 		}

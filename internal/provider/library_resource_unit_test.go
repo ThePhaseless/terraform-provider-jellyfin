@@ -244,34 +244,41 @@ func TestUnitPlanTypeOptionsByTypePlansTheOrderOfAChangedListUnknown(t *testing.
 	}
 }
 
-func TestUnitUnknownWhileSharedKeyChanges(t *testing.T) {
+func TestUnitUnknownWhileSharedKeysChange(t *testing.T) {
 	ctx := context.Background()
 	listType := types.ListType{ElemType: types.StringType}.TerraformType(ctx)
 	s := schema.Schema{Attributes: map[string]schema.Attribute{
 		"entries": schema.ListNestedAttribute{Optional: true, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
+			"type":    schema.StringAttribute{Optional: true, Computed: true},
 			"enabled": schema.ListAttribute{ElementType: types.StringType, Optional: true, Computed: true},
 			"order":   schema.ListAttribute{ElementType: types.StringType, Optional: true, Computed: true},
 		}}},
 	}}
-	entryType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{"enabled": listType, "order": listType}}
-	entries := func(orders ...tftypes.Value) tftypes.Value {
-		elems := make([]tftypes.Value, len(orders))
-		for i, o := range orders {
-			elems[i] = tftypes.NewValue(entryType, map[string]tftypes.Value{"enabled": tftypes.NewValue(listType, nil), "order": o})
+	entryType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{"type": tftypes.String, "enabled": listType, "order": listType}}
+	type entry struct {
+		typ   string
+		order []string
+	}
+	entries := func(es ...entry) tftypes.Value {
+		elems := make([]tftypes.Value, len(es))
+		for i, e := range es {
+			typ := tftypes.NewValue(tftypes.String, nil)
+			if e.typ != "" {
+				typ = tftypes.NewValue(tftypes.String, e.typ)
+			}
+			order := tftypes.NewValue(listType, nil)
+			if e.order != nil {
+				values := make([]tftypes.Value, len(e.order))
+				for j, v := range e.order {
+					values[j] = tftypes.NewValue(tftypes.String, v)
+				}
+				order = tftypes.NewValue(listType, values)
+			}
+			elems[i] = tftypes.NewValue(entryType, map[string]tftypes.Value{"type": typ, "enabled": tftypes.NewValue(listType, nil), "order": order})
 		}
 		return tftypes.NewValue(s.Type().TerraformType(ctx), map[string]tftypes.Value{"entries": tftypes.NewValue(tftypes.List{ElementType: entryType}, elems)})
 	}
-	order := func(values ...string) tftypes.Value {
-		if values == nil {
-			return tftypes.NewValue(listType, nil)
-		}
-		elems := make([]tftypes.Value, len(values))
-		for i, v := range values {
-			elems[i] = tftypes.NewValue(tftypes.String, v)
-		}
-		return tftypes.NewValue(listType, elems)
-	}
-	modify := func(config, state tftypes.Value, index int, configured types.List) types.List {
+	modify := func(m unknownWhileSharedKeysChange, config, state tftypes.Value, index int, configured types.List) types.List {
 		t.Helper()
 		req := planmodifier.ListRequest{
 			Path:        path.Root("entries").AtListIndex(index).AtName("enabled"),
@@ -284,31 +291,39 @@ func TestUnitUnknownWhileSharedKeyChanges(t *testing.T) {
 			req.PlanValue = configured
 		}
 		resp := planmodifier.ListResponse{PlanValue: req.PlanValue}
-		unknownWhileSharedKeyChanges("order").PlanModifyList(ctx, req, &resp)
+		m.PlanModifyList(ctx, req, &resp)
 		if resp.Diagnostics.HasError() {
 			t.Fatal(resp.Diagnostics)
 		}
 		return resp.PlanValue
 	}
 
+	shares := unknownWhileSharedKeysChange{siblings: []string{"order"}, scope: "type"}
+	reads := unknownWhileSharedKeysChange{siblings: []string{"order"}, scope: "type", readsScope: true}
 	unset := types.ListNull(types.StringType)
 	for name, c := range map[string]struct {
+		m             unknownWhileSharedKeysChange
 		config, state tftypes.Value
 		index         int
 		unknown       bool
 	}{
-		"the order changes":          {config: entries(order("B")), state: entries(order("A")), unknown: true},
-		"the order stays":            {config: entries(order("A")), state: entries(order("A"))},
-		"the order is unset":         {config: entries(order()), state: entries(order("A"))},
-		"a new entry sets the order": {config: entries(order("A"), order("B")), state: entries(order("A")), index: 1, unknown: true},
-		"the resource is new":        {config: entries(order("B")), state: tftypes.NewValue(s.Type().TerraformType(ctx), nil)},
+		"the order changes":                             {m: shares, config: entries(entry{"Movie", []string{"B"}}), state: entries(entry{"Movie", []string{"A"}}), unknown: true},
+		"the order stays":                               {m: shares, config: entries(entry{"Movie", []string{"A"}}), state: entries(entry{"Movie", []string{"A"}})},
+		"the order is unset":                            {m: shares, config: entries(entry{"Movie", nil}), state: entries(entry{"Movie", []string{"A"}})},
+		"a new entry sets the order":                    {m: shares, config: entries(entry{"Movie", []string{"A"}}, entry{"Book", []string{"B"}}), state: entries(entry{"Movie", []string{"A"}}), index: 1, unknown: true},
+		"the resource is new":                           {m: shares, config: entries(entry{"Movie", []string{"B"}}), state: tftypes.NewValue(s.Type().TerraformType(ctx), nil)},
+		"another type sets the same order at the index": {m: shares, config: entries(entry{"Book", []string{"A"}}), state: entries(entry{"Movie", []string{"A"}}), unknown: true},
+		"another type leaves the order unset":           {m: shares, config: entries(entry{"Book", nil}), state: entries(entry{"Movie", []string{"A"}})},
+		"another type, read from the keys":              {m: reads, config: entries(entry{"Book", nil}), state: entries(entry{"Movie", []string{"A"}}), unknown: true},
+		"the same type, read from the keys":             {m: reads, config: entries(entry{"Movie", nil}), state: entries(entry{"Movie", []string{"A"}})},
+		"an unset type, read from the keys":             {m: reads, config: entries(entry{"", nil}), state: entries(entry{"Movie", []string{"A"}})},
 	} {
-		if got := modify(c.config, c.state, c.index, unset); got.IsUnknown() != c.unknown {
+		if got := modify(c.m, c.config, c.state, c.index, unset); got.IsUnknown() != c.unknown {
 			t.Errorf("%s: planned %v, want unknown: %t", name, got, c.unknown)
 		}
 	}
 	configured := testUnitStringList(t, "C")
-	if got := modify(entries(order("B")), entries(order("A")), 0, configured); !got.Equal(configured) {
+	if got := modify(reads, entries(entry{"Book", []string{"B"}}), entries(entry{"Movie", []string{"A"}}), 0, configured); !got.Equal(configured) {
 		t.Errorf("a configured value is planned %v", got)
 	}
 }
