@@ -6,6 +6,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -109,15 +110,16 @@ func (r *APIKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	// Snapshot existing keys before creation so we can identify the new one.
+	// Jellyfin does not return the key it creates, so Create finds it by
+	// comparing the keys listed before and after. Another Create running
+	// meanwhile would add a key of its own to that difference.
+	apiKeyCreateMu.Lock()
+	defer apiKeyCreateMu.Unlock()
+
 	before, err := r.client.GetAPIKeys(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to list API keys before creation", err.Error())
 		return
-	}
-	existingTokens := make(map[string]struct{}, len(before))
-	for _, k := range before {
-		existingTokens[k.AccessToken] = struct{}{}
 	}
 
 	if err := r.client.CreateAPIKey(ctx, data.AppName.ValueString()); err != nil {
@@ -125,21 +127,13 @@ func (r *APIKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	// Find the newly created key by diffing against the pre-creation snapshot.
 	after, err := r.client.GetAPIKeys(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to list API keys after creation", err.Error())
 		return
 	}
 
-	var newKey *client.APIKey
-	for i := range after {
-		if _, existed := existingTokens[after[i].AccessToken]; !existed {
-			newKey = &after[i]
-			break
-		}
-	}
-
+	newKey := createdAPIKey(before, after, data.AppName.ValueString())
 	if newKey == nil {
 		resp.Diagnostics.AddError("Failed to find created API key", "The newly created API key was not found in the server response.")
 		return
@@ -149,6 +143,34 @@ func (r *APIKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	data.ID = types.StringValue(newKey.AccessToken)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+// apiKeyCreateMu serializes the creates of this provider, each of which finds
+// the key it made by comparing the keys listed before and after.
+var apiKeyCreateMu sync.Mutex
+
+// createdAPIKey returns the key that after lists and before does not: the one
+// named appName, or else the only new one, since another client can create a
+// key meanwhile. It returns nil when neither identifies the key.
+func createdAPIKey(before, after []client.APIKey, appName string) *client.APIKey {
+	existing := make(map[string]bool, len(before))
+	for _, k := range before {
+		existing[k.AccessToken] = true
+	}
+	var created []*client.APIKey
+	for i := range after {
+		if existing[after[i].AccessToken] {
+			continue
+		}
+		if after[i].AppName == appName {
+			return &after[i]
+		}
+		created = append(created, &after[i])
+	}
+	if len(created) == 1 {
+		return created[0]
+	}
+	return nil
 }
 
 func (r *APIKeyResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
