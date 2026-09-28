@@ -8,25 +8,20 @@ import (
 	"fmt"
 )
 
-// BrandingConfiguration represents the branding configuration.
-// RawJSON stores the complete JSON for the branding settings.
-type BrandingConfiguration struct {
-	RawJSON string `json:"-"`
-}
-
-// GetBrandingConfiguration retrieves the branding configuration.
-func (c *Client) GetBrandingConfiguration(ctx context.Context) (*BrandingConfiguration, error) {
+// GetBrandingConfiguration returns the branding configuration document as the
+// server serves it.
+func (c *Client) GetBrandingConfiguration(ctx context.Context) (string, error) {
 	raw, err := c.getRaw(ctx, "/System/Configuration/branding")
 	if err != nil {
-		return nil, fmt.Errorf("getting branding configuration: %w", err)
+		return "", fmt.Errorf("getting branding configuration: %w", err)
 	}
-
-	return &BrandingConfiguration{RawJSON: raw}, nil
+	return raw, nil
 }
 
-// UpdateBrandingConfiguration updates the branding configuration.
-func (c *Client) UpdateBrandingConfiguration(ctx context.Context, config *BrandingConfiguration) error {
-	if err := c.postRaw(ctx, "/System/Configuration/branding", config.RawJSON); err != nil {
+// UpdateBrandingConfiguration replaces the branding configuration document with
+// raw.
+func (c *Client) UpdateBrandingConfiguration(ctx context.Context, raw string) error {
+	if err := c.postRaw(ctx, "/System/Configuration/branding", raw); err != nil {
 		return fmt.Errorf("updating branding configuration: %w", err)
 	}
 	return nil

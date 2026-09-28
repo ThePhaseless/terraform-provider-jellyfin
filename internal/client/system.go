@@ -26,12 +26,6 @@ type PublicSystemInfo struct {
 	StartupWizardCompleted bool   `json:"StartupWizardCompleted"`
 }
 
-// SystemConfiguration represents the server configuration.
-// RawJSON stores the complete JSON to preserve all fields during round-trips.
-type SystemConfiguration struct {
-	RawJSON string `json:"-"`
-}
-
 // GetSystemInfo retrieves the full system information.
 func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	var info SystemInfo
@@ -54,19 +48,20 @@ func (c *Client) GetPublicSystemInfo(ctx context.Context) (*PublicSystemInfo, er
 	return &info, nil
 }
 
-// GetSystemConfiguration retrieves the server configuration.
-func (c *Client) GetSystemConfiguration(ctx context.Context) (*SystemConfiguration, error) {
+// GetSystemConfiguration returns the server configuration document as the
+// server serves it.
+func (c *Client) GetSystemConfiguration(ctx context.Context) (string, error) {
 	raw, err := c.getRaw(ctx, "/System/Configuration")
 	if err != nil {
-		return nil, fmt.Errorf("getting system configuration: %w", err)
+		return "", fmt.Errorf("getting system configuration: %w", err)
 	}
-
-	return &SystemConfiguration{RawJSON: raw}, nil
+	return raw, nil
 }
 
-// UpdateSystemConfiguration updates the server configuration.
-func (c *Client) UpdateSystemConfiguration(ctx context.Context, config *SystemConfiguration) error {
-	if err := c.postRaw(ctx, "/System/Configuration", config.RawJSON); err != nil {
+// UpdateSystemConfiguration replaces the server configuration document with
+// raw.
+func (c *Client) UpdateSystemConfiguration(ctx context.Context, raw string) error {
+	if err := c.postRaw(ctx, "/System/Configuration", raw); err != nil {
 		return fmt.Errorf("updating system configuration: %w", err)
 	}
 	return nil
@@ -83,25 +78,19 @@ func (c *Client) RestartServer(ctx context.Context) error {
 	return nil
 }
 
-// EncodingOptions represents the encoding configuration.
-// RawJSON stores the complete JSON since the configuration is very complex.
-type EncodingOptions struct {
-	RawJSON string `json:"-"`
-}
-
-// GetEncodingOptions retrieves the encoding configuration.
-func (c *Client) GetEncodingOptions(ctx context.Context) (*EncodingOptions, error) {
+// GetEncodingOptions returns the encoding configuration document as the
+// server serves it.
+func (c *Client) GetEncodingOptions(ctx context.Context) (string, error) {
 	raw, err := c.getRaw(ctx, "/System/Configuration/encoding")
 	if err != nil {
-		return nil, fmt.Errorf("getting encoding options: %w", err)
+		return "", fmt.Errorf("getting encoding options: %w", err)
 	}
-
-	return &EncodingOptions{RawJSON: raw}, nil
+	return raw, nil
 }
 
-// UpdateEncodingOptions updates the encoding configuration.
-func (c *Client) UpdateEncodingOptions(ctx context.Context, config *EncodingOptions) error {
-	if err := c.postRaw(ctx, "/System/Configuration/encoding", config.RawJSON); err != nil {
+// UpdateEncodingOptions replaces the encoding configuration document with raw.
+func (c *Client) UpdateEncodingOptions(ctx context.Context, raw string) error {
+	if err := c.postRaw(ctx, "/System/Configuration/encoding", raw); err != nil {
 		return fmt.Errorf("updating encoding options: %w", err)
 	}
 	return nil

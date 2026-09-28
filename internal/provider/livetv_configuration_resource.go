@@ -5,7 +5,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -372,62 +371,22 @@ func (r *LiveTVConfigurationResource) ModifyPlan(ctx context.Context, req resour
 
 func (r *LiveTVConfigurationResource) apply(ctx context.Context, data *LiveTVConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
 	b := wireBinding(diags, livetvWire)
-	if b == nil {
+	if b == nil || !r.document().write(ctx, b, data, diags) {
 		return
 	}
-
-	current, err := r.client.GetLiveTVConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read current Live TV configuration", err.Error())
-		return
-	}
-
-	base, err := parseJSONObject(current.RawJSON)
-	if err != nil {
-		diags.AddError("Failed to parse current Live TV configuration", err.Error())
-		return
-	}
-
-	if d := b.OverlayModel(ctx, base, data); d.HasError() {
-		diags.Append(d...)
-		return
-	}
-
-	payload, err := json.Marshal(base)
-	if err != nil {
-		diags.AddError("Failed to serialize Live TV configuration", err.Error())
-		return
-	}
-
-	if err := r.client.UpdateLiveTVConfiguration(ctx, &client.LiveTVConfiguration{RawJSON: string(payload)}); err != nil {
-		diags.AddError("Failed to update Live TV configuration", err.Error())
-		return
-	}
-
-	updated, err := r.client.GetLiveTVConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read Live TV configuration after update", err.Error())
-		return
-	}
-
-	diags.Append(b.FlattenAfterApply(ctx, updated.RawJSON, data)...)
 	data.ID = types.StringValue("livetv")
 	diags.Append(state.Set(ctx, data)...)
 }
 
 func (r *LiveTVConfigurationResource) read(ctx context.Context, data *LiveTVConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
 	b := wireBinding(diags, livetvWire)
-	if b == nil {
+	if b == nil || !r.document().read(ctx, b, data, diags) {
 		return
 	}
-
-	current, err := r.client.GetLiveTVConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read Live TV configuration", err.Error())
-		return
-	}
-
-	diags.Append(b.FlattenInto(ctx, current.RawJSON, data)...)
 	data.ID = types.StringValue("livetv")
 	diags.Append(state.Set(ctx, data)...)
+}
+
+func (r *LiveTVConfigurationResource) document() document {
+	return document{what: "Live TV configuration", get: r.client.GetLiveTVConfiguration, put: r.client.UpdateLiveTVConfiguration}
 }

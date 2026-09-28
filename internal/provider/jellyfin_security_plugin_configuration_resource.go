@@ -585,48 +585,23 @@ func (r *JellyfinSecurityPluginConfigurationResource) checkJellyfinSecurityVersi
 
 func (r *JellyfinSecurityPluginConfigurationResource) apply(ctx context.Context, data *JellyfinSecurityPluginConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
 	b := wireBinding(diags, securityPluginWire)
-	if b == nil {
+	if b == nil || !r.document(data.PluginID.ValueString()).write(ctx, b, data, diags) {
 		return
 	}
-
-	current, err := r.client.GetPluginConfiguration(ctx, data.PluginID.ValueString())
-	if err != nil {
-		diags.AddError("Failed to read JellyfinSecurity plugin configuration", err.Error())
-		return
-	}
-
-	base, err := parseJSONObject(current)
-	if err != nil {
-		diags.AddError("Failed to parse JellyfinSecurity plugin configuration", err.Error())
-		return
-	}
-
-	if d := b.OverlayModel(ctx, base, data); d.HasError() {
-		diags.Append(d...)
-		return
-	}
-
-	payload, err := json.Marshal(base)
-	if err != nil {
-		diags.AddError("Failed to serialize JellyfinSecurity plugin configuration", err.Error())
-		return
-	}
-
-	if err := r.client.UpdatePluginConfiguration(ctx, data.PluginID.ValueString(), string(payload)); err != nil {
-		diags.AddError("Failed to update JellyfinSecurity plugin configuration", err.Error())
-		return
-	}
-
-	updated, err := r.client.GetPluginConfiguration(ctx, data.PluginID.ValueString())
-	if err != nil {
-		diags.AddError("Failed to read JellyfinSecurity plugin configuration after update", err.Error())
-		return
-	}
-
-	diags.Append(b.FlattenAfterApply(ctx, updated, data)...)
 	data.ID = data.PluginID
-
 	diags.Append(state.Set(ctx, data)...)
+}
+
+func (r *JellyfinSecurityPluginConfigurationResource) document(pluginID string) document {
+	return document{
+		what: "JellyfinSecurity plugin configuration",
+		get: func(ctx context.Context) (string, error) {
+			return r.client.GetPluginConfiguration(ctx, pluginID)
+		},
+		put: func(ctx context.Context, raw string) error {
+			return r.client.UpdatePluginConfiguration(ctx, pluginID, raw)
+		},
+	}
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) read(ctx context.Context, data *JellyfinSecurityPluginConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {

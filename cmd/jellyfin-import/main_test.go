@@ -1296,7 +1296,7 @@ func seedFixtures(t *testing.T, c *client.Client) {
 		t.Fatalf("reading branding configuration: %v", err)
 	}
 	restore = append(restore, func(c *client.Client) error {
-		return c.UpdateBrandingConfiguration(ctx, &client.BrandingConfiguration{RawJSON: branding.RawJSON})
+		return c.UpdateBrandingConfiguration(ctx, branding)
 	})
 	seeded, err := json.Marshal(map[string]interface{}{
 		"LoginDisclaimer":     tricky + "\nsecond line\twith a tab and \x01",
@@ -1306,7 +1306,7 @@ func seedFixtures(t *testing.T, c *client.Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.UpdateBrandingConfiguration(ctx, &client.BrandingConfiguration{RawJSON: string(seeded)}); err != nil {
+	if err := c.UpdateBrandingConfiguration(ctx, string(seeded)); err != nil {
 		t.Fatalf("seeding branding configuration: %v", err)
 	}
 
@@ -1315,10 +1315,10 @@ func seedFixtures(t *testing.T, c *client.Client) {
 		t.Fatalf("reading system configuration: %v", err)
 	}
 	restore = append(restore, func(c *client.Client) error {
-		return c.UpdateSystemConfiguration(ctx, &client.SystemConfiguration{RawJSON: system.RawJSON})
+		return c.UpdateSystemConfiguration(ctx, system)
 	})
 	var systemDoc map[string]interface{}
-	if err := json.Unmarshal([]byte(system.RawJSON), &systemDoc); err != nil {
+	if err := json.Unmarshal([]byte(system), &systemDoc); err != nil {
 		t.Fatalf("parsing system configuration: %v", err)
 	}
 	options, _ := systemDoc["MetadataOptions"].([]interface{})
@@ -1335,7 +1335,7 @@ func seedFixtures(t *testing.T, c *client.Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.UpdateSystemConfiguration(ctx, &client.SystemConfiguration{RawJSON: string(seededSystem)}); err != nil {
+	if err := c.UpdateSystemConfiguration(ctx, string(seededSystem)); err != nil {
 		t.Fatalf("seeding system configuration: %v", err)
 	}
 

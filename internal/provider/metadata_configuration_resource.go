@@ -5,7 +5,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -132,62 +131,22 @@ func (r *MetadataConfigurationResource) ModifyPlan(ctx context.Context, req reso
 
 func (r *MetadataConfigurationResource) apply(ctx context.Context, data *MetadataConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
 	b := wireBinding(diags, metadataWire)
-	if b == nil {
+	if b == nil || !r.document().write(ctx, b, data, diags) {
 		return
 	}
-
-	current, err := r.client.GetMetadataConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read current metadata configuration", err.Error())
-		return
-	}
-
-	base, err := parseJSONObject(current.RawJSON)
-	if err != nil {
-		diags.AddError("Failed to parse current metadata configuration", err.Error())
-		return
-	}
-
-	if d := b.OverlayModel(ctx, base, data); d.HasError() {
-		diags.Append(d...)
-		return
-	}
-
-	payload, err := json.Marshal(base)
-	if err != nil {
-		diags.AddError("Failed to serialize metadata configuration", err.Error())
-		return
-	}
-
-	if err := r.client.UpdateMetadataConfiguration(ctx, &client.MetadataConfiguration{RawJSON: string(payload)}); err != nil {
-		diags.AddError("Failed to update metadata configuration", err.Error())
-		return
-	}
-
-	updated, err := r.client.GetMetadataConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read metadata configuration after update", err.Error())
-		return
-	}
-
-	diags.Append(b.FlattenAfterApply(ctx, updated.RawJSON, data)...)
 	data.ID = types.StringValue("metadata")
 	diags.Append(state.Set(ctx, data)...)
 }
 
 func (r *MetadataConfigurationResource) read(ctx context.Context, data *MetadataConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
 	b := wireBinding(diags, metadataWire)
-	if b == nil {
+	if b == nil || !r.document().read(ctx, b, data, diags) {
 		return
 	}
-
-	current, err := r.client.GetMetadataConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read metadata configuration", err.Error())
-		return
-	}
-
-	diags.Append(b.FlattenInto(ctx, current.RawJSON, data)...)
 	data.ID = types.StringValue("metadata")
 	diags.Append(state.Set(ctx, data)...)
+}
+
+func (r *MetadataConfigurationResource) document() document {
+	return document{what: "metadata configuration", get: r.client.GetMetadataConfiguration, put: r.client.UpdateMetadataConfiguration}
 }

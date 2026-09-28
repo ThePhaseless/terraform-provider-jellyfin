@@ -5,7 +5,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -163,62 +162,22 @@ func (r *BrandingConfigurationResource) ModifyPlan(ctx context.Context, req reso
 
 func (r *BrandingConfigurationResource) apply(ctx context.Context, data *BrandingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
 	b := wireBinding(diags, brandingWire)
-	if b == nil {
+	if b == nil || !r.document().write(ctx, b, data, diags) {
 		return
 	}
-
-	current, err := r.client.GetBrandingConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read current branding configuration", err.Error())
-		return
-	}
-
-	base, err := parseJSONObject(current.RawJSON)
-	if err != nil {
-		diags.AddError("Failed to parse current branding configuration", err.Error())
-		return
-	}
-
-	if d := b.OverlayModel(ctx, base, data); d.HasError() {
-		diags.Append(d...)
-		return
-	}
-
-	payload, err := json.Marshal(base)
-	if err != nil {
-		diags.AddError("Failed to serialize branding configuration", err.Error())
-		return
-	}
-
-	if err := r.client.UpdateBrandingConfiguration(ctx, &client.BrandingConfiguration{RawJSON: string(payload)}); err != nil {
-		diags.AddError("Failed to update branding configuration", err.Error())
-		return
-	}
-
-	updated, err := r.client.GetBrandingConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read branding configuration after update", err.Error())
-		return
-	}
-
-	diags.Append(b.FlattenAfterApply(ctx, updated.RawJSON, data)...)
 	data.ID = types.StringValue("branding")
 	diags.Append(state.Set(ctx, data)...)
 }
 
 func (r *BrandingConfigurationResource) read(ctx context.Context, data *BrandingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
 	b := wireBinding(diags, brandingWire)
-	if b == nil {
+	if b == nil || !r.document().read(ctx, b, data, diags) {
 		return
 	}
-
-	current, err := r.client.GetBrandingConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read branding configuration", err.Error())
-		return
-	}
-
-	diags.Append(b.FlattenInto(ctx, current.RawJSON, data)...)
 	data.ID = types.StringValue("branding")
 	diags.Append(state.Set(ctx, data)...)
+}
+
+func (r *BrandingConfigurationResource) document() document {
+	return document{what: "branding configuration", get: r.client.GetBrandingConfiguration, put: r.client.UpdateBrandingConfiguration}
 }

@@ -420,7 +420,7 @@ func testAccCheckMetadataOptions(t *testing.T, itemType string, want map[string]
 		var doc struct {
 			MetadataOptions []map[string]json.RawMessage
 		}
-		if err := json.Unmarshal([]byte(cfg.RawJSON), &doc); err != nil {
+		if err := json.Unmarshal([]byte(cfg), &doc); err != nil {
 			return fmt.Errorf("parsing the system configuration: %w", err)
 		}
 		entry := slices.IndexFunc(doc.MetadataOptions, func(e map[string]json.RawMessage) bool {

@@ -482,55 +482,19 @@ func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
 	ctx := g.context()
 	singletons := []struct {
 		name string
-		read func() (string, error)
+		read func(context.Context) (string, error)
 	}{
-		{"system", func() (string, error) {
-			c, err := g.client.GetSystemConfiguration(ctx)
-			if err != nil {
-				return "", err
-			}
-			return c.RawJSON, nil
-		}},
-		{"encoding", func() (string, error) {
-			c, err := g.client.GetEncodingOptions(ctx)
-			if err != nil {
-				return "", err
-			}
-			return c.RawJSON, nil
-		}},
-		{"networking", func() (string, error) {
-			c, err := g.client.GetNetworkConfiguration(ctx)
-			if err != nil {
-				return "", err
-			}
-			return c.RawJSON, nil
-		}},
-		{"branding", func() (string, error) {
-			c, err := g.client.GetBrandingConfiguration(ctx)
-			if err != nil {
-				return "", err
-			}
-			return c.RawJSON, nil
-		}},
-		{"livetv", func() (string, error) {
-			c, err := g.client.GetLiveTVConfiguration(ctx)
-			if err != nil {
-				return "", err
-			}
-			return c.RawJSON, nil
-		}},
-		{"metadata", func() (string, error) {
-			c, err := g.client.GetMetadataConfiguration(ctx)
-			if err != nil {
-				return "", err
-			}
-			return c.RawJSON, nil
-		}},
+		{"system", g.client.GetSystemConfiguration},
+		{"encoding", g.client.GetEncodingOptions},
+		{"networking", g.client.GetNetworkConfiguration},
+		{"branding", g.client.GetBrandingConfiguration},
+		{"livetv", g.client.GetLiveTVConfiguration},
+		{"metadata", g.client.GetMetadataConfiguration},
 	}
 
 	var imports, resources []string
 	for _, s := range singletons {
-		raw, err := s.read()
+		raw, err := s.read(ctx)
 		if err != nil {
 			return nil, nil, fmt.Errorf("getting %s configuration: %w", s.name, err)
 		}

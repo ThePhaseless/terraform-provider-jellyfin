@@ -8,25 +8,20 @@ import (
 	"fmt"
 )
 
-// MetadataConfiguration represents the metadata configuration.
-// RawJSON stores the complete JSON for the metadata settings.
-type MetadataConfiguration struct {
-	RawJSON string `json:"-"`
-}
-
-// GetMetadataConfiguration retrieves the metadata configuration.
-func (c *Client) GetMetadataConfiguration(ctx context.Context) (*MetadataConfiguration, error) {
+// GetMetadataConfiguration returns the metadata configuration document as the
+// server serves it.
+func (c *Client) GetMetadataConfiguration(ctx context.Context) (string, error) {
 	raw, err := c.getRaw(ctx, "/System/Configuration/metadata")
 	if err != nil {
-		return nil, fmt.Errorf("getting metadata configuration: %w", err)
+		return "", fmt.Errorf("getting metadata configuration: %w", err)
 	}
-
-	return &MetadataConfiguration{RawJSON: raw}, nil
+	return raw, nil
 }
 
-// UpdateMetadataConfiguration updates the metadata configuration.
-func (c *Client) UpdateMetadataConfiguration(ctx context.Context, config *MetadataConfiguration) error {
-	if err := c.postRaw(ctx, "/System/Configuration/metadata", config.RawJSON); err != nil {
+// UpdateMetadataConfiguration replaces the metadata configuration document with
+// raw.
+func (c *Client) UpdateMetadataConfiguration(ctx context.Context, raw string) error {
+	if err := c.postRaw(ctx, "/System/Configuration/metadata", raw); err != nil {
 		return fmt.Errorf("updating metadata configuration: %w", err)
 	}
 	return nil

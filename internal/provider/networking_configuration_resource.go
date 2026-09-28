@@ -5,7 +5,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"regexp"
 	"sync"
 
@@ -187,62 +186,22 @@ func (r *NetworkingConfigurationResource) ModifyPlan(ctx context.Context, req re
 
 func (r *NetworkingConfigurationResource) apply(ctx context.Context, data *NetworkingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
 	b := wireBinding(diags, networkingWire)
-	if b == nil {
+	if b == nil || !r.document().write(ctx, b, data, diags) {
 		return
 	}
-
-	current, err := r.client.GetNetworkConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read current networking configuration", err.Error())
-		return
-	}
-
-	base, err := parseJSONObject(current.RawJSON)
-	if err != nil {
-		diags.AddError("Failed to parse current networking configuration", err.Error())
-		return
-	}
-
-	if d := b.OverlayModel(ctx, base, data); d.HasError() {
-		diags.Append(d...)
-		return
-	}
-
-	payload, err := json.Marshal(base)
-	if err != nil {
-		diags.AddError("Failed to serialize networking configuration", err.Error())
-		return
-	}
-
-	if err := r.client.UpdateNetworkConfiguration(ctx, &client.NetworkConfiguration{RawJSON: string(payload)}); err != nil {
-		diags.AddError("Failed to update networking configuration", err.Error())
-		return
-	}
-
-	updated, err := r.client.GetNetworkConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read networking configuration after update", err.Error())
-		return
-	}
-
-	diags.Append(b.FlattenAfterApply(ctx, updated.RawJSON, data)...)
 	data.ID = types.StringValue("networking")
 	diags.Append(state.Set(ctx, data)...)
 }
 
 func (r *NetworkingConfigurationResource) read(ctx context.Context, data *NetworkingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
 	b := wireBinding(diags, networkingWire)
-	if b == nil {
+	if b == nil || !r.document().read(ctx, b, data, diags) {
 		return
 	}
-
-	current, err := r.client.GetNetworkConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read networking configuration", err.Error())
-		return
-	}
-
-	diags.Append(b.FlattenInto(ctx, current.RawJSON, data)...)
 	data.ID = types.StringValue("networking")
 	diags.Append(state.Set(ctx, data)...)
+}
+
+func (r *NetworkingConfigurationResource) document() document {
+	return document{what: "networking configuration", get: r.client.GetNetworkConfiguration, put: r.client.UpdateNetworkConfiguration}
 }

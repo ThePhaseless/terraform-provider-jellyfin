@@ -5,6 +5,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -50,6 +51,63 @@ func wireBinding(diags *diag.Diagnostics, bind func() (*wire.Binding, error)) *w
 		return nil
 	}
 	return b
+}
+
+// document is a Jellyfin JSON document that a resource reads and writes
+// whole through its binding: what names it in messages, get reads it, and put
+// replaces it.
+type document struct {
+	what string
+	get  func(context.Context) (string, error)
+	put  func(context.Context, string) error
+}
+
+// write writes model, the plan, over the document the server serves, and
+// then reads model from what the server serves after the write. It reports
+// whether model holds that read.
+func (d document) write(ctx context.Context, b *wire.Binding, model any, diags *diag.Diagnostics) bool {
+	current, err := d.get(ctx)
+	if err != nil {
+		diags.AddError("Failed to read current "+d.what, err.Error())
+		return false
+	}
+	base, err := parseJSONObject(current)
+	if err != nil {
+		diags.AddError("Failed to parse current "+d.what, err.Error())
+		return false
+	}
+	if o := b.OverlayModel(ctx, base, model); o.HasError() {
+		diags.Append(o...)
+		return false
+	}
+	payload, err := json.Marshal(base)
+	if err != nil {
+		diags.AddError("Failed to serialize "+d.what, err.Error())
+		return false
+	}
+	if err := d.put(ctx, string(payload)); err != nil {
+		diags.AddError("Failed to update "+d.what, err.Error())
+		return false
+	}
+	updated, err := d.get(ctx)
+	if err != nil {
+		diags.AddError("Failed to read "+d.what+" after update", err.Error())
+		return false
+	}
+	diags.Append(b.FlattenAfterApply(ctx, updated, model)...)
+	return true
+}
+
+// read reads model from the document the server serves, and reports whether
+// model holds that read.
+func (d document) read(ctx context.Context, b *wire.Binding, model any, diags *diag.Diagnostics) bool {
+	current, err := d.get(ctx)
+	if err != nil {
+		diags.AddError("Failed to read "+d.what, err.Error())
+		return false
+	}
+	diags.Append(b.FlattenInto(ctx, current, model)...)
+	return true
 }
 
 // checkServerHasFields rejects, at plan time, configured values whose fields

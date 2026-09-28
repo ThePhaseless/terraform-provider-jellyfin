@@ -5,7 +5,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -547,41 +546,9 @@ func (r *SystemConfigurationResource) apply(ctx context.Context, data *SystemCon
 	serverConfigurationMu.Lock()
 	defer serverConfigurationMu.Unlock()
 
-	current, err := r.client.GetSystemConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read current system configuration", err.Error())
+	if !r.document().write(ctx, b, data, diags) {
 		return
 	}
-
-	base, err := parseJSONObject(current.RawJSON)
-	if err != nil {
-		diags.AddError("Failed to parse current system configuration", err.Error())
-		return
-	}
-
-	if d := b.OverlayModel(ctx, base, data); d.HasError() {
-		diags.Append(d...)
-		return
-	}
-
-	payload, err := json.Marshal(base)
-	if err != nil {
-		diags.AddError("Failed to serialize system configuration", err.Error())
-		return
-	}
-
-	if err := r.client.UpdateSystemConfiguration(ctx, &client.SystemConfiguration{RawJSON: string(payload)}); err != nil {
-		diags.AddError("Failed to update system configuration", err.Error())
-		return
-	}
-
-	updated, err := r.client.GetSystemConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read system configuration after update", err.Error())
-		return
-	}
-
-	diags.Append(b.FlattenAfterApply(ctx, updated.RawJSON, data)...)
 	data.ID = types.StringValue("system")
 	diags.Append(state.Set(ctx, data)...)
 }
@@ -592,14 +559,13 @@ func (r *SystemConfigurationResource) read(ctx context.Context, data *SystemConf
 		return
 	}
 	ctx = wire.WithAvailable(ctx, r.offered(r.client))
-
-	current, err := r.client.GetSystemConfiguration(ctx)
-	if err != nil {
-		diags.AddError("Failed to read system configuration", err.Error())
+	if !r.document().read(ctx, b, data, diags) {
 		return
 	}
-
-	diags.Append(b.FlattenInto(ctx, current.RawJSON, data)...)
 	data.ID = types.StringValue("system")
 	diags.Append(state.Set(ctx, data)...)
+}
+
+func (r *SystemConfigurationResource) document() document {
+	return document{what: "system configuration", get: r.client.GetSystemConfiguration, put: r.client.UpdateSystemConfiguration}
 }

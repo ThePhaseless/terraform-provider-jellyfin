@@ -5,7 +5,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -242,62 +241,22 @@ func (r *EncodingConfigurationResource) ModifyPlan(ctx context.Context, req reso
 
 func (r *EncodingConfigurationResource) apply(ctx context.Context, data *EncodingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
 	b := wireBinding(diags, encodingWire)
-	if b == nil {
+	if b == nil || !r.document().write(ctx, b, data, diags) {
 		return
 	}
-
-	current, err := r.client.GetEncodingOptions(ctx)
-	if err != nil {
-		diags.AddError("Failed to read current encoding configuration", err.Error())
-		return
-	}
-
-	base, err := parseJSONObject(current.RawJSON)
-	if err != nil {
-		diags.AddError("Failed to parse current encoding configuration", err.Error())
-		return
-	}
-
-	if d := b.OverlayModel(ctx, base, data); d.HasError() {
-		diags.Append(d...)
-		return
-	}
-
-	payload, err := json.Marshal(base)
-	if err != nil {
-		diags.AddError("Failed to serialize encoding configuration", err.Error())
-		return
-	}
-
-	if err := r.client.UpdateEncodingOptions(ctx, &client.EncodingOptions{RawJSON: string(payload)}); err != nil {
-		diags.AddError("Failed to update encoding configuration", err.Error())
-		return
-	}
-
-	updated, err := r.client.GetEncodingOptions(ctx)
-	if err != nil {
-		diags.AddError("Failed to read encoding configuration after update", err.Error())
-		return
-	}
-
-	diags.Append(b.FlattenAfterApply(ctx, updated.RawJSON, data)...)
 	data.ID = types.StringValue("encoding")
 	diags.Append(state.Set(ctx, data)...)
 }
 
 func (r *EncodingConfigurationResource) read(ctx context.Context, data *EncodingConfigurationResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
 	b := wireBinding(diags, encodingWire)
-	if b == nil {
+	if b == nil || !r.document().read(ctx, b, data, diags) {
 		return
 	}
-
-	current, err := r.client.GetEncodingOptions(ctx)
-	if err != nil {
-		diags.AddError("Failed to read encoding configuration", err.Error())
-		return
-	}
-
-	diags.Append(b.FlattenInto(ctx, current.RawJSON, data)...)
 	data.ID = types.StringValue("encoding")
 	diags.Append(state.Set(ctx, data)...)
+}
+
+func (r *EncodingConfigurationResource) document() document {
+	return document{what: "encoding configuration", get: r.client.GetEncodingOptions, put: r.client.UpdateEncodingOptions}
 }

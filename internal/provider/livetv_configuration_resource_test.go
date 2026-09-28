@@ -258,7 +258,7 @@ func testAccWaitForLiveTVMediaLocations(t *testing.T, want ...string) resource.T
 			var cfg struct {
 				MediaLocationsCreated []string
 			}
-			if err := json.Unmarshal([]byte(current.RawJSON), &cfg); err != nil {
+			if err := json.Unmarshal([]byte(current), &cfg); err != nil {
 				return fmt.Errorf("parsing Live TV configuration: %w", err)
 			}
 			if slices.Equal(cfg.MediaLocationsCreated, want) {
