@@ -142,12 +142,7 @@ func (b *Binding) writeShared(ctx context.Context, doc map[string]json.RawMessag
 			return diags
 		}
 		if !listed {
-			var owners []string
-			for _, s := range f.Shares {
-				owners = append(owners, s.Name)
-			}
-			return diag.Diagnostics{diag.NewAttributeErrorDiagnostic(at, "Offered names unknown",
-				fmt.Sprintf("The Jellyfin server does not list the %s it offers%s, so %s cannot tell which to disable. Set %s instead.", f.Offered, forScope(scope), at, strings.Join(owners, " and ")))}
+			return diag.Diagnostics{notListed(at, f, scope)}
 		}
 		for _, n := range names {
 			if !slices.Contains(offered, n) {
@@ -216,6 +211,15 @@ func forScope(scope string) string {
 		return ""
 	}
 	return " for " + scope
+}
+
+func notListed(at path.Path, f *Field, scope string) diag.Diagnostic {
+	var owners []string
+	for _, s := range f.Shares {
+		owners = append(owners, s.Name)
+	}
+	return diag.NewAttributeErrorDiagnostic(at, "Offered names unknown",
+		fmt.Sprintf("The Jellyfin server does not list the %s it offers%s, so %s cannot tell which to disable. Set %s instead.", f.Offered, forScope(scope), at, strings.Join(owners, " and ")))
 }
 
 func notOffered(at path.Path, f *Field, name, scope string, offered []string) diag.Diagnostic {
