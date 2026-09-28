@@ -70,6 +70,14 @@ func (o *options) setKey(path, key string) {
 	a.key = key
 }
 
+func (o *options) setShares(path string, shares []string, offered, scope string) {
+	a := o.attr(path)
+	if a.shares != nil {
+		o.errs = append(o.errs, fmt.Sprintf("%s is given Orders or Complement twice", path))
+	}
+	a.shares, a.offered, a.scope = shares, offered, scope
+}
+
 func (o *options) setCodec(path string, c Codec) {
 	a := o.attr(path)
 	if a.codec != nil {
@@ -178,13 +186,7 @@ func VersionMessage(attrPath string, message func(VersionGap) (summary, detail s
 // names are those Complement describes for offered and scopeAttr; with
 // offered "", Orders asks for none.
 func Orders(attrPath, orderAttr, offered, scopeAttr string) Option {
-	return func(o *options) {
-		a := o.attr(attrPath)
-		if a.shares != nil {
-			o.errs = append(o.errs, fmt.Sprintf("%s is given Orders or Complement twice", attrPath))
-		}
-		a.shares, a.offered, a.scope = []string{orderAttr}, offered, scopeAttr
-	}
+	return func(o *options) { o.setShares(attrPath, []string{orderAttr}, offered, scopeAttr) }
 }
 
 // Complement maps the list attribute at attrPath, the enabled names in
@@ -198,11 +200,8 @@ func Orders(attrPath, orderAttr, offered, scopeAttr string) Option {
 // writes each key only while the attribute that owns it has no value to write.
 func Complement(attrPath, orderAttr, disabledAttr, offered, scopeAttr string) Option {
 	return func(o *options) {
-		a := o.setMode(attrPath, ModeComplement, "")
-		if a.shares != nil {
-			o.errs = append(o.errs, fmt.Sprintf("%s is given Orders or Complement twice", attrPath))
-		}
-		a.shares, a.offered, a.scope = []string{orderAttr, disabledAttr}, offered, scopeAttr
+		o.setMode(attrPath, ModeComplement, "")
+		o.setShares(attrPath, []string{orderAttr, disabledAttr}, offered, scopeAttr)
 	}
 }
 

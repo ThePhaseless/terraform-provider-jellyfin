@@ -9,7 +9,8 @@ package wire
 import (
 	_ "embed"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 
@@ -90,7 +91,7 @@ func FloorVersion() string { return embedded().floorVer }
 func parseAPIGolden(text string) Index {
 	ix := Index{}
 	aliases := map[string]string{}
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		rest, ok := strings.CutPrefix(line, "schema ")
 		if !ok {
 			continue
@@ -152,7 +153,7 @@ func scalarOf(sig string) (scalar, format string) {
 // below root, such as "JellyfinSecurity.OidcProviders[]".
 func parseSecurityGolden(root, text string) Index {
 	ix := Index{root: {}}
-	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(text), "\n") {
 		keyPath, typ, ok := strings.Cut(line, ": ")
 		if !ok {
 			continue
@@ -208,19 +209,14 @@ func (ix Index) Resolve(object, name string) (Prop, error) {
 		for i, h := range hits {
 			keys[i] = h.Key
 		}
-		sort.Strings(keys)
+		slices.Sort(keys)
 		return Prop{}, fmt.Errorf("%s has several properties matching %q: %s", object, name, strings.Join(keys, ", "))
 	}
 }
 
 func (ix Index) nearest(object, name string) string {
 	best, bestDist := "", -1
-	keys := make([]string, 0, len(ix[object]))
-	for k := range ix[object] {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
+	for _, k := range slices.Sorted(maps.Keys(ix[object])) {
 		if d := levenshtein(norm(k), norm(name)); bestDist < 0 || d < bestDist {
 			best, bestDist = k, d
 		}

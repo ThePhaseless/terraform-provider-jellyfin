@@ -45,12 +45,7 @@ func trieOf(docs []docField) *node {
 // pointer to the resource's model struct, whose values serve as the prior
 // values Flatten takes.
 func (b *Binding) FlattenInto(ctx context.Context, raw string, model any) diag.Diagnostics {
-	prior, diags := types.ObjectValueFrom(ctx, b.AttrTypes, model)
-	if diags.HasError() {
-		return diags
-	}
-	got, d := b.flattenRaw(ctx, raw, prior)
-	diags.Append(d...)
+	_, got, diags := b.flattenModel(ctx, raw, model)
 	if diags.HasError() {
 		return diags
 	}
@@ -62,12 +57,7 @@ func (b *Binding) FlattenInto(ctx context.Context, raw string, model any) diag.D
 // describes and the planned Complements keepUnwrittenComplements describes,
 // reports what Dropped finds, and fills model either way.
 func (b *Binding) FlattenAfterApply(ctx context.Context, raw string, model any) diag.Diagnostics {
-	planned, diags := types.ObjectValueFrom(ctx, b.AttrTypes, model)
-	if diags.HasError() {
-		return diags
-	}
-	got, d := b.flattenRaw(ctx, raw, planned)
-	diags.Append(d...)
+	planned, got, diags := b.flattenModel(ctx, raw, model)
 	if diags.HasError() {
 		return diags
 	}
@@ -77,14 +67,21 @@ func (b *Binding) FlattenAfterApply(ctx context.Context, raw string, model any) 
 	return append(diags, got.As(ctx, model, basetypes.ObjectAsOptions{})...)
 }
 
-func (b *Binding) flattenRaw(ctx context.Context, raw string, prior types.Object) (types.Object, diag.Diagnostics) {
+func (b *Binding) flattenModel(ctx context.Context, raw string, model any) (prior, got types.Object, diags diag.Diagnostics) {
+	prior, diags = types.ObjectValueFrom(ctx, b.AttrTypes, model)
+	if diags.HasError() {
+		return prior, prior, diags
+	}
 	doc := map[string]json.RawMessage{}
 	if raw != "" {
 		if err := json.Unmarshal([]byte(raw), &doc); err != nil {
-			return prior, diag.Diagnostics{diag.NewErrorDiagnostic(fmt.Sprintf("Failed to parse the Jellyfin %s", b.Object), err.Error())}
+			diags.AddError(fmt.Sprintf("Failed to parse the Jellyfin %s", b.Object), err.Error())
+			return prior, prior, diags
 		}
 	}
-	return b.Flatten(ctx, doc, prior)
+	got, d := b.Flatten(ctx, doc, prior)
+	diags.Append(d...)
+	return prior, got, diags
 }
 
 // Flatten reads doc into an object of the binding's type. An attribute whose
@@ -100,7 +97,7 @@ func (b *Binding) Flatten(ctx context.Context, doc map[string]json.RawMessage, p
 func (b *Binding) flattenNode(ctx context.Context, n *node, attrTypes map[string]attr.Type, prior types.Object, doc map[string]json.RawMessage, at path.Path, trail string) (types.Object, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	var priorAttrs map[string]attr.Value
-	if !prior.IsNull() && !prior.IsUnknown() {
+	if known(prior) {
 		priorAttrs = prior.Attributes()
 	}
 	out := make(map[string]attr.Value, len(attrTypes))
@@ -181,7 +178,7 @@ func readList(ctx context.Context, f *Field, raw json.RawMessage, prior attr.Val
 	// The prior element at the same index is the one a codec compares with,
 	// but only while the list keeps its length.
 	var priorElems []attr.Value
-	if pl, ok := prior.(basetypes.ListValue); ok && !pl.IsNull() && !pl.IsUnknown() && len(pl.Elements()) == len(elems) {
+	if pl, ok := prior.(basetypes.ListValue); ok && known(pl) && len(pl.Elements()) == len(elems) {
 		priorElems = pl.Elements()
 	}
 	var diags diag.Diagnostics
@@ -259,6 +256,10 @@ func lookupKey(ctx context.Context, m map[string]json.RawMessage, key string, at
 		tflog.Debug(ctx, "Several served keys match a Jellyfin key; reading none", map[string]any{"attribute": at.String(), "key": key, "served": hits})
 		return nil, false
 	}
+}
+
+func known(v attr.Value) bool {
+	return v != nil && !v.IsNull() && !v.IsUnknown()
 }
 
 func nullOf(ctx context.Context, t attr.Type) attr.Value {

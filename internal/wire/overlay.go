@@ -45,7 +45,7 @@ func (b *Binding) Overlay(ctx context.Context, doc map[string]json.RawMessage, o
 
 func (b *Binding) overlay(ctx context.Context, doc map[string]json.RawMessage, obj types.Object, merged bool, at path.Path, trail string) diag.Diagnostics {
 	var diags diag.Diagnostics
-	if obj.IsNull() || obj.IsUnknown() {
+	if !known(obj) {
 		return diags
 	}
 	for _, d := range b.docs {
@@ -53,9 +53,10 @@ func (b *Binding) overlay(ctx context.Context, doc map[string]json.RawMessage, o
 		if !ok {
 			continue
 		}
-		diags.Append(writeField(ctx, doc, d, v, merged, attrPathOf(at, d.attrPath), trail)...)
+		p := attrPathOf(at, d.attrPath)
+		diags.Append(writeField(ctx, doc, d, v, merged, p, trail)...)
 		if len(d.f.Shares) > 0 && !diags.HasError() {
-			diags.Append(b.writeShared(ctx, doc, obj, d, v, merged, attrPathOf(at, d.attrPath), trail)...)
+			diags.Append(b.writeShared(ctx, doc, obj, d, v, merged, p, trail)...)
 		}
 		if diags.HasError() {
 			return diags
@@ -77,7 +78,7 @@ func valueAt(obj types.Object, attrPath []string) (attr.Value, bool) {
 			return v, true
 		}
 		next, ok := v.(basetypes.ObjectValue)
-		if !ok || next.IsNull() || next.IsUnknown() {
+		if !ok || !known(next) {
 			return nil, false
 		}
 		cur = next
@@ -178,7 +179,7 @@ func writeList(ctx context.Context, doc map[string]json.RawMessage, d docField, 
 	entries := make([]map[string]json.RawMessage, 0, len(list.Elements()))
 	for i, e := range list.Elements() {
 		elem, ok := e.(basetypes.ObjectValue)
-		if !ok || elem.IsNull() || elem.IsUnknown() {
+		if !ok || !known(elem) {
 			return nil, diag.Diagnostics{diag.NewAttributeErrorDiagnostic(at.AtListIndex(i), "Unknown list element",
 				"Every element of the list must be known before it is written to Jellyfin.")}
 		}
@@ -208,10 +209,8 @@ func writeList(ctx context.Context, doc map[string]json.RawMessage, d docField, 
 }
 
 func elemKey(f *Field, attrName string) string {
-	for _, e := range f.Elem.Fields {
-		if e.Name == attrName && len(e.KeyPath) == 1 {
-			return e.KeyPath[0]
-		}
+	if e := f.Elem.fieldNamed(attrName); e != nil && len(e.KeyPath) == 1 {
+		return e.KeyPath[0]
 	}
 	return attrName
 }
@@ -220,7 +219,7 @@ func elemKey(f *Field, attrName string) string {
 // ignoring case, the way Jellyfin looks such elements up.
 func servedWithKey(ctx context.Context, served []map[string]json.RawMessage, key string, want attr.Value) map[string]json.RawMessage {
 	w, ok := want.(basetypes.StringValue)
-	if !ok || w.IsNull() || w.IsUnknown() {
+	if !ok || !known(w) {
 		return nil
 	}
 	for _, s := range served {
@@ -260,9 +259,6 @@ func servedObject(ctx context.Context, doc map[string]json.RawMessage, keyPath [
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, err
-	}
-	if out == nil {
-		out = map[string]json.RawMessage{}
 	}
 	return out, nil
 }

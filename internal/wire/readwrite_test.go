@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 	"testing"
@@ -50,7 +51,7 @@ func canonical(t *testing.T, v any) string {
 // at returns the value at a path such as "types[0].images[1].limit".
 func at(t *testing.T, v attr.Value, p string) attr.Value {
 	t.Helper()
-	for _, part := range strings.Split(p, ".") {
+	for part := range strings.SplitSeq(p, ".") {
 		name, index, hasIndex := strings.Cut(strings.TrimSuffix(part, "]"), "[")
 		obj, ok := v.(basetypes.ObjectValue)
 		if !ok {
@@ -78,15 +79,12 @@ func with(t *testing.T, obj attr.Value, p string, v attr.Value) attr.Value {
 	if !ok {
 		t.Fatalf("%s is not in an object", p)
 	}
-	attrs := map[string]attr.Value{}
-	for k, old := range o.Attributes() {
-		attrs[k] = old
-	}
+	attrs := o.Attributes()
 	switch {
 	case hasIndex:
 		i, _ := strconv.Atoi(index)
 		l, _ := attrs[name].(basetypes.ListValue)
-		elems := append([]attr.Value(nil), l.Elements()...)
+		elems := l.Elements()
 		if nested {
 			elems[i] = with(t, elems[i], rest, v)
 		} else {
@@ -103,6 +101,15 @@ func with(t *testing.T, obj attr.Value, p string, v attr.Value) attr.Value {
 		t.Fatal(d)
 	}
 	return out
+}
+
+func checkAt(t *testing.T, v attr.Value, want map[string]string) {
+	t.Helper()
+	for p, w := range want {
+		if s := at(t, v, p).String(); s != w {
+			t.Errorf("%s = %s, want %s", p, s, w)
+		}
+	}
 }
 
 func object(t *testing.T, v attr.Value) types.Object {
@@ -133,9 +140,7 @@ func TestUnitFlattenReadsEachAttribute(t *testing.T) {
 		for name, typ := range b.AttrTypes {
 			attrs[name] = nullOf(ctx, typ)
 		}
-		for name, v := range values {
-			attrs[name] = v
-		}
+		maps.Copy(attrs, values)
 		return types.ObjectValueMust(b.AttrTypes, attrs)
 	}
 	got, d := b.Flatten(ctx, doc(t, testServed), priorWith(map[string]attr.Value{
@@ -144,7 +149,7 @@ func TestUnitFlattenReadsEachAttribute(t *testing.T) {
 	if d.HasError() {
 		t.Fatal(d)
 	}
-	for p, want := range map[string]string{
+	checkAt(t, got, map[string]string{
 		"id":                 `"the-id"`,
 		"secret":             `"pw"`,
 		"name":               `"n"`,
@@ -167,28 +172,20 @@ func TestUnitFlattenReadsEachAttribute(t *testing.T) {
 		"sub.limit":          `9`,
 		"types[0].fetchers":  `["f"]`,
 		"types[0].images[0]": `{"limit":1,"type":"Primary"}`,
-	} {
-		if s := at(t, got, p).String(); s != want {
-			t.Errorf("%s = %s, want %s", p, s, want)
-		}
-	}
+	})
 
 	sparse, d := b.Flatten(ctx, doc(t, `{"Name": 5, "Tags": null, "Joined": ""}`), nullPrior)
 	if d.HasError() {
 		t.Fatal(d)
 	}
-	for p, want := range map[string]string{
+	checkAt(t, sparse, map[string]string{
 		"name":   "<null>",
 		"tags":   "<null>",
 		"joined": "[]",
 		"count":  "0",
 		"hosts":  "<null>",
 		"id":     "<null>",
-	} {
-		if s := at(t, sparse, p).String(); s != want {
-			t.Errorf("sparse %s = %s, want %s", p, s, want)
-		}
-	}
+	})
 }
 
 func TestUnitFlattenReadsAKeySpelledOtherwise(t *testing.T) {
@@ -199,11 +196,7 @@ func TestUnitFlattenReadsAKeySpelledOtherwise(t *testing.T) {
 	if d.HasError() {
 		t.Fatal(d)
 	}
-	for p, want := range map[string]string{"name": `"lower"`, "ratio": "2.500000", "tags": `["exact"]`, "sizes": "<null>"} {
-		if s := at(t, got, p).String(); s != want {
-			t.Errorf("%s = %s, want %s", p, s, want)
-		}
-	}
+	checkAt(t, got, map[string]string{"name": `"lower"`, "ratio": "2.500000", "tags": `["exact"]`, "sizes": "<null>"})
 	if !strings.Contains(logs.String(), `"served":"name"`) || !strings.Contains(logs.String(), "Reading a Jellyfin key spelled otherwise than the golden") {
 		t.Errorf("the fallback read is not logged:\n%s", logs.String())
 	}
@@ -301,11 +294,7 @@ func TestUnitSelectWritesAndReadsOnlyTheNamedAttributes(t *testing.T) {
 	if d.HasError() {
 		t.Fatal(d)
 	}
-	for p, want := range map[string]string{"name": `"read"`, "hoisted": "false", "count": "9", "sub.flag": "false", "limit": "<null>", "hosts[0].url": `"elsewhere"`} {
-		if s := at(t, read, p).String(); s != want {
-			t.Errorf("select read %s = %s, want %s", p, s, want)
-		}
-	}
+	checkAt(t, read, map[string]string{"name": `"read"`, "hoisted": "false", "count": "9", "sub.flag": "false", "limit": "<null>", "hosts[0].url": `"elsewhere"`})
 }
 
 func subDocument(t *testing.T) (*Binding, types.Object) {
@@ -343,11 +332,7 @@ func TestUnitDocumentReadKeepsTheAttributesOutsideIt(t *testing.T) {
 	if d.HasError() {
 		t.Fatal(d)
 	}
-	for p, want := range map[string]string{"name": `"kept"`, "sub.flag": "true", "sub.limit": "1", "hoisted": "false", "count": "3"} {
-		if s := at(t, read, p).String(); s != want {
-			t.Errorf("document read %s = %s, want %s", p, s, want)
-		}
-	}
+	checkAt(t, read, map[string]string{"name": `"kept"`, "sub.flag": "true", "sub.limit": "1", "hoisted": "false", "count": "3"})
 }
 
 func TestUnitAnUnreadableServedListFailsAMergeButNotACarry(t *testing.T) {
@@ -394,14 +379,10 @@ func TestUnitKeepPlannedNullsInsideListElements(t *testing.T) {
 	got = with(t, got, "opts.mode", types.StringValue(""))
 
 	kept := KeepPlannedNulls(object(t, planned), object(t, got))
-	for p, want := range map[string]string{
+	checkAt(t, kept, map[string]string{
 		"hosts[1].kind": "<null>", "types[0].fetchers": "<null>", "types[0].images[0].type": "<null>",
 		"name": `""`, "tags": "[]", "opts.mode": `""`, "hosts[0].kind": `"k0"`,
-	} {
-		if s := at(t, kept, p).String(); s != want {
-			t.Errorf("%s = %s, want %s", p, s, want)
-		}
-	}
+	})
 
 	hosts, _ := at(t, got, "hosts").(basetypes.ListValue)
 	shorter := with(t, got, "hosts", types.ListValueMust(hosts.ElementType(ctx), []attr.Value{at(t, got, "hosts[1]")}))
@@ -448,6 +429,16 @@ func configOf(t *testing.T, attrs map[string]schema.Attribute, v attr.Value) tfs
 	return tfsdk.Config{Schema: schema.Schema{Attributes: attrs}, Raw: raw}
 }
 
+func diagPaths(diags diag.Diagnostics) string {
+	var paths []string
+	for _, e := range diags {
+		if pe, ok := e.(diag.DiagnosticWithPath); ok {
+			paths = append(paths, pe.Path().String())
+		}
+	}
+	return strings.Join(paths, " ")
+}
+
 func versionErrorLines(diags diag.Diagnostics) []string {
 	var out []string
 	for _, e := range diags {
@@ -483,13 +474,7 @@ func TestUnitVersionErrors(t *testing.T) {
 			calls++
 			return c.version, nil
 		})
-		var paths []string
-		for _, e := range diags {
-			if pe, ok := e.(diag.DiagnosticWithPath); ok {
-				paths = append(paths, pe.Path().String())
-			}
-		}
-		if got := strings.Join(paths, " "); got != c.want || calls != c.calls {
+		if got := diagPaths(diags); got != c.want || calls != c.calls {
 			t.Errorf("%s: errors at %q after %d version reads, want %q after %d", c.name, got, calls, c.want, c.calls)
 		}
 	}
@@ -555,12 +540,7 @@ func TestUnitVersionErrorsGateANewNestedAttributeAsAWhole(t *testing.T) {
 	if d.HasError() {
 		t.Fatal(d)
 	}
-	var paths []string
-	for _, line := range versionErrorLines(b.VersionErrors(ctx, configOf(t, attrs, cfg), func() (string, error) { return "1.9", nil })) {
-		p, _, _ := strings.Cut(line, " | ")
-		paths = append(paths, p)
-	}
-	if got := strings.Join(paths, " "); got != "news" {
+	if got := diagPaths(b.VersionErrors(ctx, configOf(t, attrs, cfg), func() (string, error) { return "1.9", nil })); got != "news" {
 		t.Errorf("errors at %q, want news only", got)
 	}
 	message := VersionMessage("news.title", func(VersionGap) (string, string) { return "", "" })

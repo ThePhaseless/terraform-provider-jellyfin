@@ -4,6 +4,7 @@
 package wire
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 )
@@ -31,11 +32,7 @@ func (b *Binding) Describe() []string {
 		if inst.rebuilt {
 			verb = "omits"
 		}
-		where := inst.keyPath
-		if where == "" {
-			where = "(document)"
-		}
-		out = append(out, fmt.Sprintf("%s %s %s %s", where, inst.object, verb, strings.Join(inst.unclaimed, ", ")))
+		out = append(out, fmt.Sprintf("%s %s %s %s", cmp.Or(inst.keyPath, "(document)"), inst.object, verb, strings.Join(inst.unclaimed, ", ")))
 	}
 	return out
 }
@@ -49,10 +46,7 @@ func describeField(x *Binding, f *Field) string {
 		for i, s := range f.Shares {
 			keys[i] = s.key()
 		}
-		line := fmt.Sprintf("%s -> %s.%s complement-of=%s", f.Path, x.Object, strings.Join(keys, "+"), f.Offered)
-		if f.Scope != nil {
-			line += "/" + f.Scope.Name
-		}
+		line := fmt.Sprintf("%s -> %s.%s complement-of=%s", f.Path, x.Object, strings.Join(keys, "+"), f.offeredIn())
 		if f.Since != "" {
 			line += " since=" + f.Since
 		}
@@ -92,14 +86,17 @@ func describeField(x *Binding, f *Field) string {
 		flags = append(flags, "orders="+s.key())
 	}
 	if f.Offered != "" {
-		spelt := "spelt-as=" + f.Offered
-		if f.Scope != nil {
-			spelt += "/" + f.Scope.Name
-		}
-		flags = append(flags, spelt)
+		flags = append(flags, "spelt-as="+f.offeredIn())
 	}
 	if f.Document {
 		flags = append(flags, "document")
 	}
 	return line + " " + strings.Join(flags, " ")
+}
+
+func (f *Field) offeredIn() string {
+	if f.Scope == nil {
+		return f.Offered
+	}
+	return f.Offered + "/" + f.Scope.Name
 }

@@ -57,7 +57,7 @@ func segment(parts []string, i int) int64 {
 // FromEnv returns the value of key in content, the lines of an .env file, or
 // "" when no line sets it.
 func FromEnv(content, key string) string {
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		if v, ok := strings.CutPrefix(strings.TrimSpace(line), key+"="); ok {
 			return strings.TrimSpace(v)
 		}

@@ -29,14 +29,13 @@ func KeepPlannedNulls(planned, got types.Object) types.Object {
 }
 
 func keepNulls(ctx context.Context, planned, got basetypes.ObjectValue, inElement bool) basetypes.ObjectValue {
-	if planned.IsNull() || planned.IsUnknown() || got.IsNull() || got.IsUnknown() {
+	if !known(planned) || !known(got) {
 		return got
 	}
 	plannedAttrs := planned.Attributes()
-	out := make(map[string]attr.Value, len(got.Attributes()))
+	out := got.Attributes()
 	changed := false
-	for name, gv := range got.Attributes() {
-		out[name] = gv
+	for name, gv := range out {
 		pv, ok := plannedAttrs[name]
 		if !ok {
 			continue
@@ -44,13 +43,15 @@ func keepNulls(ctx context.Context, planned, got basetypes.ObjectValue, inElemen
 		nv := gv
 		switch g := gv.(type) {
 		case basetypes.ListValue:
-			if inElement && pv.IsNull() && !g.IsNull() && !g.IsUnknown() && len(g.Elements()) == 0 {
+			if inElement && pv.IsNull() && known(g) && len(g.Elements()) == 0 {
 				nv = types.ListNull(g.ElementType(ctx))
 			} else {
-				nv = keepNullsInList(ctx, pv, g)
+				nv = zipElements(ctx, pv, g, func(pe, ge basetypes.ObjectValue) basetypes.ObjectValue {
+					return keepNulls(ctx, pe, ge, true)
+				})
 			}
 		case basetypes.StringValue:
-			if inElement && pv.IsNull() && !g.IsNull() && !g.IsUnknown() && g.ValueString() == "" {
+			if inElement && pv.IsNull() && known(g) && g.ValueString() == "" {
 				nv = types.StringNull()
 			}
 		case basetypes.ObjectValue:
@@ -72,27 +73,22 @@ func keepNulls(ctx context.Context, planned, got basetypes.ObjectValue, inElemen
 	return obj
 }
 
-func keepNullsInList(ctx context.Context, pv attr.Value, got basetypes.ListValue) basetypes.ListValue {
-	planned, ok := pv.(basetypes.ListValue)
-	if !ok || planned.IsNull() || planned.IsUnknown() || got.IsNull() || got.IsUnknown() || len(planned.Elements()) != len(got.Elements()) {
+// zipElements returns got unchanged unless planned is a list of the same
+// length and both lists are known.
+func zipElements(ctx context.Context, planned attr.Value, got basetypes.ListValue, keep func(p, g basetypes.ObjectValue) basetypes.ObjectValue) basetypes.ListValue {
+	pl, ok := planned.(basetypes.ListValue)
+	if !ok || !known(pl) || !known(got) || len(pl.Elements()) != len(got.Elements()) {
 		return got
 	}
-	et, ok := got.ElementType(ctx).(basetypes.ObjectType)
-	if !ok {
-		return got
-	}
-	elems := make([]attr.Value, len(got.Elements()))
-	for i, ge := range got.Elements() {
-		elems[i] = ge
-		g, ok := ge.(basetypes.ObjectValue)
-		if !ok {
-			continue
-		}
-		if p, ok := planned.Elements()[i].(basetypes.ObjectValue); ok {
-			elems[i] = keepNulls(ctx, p, g, true)
+	plannedElems, elems := pl.Elements(), got.Elements()
+	for i, ge := range elems {
+		g, ok1 := ge.(basetypes.ObjectValue)
+		p, ok2 := plannedElems[i].(basetypes.ObjectValue)
+		if ok1 && ok2 {
+			elems[i] = keep(p, g)
 		}
 	}
-	out, diags := types.ListValue(et, elems)
+	out, diags := types.ListValue(got.ElementType(ctx), elems)
 	if diags.HasError() {
 		return got
 	}
@@ -102,11 +98,11 @@ func keepNullsInList(ctx context.Context, pv attr.Value, got basetypes.ListValue
 // keepUnwrittenComplements returns got with each Complement that the write
 // left alone set back to its planned value.
 func keepUnwrittenComplements(ctx context.Context, n *node, planned, got basetypes.ObjectValue) basetypes.ObjectValue {
-	if planned.IsNull() || planned.IsUnknown() || got.IsNull() || got.IsUnknown() {
+	if !known(planned) || !known(got) {
 		return got
 	}
 	plannedAttrs := planned.Attributes()
-	out := maps.Clone(got.Attributes())
+	out := got.Attributes()
 	changed := false
 	for name, child := range n.children {
 		pv, gv := plannedAttrs[name], out[name]
@@ -149,21 +145,9 @@ func keepUnwrittenInElements(ctx context.Context, n *node, pv, gv attr.Value) at
 			return keepUnwrittenComplements(ctx, n, p, g)
 		}
 	case basetypes.ListValue:
-		p, ok := pv.(basetypes.ListValue)
-		if !ok || p.IsNull() || p.IsUnknown() || g.IsNull() || g.IsUnknown() || len(p.Elements()) != len(g.Elements()) {
-			return gv
-		}
-		elems := slices.Clone(g.Elements())
-		for i, ge := range elems {
-			if gObj, ok := ge.(basetypes.ObjectValue); ok {
-				if pObj, ok := p.Elements()[i].(basetypes.ObjectValue); ok {
-					elems[i] = keepUnwrittenComplements(ctx, n, pObj, gObj)
-				}
-			}
-		}
-		if out, diags := types.ListValue(g.ElementType(ctx), elems); !diags.HasError() {
-			return out
-		}
+		return zipElements(ctx, pv, g, func(pe, ge basetypes.ObjectValue) basetypes.ObjectValue {
+			return keepUnwrittenComplements(ctx, n, pe, ge)
+		})
 	}
 	return gv
 }
@@ -171,15 +155,10 @@ func keepUnwrittenInElements(ctx context.Context, n *node, pv, gv attr.Value) at
 // complementWrites reports whether writeShared writes f's keys: f has a value
 // and a sharer has none.
 func complementWrites(f *Field, attrs map[string]attr.Value) bool {
-	if v := attrs[f.Name]; v == nil || v.IsNull() || v.IsUnknown() {
+	if !known(attrs[f.Name]) {
 		return false
 	}
-	for _, s := range f.Shares {
-		if v := attrs[s.Name]; v == nil || v.IsNull() || v.IsUnknown() {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(f.Shares, func(s *Field) bool { return !known(attrs[s.Name]) })
 }
 
 // Dropped reports each attribute planned with a value that the server read
@@ -193,14 +172,14 @@ func (b *Binding) Dropped(planned, got types.Object) diag.Diagnostics {
 }
 
 func dropped(n *node, planned, got basetypes.ObjectValue, at path.Path, diags *diag.Diagnostics) {
-	if planned.IsNull() || planned.IsUnknown() || got.IsNull() || got.IsUnknown() {
+	if !known(planned) || !known(got) {
 		return
 	}
 	plannedAttrs, gotAttrs := planned.Attributes(), got.Attributes()
-	for _, name := range sortedKeys(n.children) {
+	for _, name := range slices.Sorted(maps.Keys(n.children)) {
 		child := n.children[name]
 		pv, gv, p := plannedAttrs[name], gotAttrs[name], at.AtName(name)
-		if pv == nil || pv.IsNull() || pv.IsUnknown() {
+		if !known(pv) {
 			continue
 		}
 		if child.field == nil {
@@ -233,9 +212,10 @@ func dropped(n *node, planned, got basetypes.ObjectValue, at path.Path, diags *d
 		if !ok1 || !ok2 || gl.IsUnknown() || len(pl.Elements()) != len(gl.Elements()) {
 			continue
 		}
-		for i := range gl.Elements() {
-			pe, ok1 := pl.Elements()[i].(basetypes.ObjectValue)
-			ge, ok2 := gl.Elements()[i].(basetypes.ObjectValue)
+		plannedElems := pl.Elements()
+		for i, e := range gl.Elements() {
+			pe, ok1 := plannedElems[i].(basetypes.ObjectValue)
+			ge, ok2 := e.(basetypes.ObjectValue)
 			if ok1 && ok2 {
 				dropped(f.Elem.nodes, pe, ge, p.AtListIndex(i), diags)
 			}
@@ -346,13 +326,13 @@ func (f *Field) genericVersionMessage(g VersionGap) (summary, detail string) {
 }
 
 func collectGated(n *node, obj basetypes.ObjectValue, at path.Path, out *[]gatedValue) {
-	if obj.IsNull() || obj.IsUnknown() {
+	if !known(obj) {
 		return
 	}
 	attrs := obj.Attributes()
-	for _, name := range sortedKeys(n.children) {
+	for _, name := range slices.Sorted(maps.Keys(n.children)) {
 		child, v, p := n.children[name], attrs[name], at.AtName(name)
-		if v == nil || v.IsNull() || v.IsUnknown() {
+		if !known(v) {
 			continue
 		}
 		if child.field == nil {

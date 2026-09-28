@@ -4,11 +4,12 @@
 package wire
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -109,6 +110,16 @@ type Binding struct {
 	instances []*instance
 }
 
+// fieldNamed returns nil when b has no field for the attribute name.
+func (b *Binding) fieldNamed(name string) *Field {
+	for _, f := range b.Fields {
+		if f.Name == name {
+			return f
+		}
+	}
+	return nil
+}
+
 // docField places a field in a document: attrPath leads to its value from the
 // binding's object type, keyPath to its key from the document's root.
 type docField struct {
@@ -160,7 +171,7 @@ func (c *catalog) bind(s schema.Schema, root string, opts ...Option) (*Binding, 
 	b := bb.object(root, "", s.Attributes, false, "", "")
 	bb.check()
 	if len(bb.errs) > 0 {
-		sort.Strings(bb.errs)
+		slices.Sort(bb.errs)
 		return nil, errors.New(strings.Join(bb.errs, "\n"))
 	}
 	b.documents = o.documents
@@ -220,12 +231,7 @@ func displayKeyPath(kp string) string {
 func (bb *binder) object(object, prefix string, attrs map[string]schema.Attribute, rebuilt bool, inst, since string) *Binding {
 	b := &Binding{Object: object, AttrTypes: map[string]attr.Type{}}
 	bb.instance(inst, object, rebuilt, false)
-	names := make([]string, 0, len(attrs))
-	for n := range attrs {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, name := range names {
+	for _, name := range slices.Sorted(maps.Keys(attrs)) {
 		a := attrs[name]
 		f := bb.field(object, joinKeyPath(prefix, name), name, a, inst, since)
 		b.Fields = append(b.Fields, f)
@@ -244,17 +250,10 @@ func (bb *binder) object(object, prefix string, attrs map[string]schema.Attribut
 // index orders the binding's docs, as writes follow them, and arranges them
 // in the trie reads follow.
 func (b *Binding) index() {
-	sortDocs(b.docs)
-	b.nodes = trieOf(b.docs)
-}
-
-func sortDocs(docs []docField) {
-	sort.SliceStable(docs, func(i, j int) bool {
-		if len(docs[i].keyPath) != len(docs[j].keyPath) {
-			return len(docs[i].keyPath) < len(docs[j].keyPath)
-		}
-		return strings.Join(docs[i].attrPath, ".") < strings.Join(docs[j].attrPath, ".")
+	slices.SortStableFunc(b.docs, func(x, y docField) int {
+		return cmp.Or(cmp.Compare(len(x.keyPath), len(y.keyPath)), strings.Compare(strings.Join(x.attrPath, "."), strings.Join(y.attrPath, ".")))
 	})
+	b.nodes = trieOf(b.docs)
 }
 
 func (bb *binder) field(object, path, name string, a schema.Attribute, inst, since string) *Field {
@@ -332,10 +331,7 @@ func (bb *binder) field(object, path, name string, a schema.Attribute, inst, sin
 			f.Since = bb.c.sinceVer
 		}
 	}
-	nestedSince := since
-	if nestedSince == "" {
-		nestedSince = f.Since
-	}
+	nestedSince := cmp.Or(since, f.Since)
 	if opt.versionMsg != nil && f.Since == "" && f.Until == "" {
 		bb.errorf("%s: VersionMessage names an attribute VersionErrors never reports, as it has no since or until version of its own", path)
 	}
@@ -405,27 +401,19 @@ func checkCodec(f *Field) string {
 }
 
 func (bb *binder) checkListOptions(f *Field, elemInst string) {
-	elemField := func(name string) *Field {
-		for _, e := range f.Elem.Fields {
-			if e.Name == name {
-				return e
-			}
-		}
-		return nil
-	}
 	isStringKey := func(e *Field) bool {
 		_, ok := e.Codec.(stringCodec)
 		return e.Mode == ModeSent && len(e.KeyPath) == 1 && ok
 	}
 	if f.MergeKey != "" {
-		if e := elemField(f.MergeKey); e == nil || !isStringKey(e) {
+		if e := f.Elem.fieldNamed(f.MergeKey); e == nil || !isStringKey(e) {
 			bb.errorf("%s: MergeByKey needs %q to be a string attribute of the element with a key of its own", f.Path, f.MergeKey)
 		}
 	}
 	if f.CarryKey == "" {
 		return
 	}
-	if e := elemField(f.CarryBy); e == nil || !isStringKey(e) {
+	if e := f.Elem.fieldNamed(f.CarryBy); e == nil || !isStringKey(e) {
 		bb.errorf("%s: CarryServed needs %q to be a string attribute of the element with a key of its own", f.Path, f.CarryBy)
 	}
 	if !hasProp(bb.c.pinned[f.Elem.Object], f.CarryKey) {
@@ -444,12 +432,7 @@ func (bb *binder) checkListOptions(f *Field, elemInst string) {
 }
 
 func (bb *binder) check() {
-	paths := make([]string, 0, len(bb.o.attrs))
-	for p := range bb.o.attrs {
-		paths = append(paths, p)
-	}
-	sort.Strings(paths)
-	for _, p := range paths {
+	for _, p := range slices.Sorted(maps.Keys(bb.o.attrs)) {
 		if !bb.o.attrs[p].used {
 			bb.errorf("an option names %s, which Bind never reached: the schema has no such attribute, or it sits inside one without a key", p)
 		}
@@ -467,7 +450,7 @@ func (bb *binder) check() {
 				rebuilt = append(rebuilt, inst)
 			}
 		}
-		for key := range keys {
+		for key, reason := range keys {
 			switch {
 			case len(rebuilt) == 0:
 				bb.errorf("Unmanaged(%q, %q): no attribute rebuilds %s, so its unclaimed keys are kept anyway", object, key, object)
@@ -478,13 +461,13 @@ func (bb *binder) check() {
 				if by, claimed := inst.claimed[key]; claimed {
 					bb.errorf("Unmanaged(%q, %q): %s claims it", object, key, by)
 				}
-				inst.unmanaged[key] = keys[key]
+				inst.unmanaged[key] = reason
 			}
 		}
 	}
 	for _, kp := range bb.order {
 		inst := bb.instances[kp]
-		for _, key := range sortedKeys(bb.c.pinned[inst.object]) {
+		for _, key := range slices.Sorted(maps.Keys(bb.c.pinned[inst.object])) {
 			if _, claimed := inst.claimed[key]; claimed {
 				continue
 			}
@@ -494,15 +477,6 @@ func (bb *binder) check() {
 			}
 		}
 	}
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // Document returns the binding of the object at keyPath, declared with the

@@ -94,6 +94,10 @@ func offering(offered map[string][]string, asked *[]string) AvailableFunc {
 	}
 }
 
+func offline() context.Context {
+	return WithAvailable(context.Background(), func(context.Context, string, string) ([]string, error) { return nil, errors.New("offline") })
+}
+
 func strs(values ...string) types.List {
 	elems := make([]attr.Value, len(values))
 	for i, v := range values {
@@ -187,10 +191,9 @@ func TestUnitOrdersSpellsEachNameAsTheServerOffersItForTheEntrysScope(t *testing
 		}
 	}
 
-	failing := WithAvailable(context.Background(), func(context.Context, string, string) ([]string, error) { return nil, errors.New("offline") })
 	m := with(t, model, "types[0].fetchers", strs("a"))
 	m = with(t, m, "types[0].fetcher_order", types.ListUnknown(types.StringType))
-	if d := b.Overlay(failing, doc(t, served), object(t, m)); !d.HasError() || !strings.Contains(d[0].Detail(), "offline") {
+	if d := b.Overlay(offline(), doc(t, served), object(t, m)); !d.HasError() || !strings.Contains(d[0].Detail(), "offline") {
 		t.Errorf("a failed lookup is not reported: %v", d)
 	}
 }
@@ -262,7 +265,7 @@ func TestUnitComplementReadsTheEnabledNamesInOrder(t *testing.T) {
 		}
 	}
 
-	failing := WithAvailable(context.Background(), func(context.Context, string, string) ([]string, error) { return nil, errors.New("offline") })
+	failing := offline()
 	read, d := b.Flatten(context.Background(), doc(t, `{"Name": "n"}`), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
 		t.Fatal(d)
@@ -298,8 +301,7 @@ func TestUnitComplementWriteReportsAFailedLookup(t *testing.T) {
 	m := with(t, model, "enabled", strs("A"))
 	m = with(t, m, "order", types.ListUnknown(types.StringType))
 	m = with(t, m, "disabled", types.ListUnknown(types.StringType))
-	failing := WithAvailable(context.Background(), func(context.Context, string, string) ([]string, error) { return nil, errors.New("offline") })
-	if d := b.Overlay(failing, doc(t, `{"Name": "n"}`), object(t, m)); !d.HasError() || !strings.Contains(d[0].Detail(), "offline") {
+	if d := b.Overlay(offline(), doc(t, `{"Name": "n"}`), object(t, m)); !d.HasError() || !strings.Contains(d[0].Detail(), "offline") {
 		t.Errorf("a failed lookup is not reported as the reason the write fails: %v", d)
 	}
 }

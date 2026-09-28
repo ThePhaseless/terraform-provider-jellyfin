@@ -49,12 +49,11 @@ func (bb *binder) share(b *Binding, f *Field, opt *attrOption) {
 		return
 	}
 	sibling := func(name, role string, want attr.Type) *Field {
-		i := slices.IndexFunc(b.Fields, func(s *Field) bool { return s.Name == name })
-		if i < 0 {
+		s := b.fieldNamed(name)
+		if s == nil {
 			bb.errorf("%s: %s %q is no attribute of the same object", f.Path, role, name)
 			return nil
 		}
-		s := b.Fields[i]
 		if s.Mode != ModeSent || s.ReadOnly || len(s.KeyPath) != 1 || !s.Type.Equal(want) {
 			bb.errorf("%s: %s %s must be a configurable %s with a key of its own", f.Path, role, s.Path, want)
 			return nil
@@ -113,7 +112,7 @@ func missingShare(f *Field) diag.Diagnostics {
 // leave to it, from v, the value of d in obj.
 func (b *Binding) writeShared(ctx context.Context, doc map[string]json.RawMessage, obj types.Object, d docField, v attr.Value, merged bool, at path.Path, trail string) diag.Diagnostics {
 	f := d.f
-	if v.IsNull() || v.IsUnknown() {
+	if !known(v) {
 		return nil
 	}
 	targets := make([]docField, len(f.Shares))
@@ -166,7 +165,8 @@ func (b *Binding) writeShared(ctx context.Context, doc map[string]json.RawMessag
 				return offeredNamesError(at, err)
 			}
 		}
-		values = [][]string{ordered(names, servedStrings(ctx, doc, targets[0].keyPath, at), offered)}
+		served, _ := servedList(ctx, doc, targets[0].keyPath, at)
+		values = [][]string{ordered(names, served, offered)}
 	}
 
 	for i, sd := range targets {
@@ -198,7 +198,7 @@ func (b *Binding) scopeOf(obj types.Object, f *Field) (scope string, scoped bool
 	}
 	sv, _ := valueAt(obj, sd.attrPath)
 	s, ok := sv.(types.String)
-	if !ok || s.IsNull() || s.IsUnknown() || s.ValueString() == "" {
+	if !ok || !known(s) || s.ValueString() == "" {
 		return "", false, nil
 	}
 	return s.ValueString(), true, nil
@@ -320,11 +320,6 @@ func servedList(ctx context.Context, doc map[string]json.RawMessage, keyPath []s
 		return nil, false
 	}
 	return names, true
-}
-
-func servedStrings(ctx context.Context, doc map[string]json.RawMessage, keyPath []string, at path.Path) []string {
-	names, _ := servedList(ctx, doc, keyPath, at)
-	return names
 }
 
 // Jellyfin matches enabled and disabled names ignoring case, but ranks by the
