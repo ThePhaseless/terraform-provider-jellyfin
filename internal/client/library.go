@@ -20,6 +20,13 @@ type VirtualFolder struct {
 	LibraryOptions json.RawMessage `json:"LibraryOptions,omitempty"`
 }
 
+// GetLibraryOptions extracts the LibraryOptions from a VirtualFolder as a LibraryOptions struct.
+func (vf *VirtualFolder) GetLibraryOptions() *LibraryOptions {
+	return &LibraryOptions{
+		RawJSON: strings.TrimSpace(string(vf.LibraryOptions)),
+	}
+}
+
 // LibraryOptions represents the configuration for a library.
 // RawJSON stores the complete JSON for flexibility.
 type LibraryOptions struct {
@@ -108,13 +115,6 @@ func (c *Client) UpdateVirtualFolder(ctx context.Context, itemID string, library
 		return fmt.Errorf("updating virtual folder %s: %w", itemID, err)
 	}
 	return nil
-}
-
-// GetLibraryOptions extracts the LibraryOptions from a VirtualFolder as a LibraryOptions struct.
-func (vf *VirtualFolder) GetLibraryOptions() *LibraryOptions {
-	return &LibraryOptions{
-		RawJSON: strings.TrimSpace(string(vf.LibraryOptions)),
-	}
 }
 
 // AvailableLibraryOptions is what Jellyfin offers a library of one content
