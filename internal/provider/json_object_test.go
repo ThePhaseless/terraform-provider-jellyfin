@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestConfigOverlayParseJSONObject(t *testing.T) {
+func TestUnitParseJSONObject(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
