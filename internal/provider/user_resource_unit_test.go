@@ -10,7 +10,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
@@ -151,5 +155,33 @@ func TestUnitUserPolicyDemotesBeforeDisabling(t *testing.T) {
 	}
 	if policy["IsAdministrator"] != false || policy["IsDisabled"] != true || posts != 2 {
 		t.Errorf("after %d posts the policy is %v, want a disabled user that is no administrator", posts, policy)
+	}
+}
+
+// Jellyfin lists IDs as 32 lowercase hex digits, whatever spelling it read.
+func TestUnitUserPolicyTakesIDsAsJellyfinListsThem(t *testing.T) {
+	s := schemaOf(&UserResource{})
+	policy, ok := s.Attributes["policy"].(schema.SingleNestedAttribute)
+	if !ok {
+		t.Fatal("policy is not a nested object")
+	}
+	for _, name := range []string{"enabled_folders", "blocked_media_folders", "enabled_channels", "blocked_channels"} {
+		a, ok := policy.Attributes[name].(schema.ListAttribute)
+		if !ok {
+			t.Fatalf("%s is not a list", name)
+		}
+		for id, want := range map[string]bool{
+			"f137a2dd21bbc1b99aa5c0f6bf02a805":     false,
+			"F137A2DD21BBC1B99AA5C0F6BF02A805":     true,
+			"f137a2dd-21bb-c1b9-9aa5-c0f6bf02a805": true,
+		} {
+			resp := validator.ListResponse{}
+			for _, v := range a.Validators {
+				v.ValidateList(context.Background(), validator.ListRequest{Path: path.Root(name), ConfigValue: types.ListValueMust(types.StringType, []attr.Value{types.StringValue(id)})}, &resp)
+			}
+			if resp.Diagnostics.HasError() != want {
+				t.Errorf("%s = [%q]: error %t, want %t", name, id, resp.Diagnostics.HasError(), want)
+			}
+		}
 	}
 }

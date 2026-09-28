@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"regexp"
 	"sync"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -282,14 +284,14 @@ func userPolicyAttributes() map[string]schema.Attribute {
 		"enable_media_conversion":              optionalBool("Whether media conversion is enabled."),
 		"enabled_devices":                      optionalStringList("Devices explicitly enabled for the user."),
 		"enable_all_devices":                   optionalBool("Whether all devices are enabled."),
-		"enabled_channels":                     optionalStringList("Channels explicitly enabled for the user."),
+		"enabled_channels":                     guidList(optionalStringList("Channels explicitly enabled for the user, by ID as Jellyfin lists it.")),
 		"enable_all_channels":                  optionalBool("Whether all channels are enabled."),
-		"enabled_folders":                      optionalStringList("Folders explicitly enabled for the user."),
+		"enabled_folders":                      guidList(optionalStringList("Folders explicitly enabled for the user, by ID as Jellyfin lists it, such as a library's `item_id`.")),
 		"login_attempts_before_lockout":        optionalInt("Number of failed login attempts before the account is locked."),
 		"max_active_sessions":                  optionalInt("Maximum number of simultaneous sessions."),
 		"enable_public_sharing":                optionalBool("Whether public sharing is enabled."),
-		"blocked_media_folders":                optionalStringList("Media folders that are blocked."),
-		"blocked_channels":                     optionalStringList("Channels that are blocked."),
+		"blocked_media_folders":                guidList(optionalStringList("Media folders that are blocked, by ID as Jellyfin lists it, such as a library's `item_id`.")),
+		"blocked_channels":                     guidList(optionalStringList("Channels that are blocked, by ID as Jellyfin lists it.")),
 		"remote_client_bitrate_limit":          optionalInt("Remote client bitrate limit."),
 		"authentication_provider_id":           optionalString("Authentication provider ID.", ""),
 		"password_reset_provider_id":           optionalString("Password reset provider ID.", ""),
@@ -363,6 +365,17 @@ func (r *UserResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 			},
 		},
 	}
+}
+
+// Jellyfin reads an ID in any of .NET's Guid spellings but lists it as 32
+// lowercase hex digits, so any other spelling would read back otherwise.
+var guidPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+// guidList takes only IDs spelled as Jellyfin lists them.
+func guidList(a schema.ListAttribute) schema.ListAttribute {
+	a.Validators = append(a.Validators, listvalidator.ValueStringsAre(stringvalidator.RegexMatches(guidPattern,
+		"must be an ID as Jellyfin lists it: 32 lowercase hex digits without dashes")))
+	return a
 }
 
 func (r *UserResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
