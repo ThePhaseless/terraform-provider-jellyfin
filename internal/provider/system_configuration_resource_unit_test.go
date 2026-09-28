@@ -112,7 +112,7 @@ func TestUnitSystemConfigurationRoundTrip(t *testing.T) {
 		"ServerName": "My Jellyfin Server"
 	}`
 
-	offered := testUnitOfferingByItemType(map[string][]string{"MetadataFetchers/Movie": {"TheMovieDb"}, "ImageFetchers/Movie": {"TheMovieDb"}})
+	offered := testUnitOfferingByItemType(t.Context(), map[string][]string{"MetadataFetchers/Movie": {"TheMovieDb"}, "ImageFetchers/Movie": {"TheMovieDb"}})
 	data := readWireIn[SystemConfigurationResourceModel](offered, t, b, fixture)
 	checkSameJSON(t, writeWire(t, b, &data), fixture)
 }
@@ -160,7 +160,7 @@ func testUnitMetadataOptions(itemType string, lists types.List) metadataOptionsM
 }
 
 func TestUnitPlanMetadataOptionsByItemType(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	attrs := schemaOf(&SystemConfigurationResource{}).Attributes
 	nested, ok := attrs["metadata_options"].(rschema.ListNestedAttribute)
 	if !ok {
@@ -254,7 +254,7 @@ func TestUnitPlanMetadataOptionsByItemType(t *testing.T) {
 }
 
 func TestUnitSystemConfigurationEntriesAndRenamedKeysCopyOnlyNonNullPriorValues(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s := schemaOf(&SystemConfigurationResource{})
 	trickplay, ok := s.Attributes["trickplay_options"].(rschema.SingleNestedAttribute)
@@ -345,8 +345,8 @@ func TestUnitSystemConfigurationEntriesAndRenamedKeysCopyOnlyNonNullPriorValues(
 
 // testUnitOfferingByItemType serves offered by "list/item type" key; other
 // item types are not offered.
-func testUnitOfferingByItemType(offered map[string][]string) context.Context {
-	return wire.WithAvailable(context.Background(), func(_ context.Context, list, scope string) ([]string, error) {
+func testUnitOfferingByItemType(ctx context.Context, offered map[string][]string) context.Context {
+	return wire.WithAvailable(ctx, func(_ context.Context, list, scope string) ([]string, error) {
 		names, ok := offered[list+"/"+scope]
 		if !ok {
 			return nil, fmt.Errorf("item type %q: %w", scope, wire.ErrNotOffered)
@@ -372,7 +372,7 @@ func testUnitServeAvailableOptions(byContentType map[string]string, asked map[st
 }
 
 func TestUnitOfferedProvidersByItemType(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	var mu sync.Mutex
 	asked := map[string]int{}
 	srv := httptest.NewServer(testUnitServeAvailableOptions(map[string]string{
@@ -420,7 +420,7 @@ func TestUnitOfferedProvidersByItemType(t *testing.T) {
 }
 
 func TestUnitSystemApplyWritesTheKeysItsFetchersShare(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	const served = `{"ServerName": "s", "MetadataOptions": [{"ItemType": "Movie", "DisabledMetadataFetchers": ["The Open Movie Database"], "MetadataFetcherOrder": [], "DisabledImageFetchers": [], "ImageFetcherOrder": []}]}`
 	var mu sync.Mutex
 	var posted []byte
@@ -534,7 +534,7 @@ func TestUnitSystemReadSurvivesAFailingOfferedProvidersLookup(t *testing.T) {
 		t.Fatalf("read diagnostics = %v, want one warning", resp.Diagnostics)
 	}
 	var serverName types.String
-	resp.Diagnostics.Append(resp.State.GetAttribute(context.Background(), path.Root("server_name"), &serverName)...)
+	resp.Diagnostics.Append(resp.State.GetAttribute(t.Context(), path.Root("server_name"), &serverName)...)
 	if serverName.ValueString() != "s" {
 		t.Errorf("server_name = %s, want the served name", serverName)
 	}
@@ -548,7 +548,7 @@ func TestUnitSystemReadSurvivesAFailingOfferedProvidersLookup(t *testing.T) {
 // A create plans the trickplay settings it leaves unset as unknown, which
 // the write must leave as served rather than reset to Jellyfin's defaults.
 func TestUnitSystemTrickplayOptionsKeepWhatTheyLeaveUnset(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := mustWire(t, systemWire)
 	const served = `{"TrickplayOptions": {"EnableHwAcceleration": true, "Interval": 10000, "WidthResolutions": [320, 640], "JpegQuality": 80}}`
 	doc, err := parseJSONObject(served)
@@ -574,7 +574,7 @@ func TestUnitSystemTrickplayOptionsKeepWhatTheyLeaveUnset(t *testing.T) {
 
 func testUnitUnknownAttributes(t *testing.T, attrTypes map[string]attr.Type) map[string]attr.Value {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	values := make(map[string]attr.Value, len(attrTypes))
 	for name, typ := range attrTypes {
 		v, err := typ.ValueFromTerraform(ctx, tftypes.NewValue(typ.TerraformType(ctx), tftypes.UnknownValue))

@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -27,7 +26,7 @@ func TestUnitEncodingConfigurationRoundTrip(t *testing.T) {
 }
 
 func TestUnitEncodingConfigurationJellyfin12FieldsResolveToNullWhenKeysMissing(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := mustWire(t, encodingWire)
 	fixture := `{"EnableSubtitleExtraction":true,"HardwareDecodingCodecs":["h264","vc1"]}`
 
@@ -125,7 +124,7 @@ func TestUnitEncodingConfigurationPlanRejectsJellyfin12FieldsOnOlderServers(t *t
 			}))
 			defer server.Close()
 
-			ctx := context.Background()
+			ctx := t.Context()
 			r := &EncodingConfigurationResource{client: client.NewClient(server.URL, "k")}
 			plan := tfsdk.Plan{Schema: schemaOf(r)}
 			if d := plan.Set(ctx, &tc.config); d.HasError() {

@@ -31,7 +31,7 @@ var typedClientResources = map[string]string{
 }
 
 func TestUnitWireBindings(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	seen := map[string]bool{}
 	var lines []string
 	for _, newResource := range New("test")().Resources(ctx) {
@@ -124,7 +124,7 @@ func checkRoundTrip[T any](t *testing.T, b *wire.Binding, fixture string) {
 func writeWire(t *testing.T, b *wire.Binding, model any) map[string]json.RawMessage {
 	t.Helper()
 	doc := map[string]json.RawMessage{}
-	if d := b.OverlayModel(context.Background(), doc, model); d.HasError() {
+	if d := b.OverlayModel(t.Context(), doc, model); d.HasError() {
 		t.Fatalf("write: %v", d)
 	}
 	return doc
@@ -134,7 +134,7 @@ func writeWire(t *testing.T, b *wire.Binding, model any) map[string]json.RawMess
 // attribute is null, as the read that follows an import does.
 func readWire[T any](t *testing.T, b *wire.Binding, raw string) T {
 	t.Helper()
-	return readWireIn[T](context.Background(), t, b, raw)
+	return readWireIn[T](t.Context(), t, b, raw)
 }
 
 func readWireIn[T any](ctx context.Context, t *testing.T, b *wire.Binding, raw string) T {

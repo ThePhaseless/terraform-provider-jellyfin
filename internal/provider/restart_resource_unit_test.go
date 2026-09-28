@@ -65,7 +65,7 @@ func TestAwaitRestartWaitsOutTheOutgoingHost(t *testing.T) {
 	defer server.Close()
 
 	c := client.NewClient(server.URL, "k")
-	if err := awaitRestart(context.Background(), c, 5*time.Second, testPoll); err != nil {
+	if err := awaitRestart(t.Context(), c, 5*time.Second, testPoll); err != nil {
 		t.Fatalf("awaitRestart() error = %v", err)
 	}
 	if elapsed := time.Since(start); elapsed < restartSettleReads*testPoll {
@@ -83,7 +83,7 @@ func TestAwaitRestartRequiresConsecutiveHealthyReads(t *testing.T) {
 	defer server.Close()
 
 	c := client.NewClient(server.URL, "k")
-	if err := awaitRestart(context.Background(), c, 400*time.Millisecond, testPoll); err == nil {
+	if err := awaitRestart(t.Context(), c, 400*time.Millisecond, testPoll); err == nil {
 		t.Fatal("a server that never answers consecutively is not back; expected an error")
 	}
 }
@@ -97,7 +97,7 @@ func TestAwaitRestartIgnoresPendingRestart(t *testing.T) {
 	defer server.Close()
 
 	c := client.NewClient(server.URL, "k")
-	if err := awaitRestart(context.Background(), c, 5*time.Second, testPoll); err != nil {
+	if err := awaitRestart(t.Context(), c, 5*time.Second, testPoll); err != nil {
 		t.Fatalf("awaitRestart() error = %v", err)
 	}
 }
@@ -108,7 +108,7 @@ func TestAwaitRestartHonoursCancellation(t *testing.T) {
 	server := httptest.NewServer(systemInfoHandler(func() (bool, bool) { return true, false }))
 	defer server.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	// A server that never comes back would also end the wait, but only once
@@ -125,7 +125,7 @@ func TestAwaitRestartHonoursCancellation(t *testing.T) {
 
 func TestRestartUpdateChangesTimeoutWithoutRestarting(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// No client: an Update that restarted the server would panic.
 	r := &RestartResource{}

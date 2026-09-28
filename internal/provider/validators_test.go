@@ -15,10 +15,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-func validateStringWith(value string, validators ...validator.String) diag.Diagnostics {
+func validateStringWith(ctx context.Context, value string, validators ...validator.String) diag.Diagnostics {
 	var resp validator.StringResponse
 	for _, v := range validators {
-		v.ValidateString(context.Background(), validator.StringRequest{
+		v.ValidateString(ctx, validator.StringRequest{
 			Path:        path.Root("name"),
 			ConfigValue: types.StringValue(value),
 		}, &resp)
@@ -43,7 +43,7 @@ func TestNoPathSeparatorsValidator(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			if d := validateStringWith(test.value, noPathSeparatorsValidator); d.HasError() != test.expectError {
+			if d := validateStringWith(t.Context(), test.value, noPathSeparatorsValidator); d.HasError() != test.expectError {
 				t.Fatalf("expected error %t, got diagnostics: %v", test.expectError, d)
 			}
 		})
@@ -53,7 +53,7 @@ func TestNoPathSeparatorsValidator(t *testing.T) {
 func TestUnsupportedLibraryOptionValidatorRejectsOnlySetValues(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	v := unsupportedLibraryOption.reject
 	p := path.Root("library_options").AtName("disabled_metadata_savers")
 	validateBool := func(value types.Bool) diag.Diagnostics {
@@ -107,7 +107,7 @@ func TestNoSurroundingWhitespaceValidatorMatchesUnicodeIsSpace(t *testing.T) {
 	t.Parallel()
 
 	rejects := func(value string) bool {
-		return validateStringWith(value, noSurroundingWhitespaceValidator).HasError()
+		return validateStringWith(t.Context(), value, noSurroundingWhitespaceValidator).HasError()
 	}
 
 	for r := rune(0); r <= unicode.MaxRune; r++ {
@@ -160,7 +160,7 @@ func TestLibraryNameValidators(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			if d := validateStringWith(test.value, libraryNameValidators()...); d.HasError() != test.expectError {
+			if d := validateStringWith(t.Context(), test.value, libraryNameValidators()...); d.HasError() != test.expectError {
 				t.Fatalf("expected error %t, got diagnostics: %v", test.expectError, d)
 			}
 		})

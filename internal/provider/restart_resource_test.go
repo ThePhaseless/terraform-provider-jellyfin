@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -49,7 +48,7 @@ resource "jellyfin_restart" "after_plugin" {
 					resource.TestCheckResourceAttr("jellyfin_restart.after_plugin", "triggers.plugin_version", pluginVersion),
 					func(*terraform.State) error {
 						c := testAccClient(t)
-						info, err := c.GetSystemInfo(context.Background())
+						info, err := c.GetSystemInfo(t.Context())
 						if err != nil {
 							return fmt.Errorf("reading system info after restart: %w", err)
 						}

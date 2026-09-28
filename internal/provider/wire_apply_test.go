@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -82,7 +81,7 @@ type planValue struct {
 // value of set.
 func planRead(t *testing.T, r resource.Resource, doc string, set ...planValue) tfsdk.Plan {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	bound, ok := r.(wireBound)
 	if !ok {
 		t.Fatalf("%T binds no Jellyfin document", r)
@@ -107,7 +106,7 @@ func configure(t *testing.T, r resource.Resource, c *client.Client) {
 		t.Fatalf("%T takes no client", r)
 	}
 	var configured resource.ConfigureResponse
-	configurable.Configure(context.Background(), resource.ConfigureRequest{ProviderData: c}, &configured)
+	configurable.Configure(t.Context(), resource.ConfigureRequest{ProviderData: c}, &configured)
 	if configured.Diagnostics.HasError() {
 		t.Fatalf("configure: %v", configured.Diagnostics)
 	}
@@ -117,7 +116,7 @@ func updateAgainst(t *testing.T, r resource.Resource, c *client.Client, plan tfs
 	t.Helper()
 	configure(t, r, c)
 	resp := resource.UpdateResponse{State: tfsdk.State(plan)}
-	r.Update(context.Background(), resource.UpdateRequest{Plan: plan, State: tfsdk.State(plan)}, &resp)
+	r.Update(t.Context(), resource.UpdateRequest{Plan: plan, State: tfsdk.State(plan)}, &resp)
 	return resp
 }
 
@@ -125,7 +124,7 @@ func readAgainst(t *testing.T, r resource.Resource, c *client.Client, state tfsd
 	t.Helper()
 	configure(t, r, c)
 	resp := resource.ReadResponse{State: state}
-	r.Read(context.Background(), resource.ReadRequest{State: state}, &resp)
+	r.Read(t.Context(), resource.ReadRequest{State: state}, &resp)
 	return resp
 }
 
@@ -273,7 +272,7 @@ func TestUnitReadReplacesStateWithServedValue(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			ctx := context.Background()
+			ctx := t.Context()
 
 			srv := &fakeJellyfin{get: tc.get, before: tc.served}
 			resp := readAgainst(t, tc.resource, srv.client(t), tfsdk.State(planRead(t, tc.resource, tc.state, tc.set...)))
@@ -328,7 +327,7 @@ func TestUnitApplyKeepsPlannedNullInsideListElementServedEmpty(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			ctx := context.Background()
+			ctx := t.Context()
 
 			var served attr.Value
 			plan := planRead(t, tc.resource, tc.doc, tc.set...)

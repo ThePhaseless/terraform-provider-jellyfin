@@ -94,8 +94,8 @@ func offering(offered map[string][]string, asked *[]string) AvailableFunc {
 	}
 }
 
-func offline() context.Context {
-	return WithAvailable(context.Background(), func(context.Context, string, string) ([]string, error) { return nil, errors.New("offline") })
+func offline(ctx context.Context) context.Context {
+	return WithAvailable(ctx, func(context.Context, string, string) ([]string, error) { return nil, errors.New("offline") })
 }
 
 func strs(values ...string) types.List {
@@ -129,7 +129,7 @@ func TestUnitSharedKeysDescribe(t *testing.T) {
 
 func TestUnitOrdersWritesTheOrderKeyUnlessItsAttributeWritesIt(t *testing.T) {
 	b := sharedBinding(t)
-	ctx := WithAvailable(context.Background(), offering(map[string][]string{"Movie": {"A", "B", "C"}}, new([]string)))
+	ctx := WithAvailable(t.Context(), offering(map[string][]string{"Movie": {"A", "B", "C"}}, new([]string)))
 	served := `{"Types": [{"Type": "Movie", "Fetchers": ["A", "B"], "FetcherOrder": ["b", "C", "A"]}]}`
 	model, d := b.Flatten(ctx, doc(t, served), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
@@ -159,7 +159,7 @@ func TestUnitOrdersWritesTheOrderKeyUnlessItsAttributeWritesIt(t *testing.T) {
 func TestUnitOrdersSpellsEachNameAsTheServerOffersItForTheEntrysScope(t *testing.T) {
 	b := sharedBinding(t)
 	served := `{"Types": [{"Type": "Movie", "Fetchers": [], "FetcherOrder": []}]}`
-	model, d := b.Flatten(context.Background(), doc(t, served), types.ObjectNull(b.AttrTypes))
+	model, d := b.Flatten(t.Context(), doc(t, served), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
 		t.Fatal(d)
 	}
@@ -174,7 +174,7 @@ func TestUnitOrdersSpellsEachNameAsTheServerOffersItForTheEntrysScope(t *testing
 		{"an unknown scope", types.StringUnknown(), `["a","B"]`, ""},
 	} {
 		var asked []string
-		ctx := WithAvailable(context.Background(), offering(map[string][]string{"Movie": {"C", "B", "A"}}, &asked))
+		ctx := WithAvailable(t.Context(), offering(map[string][]string{"Movie": {"C", "B", "A"}}, &asked))
 		m := with(t, model, "types[0].type", c.scope)
 		m = with(t, m, "types[0].fetchers", strs("a", "B"))
 		m = with(t, m, "types[0].fetcher_order", types.ListUnknown(types.StringType))
@@ -193,7 +193,7 @@ func TestUnitOrdersSpellsEachNameAsTheServerOffersItForTheEntrysScope(t *testing
 
 	m := with(t, model, "types[0].fetchers", strs("a"))
 	m = with(t, m, "types[0].fetcher_order", types.ListUnknown(types.StringType))
-	if d := b.Overlay(offline(), doc(t, served), object(t, m)); !d.HasError() || !strings.Contains(d[0].Detail(), "offline") {
+	if d := b.Overlay(offline(t.Context()), doc(t, served), object(t, m)); !d.HasError() || !strings.Contains(d[0].Detail(), "offline") {
 		t.Errorf("a failed lookup is not reported: %v", d)
 	}
 }
@@ -210,7 +210,7 @@ func jsonValue(t *testing.T, raw []byte, i int) any {
 func TestUnitComplementWritesEachKeyItsAttributeLeavesToIt(t *testing.T) {
 	b := sharedBinding(t)
 	var asked []string
-	ctx := WithAvailable(context.Background(), offering(map[string][]string{"": {"A", "B", "C"}}, &asked))
+	ctx := WithAvailable(t.Context(), offering(map[string][]string{"": {"A", "B", "C"}}, &asked))
 	model, d := b.Flatten(ctx, doc(t, `{"Name": "n"}`), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
 		t.Fatal(d)
@@ -255,7 +255,7 @@ func TestUnitComplementReadsTheEnabledNamesInOrder(t *testing.T) {
 		{"an order that is not a list of strings", `{"Order": ["B", 1, "A"], "Disabled": ["C"]}`, map[string][]string{"": {"A", "B", "C"}}, `["A","B"]`, 1},
 	} {
 		var asked []string
-		ctx := WithAvailable(context.Background(), offering(c.offered, &asked))
+		ctx := WithAvailable(t.Context(), offering(c.offered, &asked))
 		got, d := b.Flatten(ctx, doc(t, c.served), types.ObjectNull(b.AttrTypes))
 		if d.HasError() {
 			t.Fatalf("%s: %v", c.name, d)
@@ -265,8 +265,8 @@ func TestUnitComplementReadsTheEnabledNamesInOrder(t *testing.T) {
 		}
 	}
 
-	failing := offline()
-	read, d := b.Flatten(context.Background(), doc(t, `{"Name": "n"}`), types.ObjectNull(b.AttrTypes))
+	failing := offline(t.Context())
+	read, d := b.Flatten(t.Context(), doc(t, `{"Name": "n"}`), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
 		t.Fatal(d)
 	}
@@ -287,21 +287,21 @@ func TestUnitComplementReadsTheEnabledNamesInOrder(t *testing.T) {
 	if d.HasError() || at(t, got, "enabled").IsUnknown() {
 		t.Errorf("after a failed lookup, an unknown enabled reads as %s (%v), want a known value", at(t, got, "enabled"), d)
 	}
-	if _, d := b.Flatten(context.Background(), doc(t, `{"Order": []}`), types.ObjectNull(b.AttrTypes)); !d.HasError() || !strings.Contains(d[0].Detail(), "bug in the provider") {
+	if _, d := b.Flatten(t.Context(), doc(t, `{"Order": []}`), types.ObjectNull(b.AttrTypes)); !d.HasError() || !strings.Contains(d[0].Detail(), "bug in the provider") {
 		t.Errorf("a read without an AvailableFunc is not reported: %v", d)
 	}
 }
 
 func TestUnitComplementWriteReportsAFailedLookup(t *testing.T) {
 	b := sharedBinding(t)
-	model, d := b.Flatten(WithAvailable(context.Background(), offering(nil, new([]string))), doc(t, `{"Name": "n"}`), types.ObjectNull(b.AttrTypes))
+	model, d := b.Flatten(WithAvailable(t.Context(), offering(nil, new([]string))), doc(t, `{"Name": "n"}`), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
 		t.Fatal(d)
 	}
 	m := with(t, model, "enabled", strs("A"))
 	m = with(t, m, "order", types.ListUnknown(types.StringType))
 	m = with(t, m, "disabled", types.ListUnknown(types.StringType))
-	if d := b.Overlay(offline(), doc(t, `{"Name": "n"}`), object(t, m)); !d.HasError() || !strings.Contains(d[0].Detail(), "offline") {
+	if d := b.Overlay(offline(t.Context()), doc(t, `{"Name": "n"}`), object(t, m)); !d.HasError() || !strings.Contains(d[0].Detail(), "offline") {
 		t.Errorf("a failed lookup is not reported as the reason the write fails: %v", d)
 	}
 }
@@ -309,7 +309,7 @@ func TestUnitComplementWriteReportsAFailedLookup(t *testing.T) {
 func TestUnitComplementRoundTripsInARebuiltElement(t *testing.T) {
 	b := sharedBinding(t)
 	var asked []string
-	ctx := WithAvailable(context.Background(), offering(map[string][]string{"Movie": {"A", "B", "C"}}, &asked))
+	ctx := WithAvailable(t.Context(), offering(map[string][]string{"Movie": {"A", "B", "C"}}, &asked))
 	model, d := b.Flatten(ctx, doc(t, `{"Opts": [{"ItemType": "Movie", "FetcherOrder": [], "DisabledFetchers": []}]}`), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
 		t.Fatal(d)
@@ -342,7 +342,7 @@ func TestUnitComplementRoundTripsInARebuiltElement(t *testing.T) {
 func TestUnitComplementRejectsWhatItCannotWrite(t *testing.T) {
 	b := sharedBinding(t)
 	var asked []string
-	ctx := WithAvailable(context.Background(), offering(map[string][]string{"Movie": {"A", "B"}}, &asked))
+	ctx := WithAvailable(t.Context(), offering(map[string][]string{"Movie": {"A", "B"}}, &asked))
 	model, d := b.Flatten(ctx, doc(t, `{"Opts": [{"ItemType": "Movie", "FetcherOrder": ["A"]}]}`), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
 		t.Fatal(d)
@@ -375,14 +375,14 @@ func TestUnitComplementRejectsWhatItCannotWrite(t *testing.T) {
 
 func TestUnitComplementVersionErrorNamesTheKeyItTakesItsVersionFrom(t *testing.T) {
 	b := sharedBinding(t)
-	model, d := b.Flatten(WithAvailable(context.Background(), offering(map[string][]string{"Movie": {"A"}}, new([]string))),
+	model, d := b.Flatten(WithAvailable(t.Context(), offering(map[string][]string{"Movie": {"A"}}, new([]string))),
 		doc(t, `{"Opts": [{"ItemType": "Movie", "FetcherOrder": ["A"], "DisabledFetchers": []}]}`), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
 		t.Fatal(d)
 	}
 	m := with(t, model, "opts[0].fetcher_order", types.ListNull(types.StringType))
 	m = with(t, m, "opts[0].disabled_fetchers", types.ListNull(types.StringType))
-	diags := b.VersionErrors(context.Background(), configOf(t, sharedAttrs(), m), func() (string, error) { return "1.9", nil })
+	diags := b.VersionErrors(t.Context(), configOf(t, sharedAttrs(), m), func() (string, error) { return "1.9", nil })
 	want := "opts[0].fetchers | Unsupported Jellyfin server version | opts[0].fetchers requires Jellyfin 2.0 or later: the server runs Jellyfin 1.9, which has no FetcherOrder field, so it would discard the value. Remove opts[0].fetchers from the configuration or upgrade the server."
 	if got := strings.Join(versionErrorLines(diags), "\n"); got != want {
 		t.Errorf("VersionErrors:\n%s\nwant:\n%s", got, want)
@@ -485,7 +485,7 @@ func TestUnitOrderedRanksEachServedOrOfferedSpellingOfANameWithIt(t *testing.T) 
 func TestUnitOrdersAsksNothingForAnEmptyScope(t *testing.T) {
 	b := sharedBinding(t)
 	var asked []string
-	ctx := WithAvailable(context.Background(), offering(map[string][]string{"": {"A", "B"}}, &asked))
+	ctx := WithAvailable(t.Context(), offering(map[string][]string{"": {"A", "B"}}, &asked))
 	served := `{"Types": [{"Type": "", "Fetchers": ["B"], "FetcherOrder": ["B"]}]}`
 	model, d := b.Flatten(ctx, doc(t, served), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
@@ -512,8 +512,8 @@ func TestUnitOrdersAsksNothingForAnEmptyScope(t *testing.T) {
 func TestUnitComplementKeepsItsPlannedValueWhenTheWriteLeavesItAlone(t *testing.T) {
 	b := sharedBinding(t)
 	served := `{"Name": "n", "Order": ["A"], "Disabled": []}`
-	before := WithAvailable(context.Background(), offering(map[string][]string{"": {"A"}}, new([]string)))
-	after := WithAvailable(context.Background(), offering(map[string][]string{"": {"A", "B"}}, new([]string)))
+	before := WithAvailable(t.Context(), offering(map[string][]string{"": {"A"}}, new([]string)))
+	after := WithAvailable(t.Context(), offering(map[string][]string{"": {"A", "B"}}, new([]string)))
 	prior, d := b.Flatten(before, doc(t, served), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
 		t.Fatal(d)
@@ -531,7 +531,7 @@ func TestUnitComplementKeepsItsPlannedValueWhenTheWriteLeavesItAlone(t *testing.
 		{"keys written by the Complement", types.ListUnknown(types.StringType), `["A","B"]`},
 	} {
 		var model sharedModel
-		if d := object(t, with(t, prior, "order", c.order)).As(context.Background(), &model, basetypes.ObjectAsOptions{}); d.HasError() {
+		if d := object(t, with(t, prior, "order", c.order)).As(t.Context(), &model, basetypes.ObjectAsOptions{}); d.HasError() {
 			t.Fatal(d)
 		}
 		if d := b.FlattenAfterApply(after, served, &model); d.HasError() {
@@ -549,13 +549,13 @@ func TestUnitComplementKeepsItsPlannedValueWhenTheWriteLeavesItAlone(t *testing.
 func TestUnitComplementKeepsAPlannedNullInAnEntry(t *testing.T) {
 	b := sharedBinding(t)
 	served := `{"Opts": [{"ItemType": "Movie", "FetcherOrder": [], "DisabledFetchers": []}]}`
-	ctx := WithAvailable(context.Background(), offering(map[string][]string{"Movie": {"A", "B"}}, new([]string)))
+	ctx := WithAvailable(t.Context(), offering(map[string][]string{"Movie": {"A", "B"}}, new([]string)))
 	read, d := b.Flatten(ctx, doc(t, served), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
 		t.Fatal(d)
 	}
 	var model sharedModel
-	if d := object(t, with(t, read, "opts[0].fetchers", types.ListNull(types.StringType))).As(context.Background(), &model, basetypes.ObjectAsOptions{}); d.HasError() {
+	if d := object(t, with(t, read, "opts[0].fetchers", types.ListNull(types.StringType))).As(t.Context(), &model, basetypes.ObjectAsOptions{}); d.HasError() {
 		t.Fatal(d)
 	}
 	if d := b.FlattenAfterApply(ctx, served, &model); d.HasError() {

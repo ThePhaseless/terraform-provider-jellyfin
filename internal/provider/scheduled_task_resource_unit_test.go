@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -66,7 +65,7 @@ func newTrigger(typ string) ScheduledTaskTriggerModel {
 func triggerList(t *testing.T, triggers ...ScheduledTaskTriggerModel) types.List {
 	t.Helper()
 
-	list, diags := types.ListValueFrom(context.Background(), scheduledTaskTriggerType(t), triggers)
+	list, diags := types.ListValueFrom(t.Context(), scheduledTaskTriggerType(t), triggers)
 	if diags.HasError() {
 		t.Fatalf("building trigger list: %v", diags)
 	}
@@ -117,7 +116,7 @@ func TestScheduledTaskTriggerTickValidators(t *testing.T) {
 			var diags diag.Diagnostics
 			for _, v := range a.Int64Validators() {
 				var resp validator.Int64Response
-				v.ValidateInt64(context.Background(), validator.Int64Request{
+				v.ValidateInt64(t.Context(), validator.Int64Request{
 					Path:        path.Root("triggers").AtListIndex(0).AtName(tc.attribute),
 					ConfigValue: types.Int64Value(tc.value),
 				}, &resp)
@@ -192,7 +191,7 @@ func TestScheduledTaskApplyPostsTriggersWithoutNullAttributes(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			ctx := context.Background()
+			ctx := t.Context()
 
 			plan := tfsdk.Plan{Schema: scheduledTaskSchema(t)}
 			data := ScheduledTaskResourceModel{ID: types.StringNull(), TaskID: types.StringValue("abc"), Triggers: tc.triggers}
@@ -300,7 +299,7 @@ func validateScheduledTask(t *testing.T, m ScheduledTaskResourceModel) diag.Diag
 	t.Helper()
 
 	var resp resource.ValidateConfigResponse
-	(&ScheduledTaskResource{}).ValidateConfig(context.Background(), resource.ValidateConfigRequest{
+	(&ScheduledTaskResource{}).ValidateConfig(t.Context(), resource.ValidateConfigRequest{
 		Config: tfsdk.Config{Schema: scheduledTaskSchema(t), Raw: scheduledTaskValue(t, &m)},
 	}, &resp)
 	return resp.Diagnostics
@@ -526,7 +525,7 @@ func (f *fakeTaskServer) requestCount() int {
 func scheduledTaskValue(t *testing.T, m *ScheduledTaskResourceModel) tftypes.Value {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s := scheduledTaskSchema(t)
 	v := tfsdk.Plan{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nil)}
 	if m == nil {
@@ -547,7 +546,7 @@ func scheduledTaskValue(t *testing.T, m *ScheduledTaskResourceModel) tftypes.Val
 func planScheduledTask(t *testing.T, c *client.Client, config ScheduledTaskResourceModel, state *ScheduledTaskResourceModel, plan ScheduledTaskResourceModel) (ScheduledTaskResourceModel, resource.ModifyPlanResponse) {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s := scheduledTaskSchema(t)
 	resp := resource.ModifyPlanResponse{Plan: tfsdk.Plan{Schema: s, Raw: scheduledTaskValue(t, &plan)}}
 	(&ScheduledTaskResource{client: c}).ModifyPlan(ctx, resource.ModifyPlanRequest{
@@ -734,7 +733,7 @@ func TestScheduledTaskPlanWithKeyAndTaskID(t *testing.T) {
 func replacesChangedPath(t *testing.T, state *ScheduledTaskResourceModel, resp resource.ModifyPlanResponse) bool {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	prior := tfsdk.State{Schema: scheduledTaskSchema(t), Raw: scheduledTaskValue(t, state)}
 	for _, p := range resp.RequiresReplace {
 		var before, after types.String
@@ -828,7 +827,7 @@ func TestScheduledTaskReadAfterImport(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			ctx := context.Background()
+			ctx := t.Context()
 
 			srv := &fakeTaskServer{tasks: testTasks()}
 			s := scheduledTaskSchema(t)
@@ -863,7 +862,7 @@ func TestScheduledTaskReadAfterImport(t *testing.T) {
 // unknown in a plan that changes the task, since apply reads it back.
 func TestUnitScheduledTaskKeyPlansUnknownOverANullPriorKey(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s := scheduledTaskSchema(t)
 	state := tfsdk.State{Schema: s, Raw: scheduledTaskValue(t, storedTask("abc", types.StringNull()))}

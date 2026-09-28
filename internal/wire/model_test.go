@@ -4,7 +4,6 @@
 package wire
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -22,7 +21,7 @@ type miniModel struct {
 }
 
 func TestUnitModelReadsAndWrites(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hostAttrs := map[string]schema.Attribute{"url": optString(), "kind": optString()}
 	b, err := testCatalog().bind(schema.Schema{Attributes: map[string]schema.Attribute{
 		"id":    schema.StringAttribute{Computed: true},

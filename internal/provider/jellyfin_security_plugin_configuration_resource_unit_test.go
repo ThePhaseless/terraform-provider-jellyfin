@@ -5,7 +5,6 @@ package provider
 
 import (
 	"cmp"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,7 +32,7 @@ import (
 )
 
 func TestUnitJellyfinSecurityNotificationAuthRoundTrip(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := mustWire(t, securityPluginWire)
 	fixture := `{"NtfyToken":"tk_abc","NtfyUsername":"alice","NtfyPassword":"s3cret","WebhookHeaders":["X-Api-Key: k","Authorization: Bearer t"]}`
 
@@ -71,7 +70,7 @@ func TestUnitJellyfinSecurityNotificationAuthRoundTrip(t *testing.T) {
 }
 
 func TestUnitOidcProviderRpInitiatedLogoutRoundTrip(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := mustWire(t, securityPluginWire)
 	data := readWire[JellyfinSecurityPluginConfigurationResourceModel](t, b, `{"OidcProviders":[{"Id":"idp","RpInitiatedLogoutEnabled":true,"RpInitiatedLogoutRedirectUri":"https://example.com/bye"}]}`)
 
@@ -100,7 +99,7 @@ func TestUnitOidcProviderRpInitiatedLogoutRoundTrip(t *testing.T) {
 }
 
 func TestUnitJellyfinSecurityPlugin263FieldsRoundTrip(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := mustWire(t, securityPluginWire)
 	fixture := `{"PairDeviceOnSecondScreenApproval":true,"PublicBaseUrl":"https://jf.example.com","OidcProviders":[{"Id":"idp","LinkExistingUsersByUsername":true}]}`
 
@@ -178,7 +177,7 @@ func TestUnitKeepSameInstant(t *testing.T) {
 }
 
 func TestUnitSameInstantPlanModifier(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	state := types.StringValue("2030-01-01T00:00:00.0000000Z")
 
 	for _, c := range []struct {
@@ -239,7 +238,7 @@ func TestUnitFillEmptyPayloadLists(t *testing.T) {
 }
 
 func TestUnitJellyfinSecurityWriteKeepsTheServedShape(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := mustWire(t, securityPluginWire)
 
 	raw, err := os.ReadFile(securityPluginPayloadGolden)
@@ -594,7 +593,7 @@ func TestUnitSecurityPluginApplyChecksThePlugin(t *testing.T) {
 // provider's values: its secret and settings come from the prior entry with
 // its id, and a new entry takes the server's values.
 func TestUnitSecurityPluginPlansOIDCProvidersByID(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := schemaOf(&JellyfinSecurityPluginConfigurationResource{})
 	providers, ok := s.Attributes["oidc_providers"].(rschema.ListNestedAttribute)
 	if !ok {
@@ -725,7 +724,7 @@ func hasPlanModifiers(a rschema.Attribute) bool {
 // An empty enrollment_deadline clears the deadline: the plugin reads the
 // empty string as none and leaves the key out, which reads back as empty.
 func TestUnitSecurityPluginEnrollmentDeadlineClears(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := mustWire(t, securityPluginWire)
 	data := readWire[JellyfinSecurityPluginConfigurationResourceModel](t, b, `{"EnrollmentDeadline":"2030-01-01T00:00:00Z"}`)
 	data.EnrollmentDeadline = types.StringValue("")
@@ -766,7 +765,7 @@ func TestUnitSecurityPluginEnrollmentDeadlineClears(t *testing.T) {
 // A list the plugin stores joined into one string must not hold values that
 // the join would change.
 func TestUnitSecurityPluginDelimitedListsRejectWhatTheJoinChanges(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := schemaOf(&JellyfinSecurityPluginConfigurationResource{})
 	providers, ok := s.Attributes["oidc_providers"].(rschema.ListNestedAttribute)
 	if !ok {

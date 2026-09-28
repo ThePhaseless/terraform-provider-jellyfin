@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -178,7 +177,7 @@ func TestAccJellyfinAPISchemaFloorGuard(t *testing.T) {
 	testAccPreCheck(t)
 	c := testAccClient(t)
 
-	info, err := c.GetPublicSystemInfo(context.Background())
+	info, err := c.GetPublicSystemInfo(t.Context())
 	if err != nil {
 		t.Fatalf("reading the Jellyfin version: %v", err)
 	}
@@ -190,7 +189,7 @@ func TestAccJellyfinAPISchemaFloorGuard(t *testing.T) {
 
 func testAccReducedAPISchema(t *testing.T, c *client.Client) []string {
 	t.Helper()
-	spec, err := c.GetOpenAPISpec(context.Background())
+	spec, err := c.GetOpenAPISpec(t.Context())
 	if err != nil {
 		t.Fatalf("getting OpenAPI spec: %v", err)
 	}

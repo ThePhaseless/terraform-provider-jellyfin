@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"net/http"
 	"testing"
 
@@ -21,7 +20,7 @@ import (
 func pluginResourcePlan(t *testing.T, m PluginResourceModel) tfsdk.Plan {
 	t.Helper()
 	plan := tfsdk.Plan{Schema: schemaOf(NewPluginResource())}
-	if diags := plan.Set(context.Background(), &m); diags.HasError() {
+	if diags := plan.Set(t.Context(), &m); diags.HasError() {
 		t.Fatalf("plan: %v", diags.Errors())
 	}
 	return plan
@@ -34,7 +33,7 @@ func modifyPluginPlan(t *testing.T, r *PluginResource, state, plan PluginResourc
 		State: pluginResourceState(t, state),
 	}
 	resp := &resource.ModifyPlanResponse{Plan: req.Plan}
-	r.ModifyPlan(context.Background(), req, resp)
+	r.ModifyPlan(t.Context(), req, resp)
 	return resp
 }
 
@@ -99,7 +98,7 @@ func TestUnitPluginVersionChangeReplacesUnlessItNamesInstalledVersion(t *testing
 func TestUnitPluginUpdateOnlyChangesState(t *testing.T) {
 	fake := &fakePluginServer{}
 	r := newFakePluginResource(t, fake)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	prior := PluginResourceModel{
 		ID:               types.StringValue(bookshelfID),
@@ -172,7 +171,7 @@ func TestUnitPluginSupportedKeywordFailsPlanUnlessPackagesResolveIt(t *testing.T
 // TestUnitPluginVersionPlan runs version's plan modifiers in order, handing
 // each the previous one's plan value as the framework does.
 func TestUnitPluginVersionPlan(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	attr, ok := schemaOf(NewPluginResource()).Attributes["version"].(schema.StringAttribute)
 	if !ok {
 		t.Fatal("version is not a schema.StringAttribute")
@@ -212,7 +211,7 @@ func TestUnitPluginVersionPlan(t *testing.T) {
 				ConfigValue: c.config,
 				StateValue:  types.StringNull(),
 				PlanValue:   planned,
-				State:       pluginResourceNullState(),
+				State:       pluginResourceNullState(ctx),
 			}
 			if c.state != nil {
 				req.State = pluginResourceState(t, *c.state)

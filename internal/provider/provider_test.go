@@ -39,7 +39,7 @@ func testAccClient(t *testing.T) *client.Client {
 	t.Helper()
 
 	c, _, err := configureClient(
-		context.Background(),
+		context.WithoutCancel(t.Context()),
 		os.Getenv("JELLYFIN_ENDPOINT"),
 		os.Getenv("JELLYFIN_API_KEY"),
 		os.Getenv("JELLYFIN_USERNAME"),
@@ -54,7 +54,7 @@ func testAccClient(t *testing.T) *client.Client {
 func testAccJellyfin12OrLater(t *testing.T) bool {
 	t.Helper()
 
-	info, err := client.NewClient(os.Getenv("JELLYFIN_ENDPOINT"), "").GetPublicSystemInfo(context.Background())
+	info, err := client.NewClient(os.Getenv("JELLYFIN_ENDPOINT"), "").GetPublicSystemInfo(t.Context())
 	if err != nil {
 		t.Fatalf("reading the Jellyfin version: %v", err)
 	}

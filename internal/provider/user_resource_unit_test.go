@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -24,7 +23,7 @@ import (
 )
 
 func TestUnitUserPolicyRoundTrip(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := mustWire(t, userPolicyWire)
 	fixture := `{"IsAdministrator":false,"IsDisabled":false,"EnableAllFolders":true,` +
 		`"IsHidden":true,"EnableMediaPlayback":false,"MaxParentalRating":13,"MaxParentalSubRating":1,` +
@@ -46,7 +45,7 @@ func TestUnitUserPolicyRoundTrip(t *testing.T) {
 }
 
 func TestUnitUserPolicyWriteSendsNullParentalRatings(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := mustWire(t, userPolicyWire)
 	var data UserResourceModel
 	if d := b.FlattenInto(ctx, `{}`, &data); d.HasError() {
@@ -94,7 +93,7 @@ func TestUnitUserRenameKeepsConfiguration(t *testing.T) {
 	defer server.Close()
 
 	r := &UserResource{client: client.NewClient(server.URL, "k")}
-	if err := r.renameUser(context.Background(), "user-1", "New"); err != nil {
+	if err := r.renameUser(t.Context(), "user-1", "New"); err != nil {
 		t.Fatalf("renameUser() error = %v", err)
 	}
 
@@ -143,7 +142,7 @@ func TestUnitUserPolicyDemotesBeforeDisabling(t *testing.T) {
 		EnableAllFolders: types.BoolValue(true),
 	}
 	var diags diag.Diagnostics
-	if err := r.applyPolicy(context.Background(), &data, "user-1", &diags); err != nil || diags.HasError() {
+	if err := r.applyPolicy(t.Context(), &data, "user-1", &diags); err != nil || diags.HasError() {
 		t.Fatalf("applyPolicy() error = %v, %v", err, diags)
 	}
 	if policy["IsAdministrator"] != false || policy["IsDisabled"] != true || posts != 2 {
@@ -166,7 +165,7 @@ func TestUnitUserPolicyTakesIDsAsJellyfinListsThem(t *testing.T) {
 		} {
 			resp := validator.ListResponse{}
 			for _, v := range a.Validators {
-				v.ValidateList(context.Background(), validator.ListRequest{Path: path.Root(name), ConfigValue: types.ListValueMust(types.StringType, []attr.Value{types.StringValue(id)})}, &resp)
+				v.ValidateList(t.Context(), validator.ListRequest{Path: path.Root(name), ConfigValue: types.ListValueMust(types.StringType, []attr.Value{types.StringValue(id)})}, &resp)
 			}
 			if resp.Diagnostics.HasError() != want {
 				t.Errorf("%s = [%q]: error %t, want %t", name, id, resp.Diagnostics.HasError(), want)
@@ -178,7 +177,7 @@ func TestUnitUserPolicyTakesIDsAsJellyfinListsThem(t *testing.T) {
 // Removing a schedule must not plan the next one with its hours: an hour a
 // schedule leaves unset comes from the prior schedule with the same day.
 func TestUnitUserAccessSchedulesPlanByDay(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	schedules, ok := userPolicyAttributes()["access_schedules"].(schema.ListNestedAttribute)
 	if !ok {
 		t.Fatal("access_schedules is not a nested list")

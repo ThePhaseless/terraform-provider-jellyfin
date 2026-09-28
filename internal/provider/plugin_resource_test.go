@@ -378,7 +378,7 @@ func testAccRestorePluginUpdateTriggers(t *testing.T) string {
 		t.Cleanup(func() {
 			// The provider's sign-in has signed c out by now, since both share
 			// a device ID.
-			if err := testAccClient(t).UpdateScheduledTaskTriggers(context.Background(), task.ID, string(found)); err != nil {
+			if err := testAccClient(t).UpdateScheduledTaskTriggers(context.WithoutCancel(t.Context()), task.ID, string(found)); err != nil {
 				t.Errorf("putting back the PluginUpdates triggers: %v", err)
 			}
 		})
@@ -388,8 +388,8 @@ func testAccRestorePluginUpdateTriggers(t *testing.T) string {
 	return ""
 }
 
-func testAccListedPlugins(c *client.Client, name string) ([]client.InstalledPlugin, error) {
-	plugins, err := c.GetInstalledPlugins(context.Background())
+func testAccListedPlugins(ctx context.Context, c *client.Client, name string) ([]client.InstalledPlugin, error) {
+	plugins, err := c.GetInstalledPlugins(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -404,7 +404,7 @@ func testAccCheckPluginStaysAt(t *testing.T, name, want string) resource.TestChe
 	return func(*terraform.State) error {
 		c := testAccClient(t)
 		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(pluginPollInterval) {
-			listed, err := testAccListedPlugins(c, name)
+			listed, err := testAccListedPlugins(t.Context(), c, name)
 			if err != nil {
 				return err
 			}
@@ -422,7 +422,7 @@ func testAccCheckPluginStaysAt(t *testing.T, name, want string) resource.TestChe
 // named plugin other than one it deletes at the next restart.
 func testAccCheckPluginNotListed(t *testing.T, name string) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		listed, err := testAccListedPlugins(testAccClient(t), name)
+		listed, err := testAccListedPlugins(t.Context(), testAccClient(t), name)
 		if err != nil {
 			return err
 		}
@@ -438,7 +438,7 @@ func testAccCheckPluginNotListed(t *testing.T, name string) resource.TestCheckFu
 // restart.
 func testAccCheckPluginListedOnlyAt(t *testing.T, name, version string) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		listed, err := testAccListedPlugins(testAccClient(t), name)
+		listed, err := testAccListedPlugins(t.Context(), testAccClient(t), name)
 		if err != nil {
 			return err
 		}
@@ -456,7 +456,7 @@ func testAccCheckPluginListedOnlyAt(t *testing.T, name, version string) resource
 // testAccCheckPluginListed fails unless Jellyfin lists the named plugin.
 func testAccCheckPluginListed(t *testing.T, name string) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		listed, err := testAccListedPlugins(testAccClient(t), name)
+		listed, err := testAccListedPlugins(t.Context(), testAccClient(t), name)
 		if err != nil {
 			return err
 		}
@@ -489,7 +489,7 @@ func testAccRegisterRepository(t *testing.T, name, repoURL string) {
 	t.Cleanup(func() {
 		// t.Context() is done by now, and the provider's sign-in has signed c
 		// out, since both share a device ID.
-		if err := testAccClient(t).SetPluginRepositories(context.Background(), repos); err != nil {
+		if err := testAccClient(t).SetPluginRepositories(context.WithoutCancel(t.Context()), repos); err != nil {
 			t.Errorf("failed to restore plugin repositories: %v", err)
 		}
 	})

@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -19,7 +18,7 @@ func TestUnitLiveTVConfigurationRoundTrip(t *testing.T) {
 // A first apply plans the settings an entry leaves unset as unknown; the
 // write keeps those of the served entry with the same id.
 func TestUnitLiveTVTunerHostKeepsTheServedEntrysSettings(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := mustWire(t, livetvWire)
 	const served = `{"TunerHosts": [{"Id": "abc", "Url": "http://old", "Type": "hdhomerun", "FriendlyName": "Living room", "TunerCount": 2}]}`
 	doc, err := parseJSONObject(served)

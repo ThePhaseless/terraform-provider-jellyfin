@@ -129,15 +129,15 @@ func newFakePluginResource(t *testing.T, fake *fakePluginServer) *PluginResource
 	return &PluginResource{client: client.NewClient(server.URL, "test-key")}
 }
 
-func pluginResourceNullState() tfsdk.State {
+func pluginResourceNullState(ctx context.Context) tfsdk.State {
 	s := schemaOf(NewPluginResource())
-	return tfsdk.State{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(context.Background()), nil)}
+	return tfsdk.State{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nil)}
 }
 
 func pluginResourceState(t *testing.T, m PluginResourceModel) tfsdk.State {
 	t.Helper()
 	state := tfsdk.State{Schema: schemaOf(NewPluginResource())}
-	if diags := state.Set(context.Background(), &m); diags.HasError() {
+	if diags := state.Set(t.Context(), &m); diags.HasError() {
 		t.Fatalf("state: %v", diags.Errors())
 	}
 	return state
@@ -148,7 +148,7 @@ func TestUnitPluginInstallsAndUninstallsDoNotOverlap(t *testing.T) {
 	server := httptest.NewServer(fake)
 	defer server.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	var wg sync.WaitGroup
 	for i := range 8 {
 		c := client.NewClient(server.URL, "test-key")
@@ -179,7 +179,7 @@ func TestUnitPluginUninstallRemovesEveryListedVersion(t *testing.T) {
 	}}
 	r := newFakePluginResource(t, fake)
 
-	if _, err := r.uninstall(context.Background(), bookshelfID); err != nil {
+	if _, err := r.uninstall(t.Context(), bookshelfID); err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}
 	if got := fake.listed(); len(got) != 1 || got[0].Name != "Fanart" {
@@ -193,7 +193,7 @@ func TestUnitPluginUninstallSkipsVersionPendingDeletion(t *testing.T) {
 	}}
 	r := newFakePluginResource(t, fake)
 
-	if _, err := r.uninstall(context.Background(), bookshelfID); err != nil {
+	if _, err := r.uninstall(t.Context(), bookshelfID); err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}
 	if fake.deletes != 0 {
@@ -208,7 +208,7 @@ func TestUnitPluginUninstallAcceptsFailureOncePluginIsGone(t *testing.T) {
 	}
 	r := newFakePluginResource(t, fake)
 
-	if _, err := r.uninstall(context.Background(), bookshelfID); err != nil {
+	if _, err := r.uninstall(t.Context(), bookshelfID); err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}
 }
@@ -221,7 +221,7 @@ func TestUnitPluginUninstallReportsFailureWhilePluginIsListed(t *testing.T) {
 	}
 	r := newFakePluginResource(t, fake)
 
-	_, err := r.uninstall(context.Background(), bookshelfID)
+	_, err := r.uninstall(t.Context(), bookshelfID)
 	if err == nil || !strings.Contains(err.Error(), "400") {
 		t.Fatalf("uninstall error = %v, want the 400 Jellyfin answered", err)
 	}
@@ -237,7 +237,7 @@ func TestUnitPluginUninstallReportsNotFoundWhilePluginIsListed(t *testing.T) {
 	}
 	r := newFakePluginResource(t, fake)
 
-	_, err := r.uninstall(context.Background(), bookshelfID)
+	_, err := r.uninstall(t.Context(), bookshelfID)
 	if !client.IsNotFound(err) {
 		t.Fatalf("uninstall error = %v, want the 404 Jellyfin answered", err)
 	}
@@ -249,7 +249,7 @@ func TestUnitPluginUninstallLeavesBundledPlugin(t *testing.T) {
 	}}
 	r := newFakePluginResource(t, fake)
 
-	kept, err := r.uninstall(context.Background(), tmdbID)
+	kept, err := r.uninstall(t.Context(), tmdbID)
 	if err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestUnitPluginUninstallRemovesVersionInstalledOverBundledPlugin(t *testing.
 	}}
 	r := newFakePluginResource(t, fake)
 
-	kept, err := r.uninstall(context.Background(), tmdbID)
+	kept, err := r.uninstall(t.Context(), tmdbID)
 	if err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestUnitPluginDeleteWarnsWhenJellyfinKeepsBundledPlugin(t *testing.T) {
 		{ID: tmdbID, Name: "TMDb", Version: "12.1.0.0", Status: "Active"},
 	}}
 	r := newFakePluginResource(t, fake)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	state := pluginResourceState(t, PluginResourceModel{
 		ID:               types.StringValue(tmdbID),
@@ -313,7 +313,7 @@ func TestUnitPluginUninstallStopsWhenJellyfinKeepsPlugin(t *testing.T) {
 	}
 	r := newFakePluginResource(t, fake)
 
-	_, err := r.uninstall(context.Background(), bookshelfID)
+	_, err := r.uninstall(t.Context(), bookshelfID)
 	if err == nil || !strings.Contains(err.Error(), "13.0.0.0") {
 		t.Fatalf("uninstall error = %v, want one naming the version still listed", err)
 	}
@@ -329,7 +329,7 @@ func TestUnitPluginConcurrentUninstallsOfOnePluginSucceed(t *testing.T) {
 	server := httptest.NewServer(fake)
 	defer server.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	var wg sync.WaitGroup
 	for i := range 4 {
 		r := &PluginResource{client: client.NewClient(server.URL, "test-key")}
@@ -350,9 +350,9 @@ func TestUnitPluginConcurrentUninstallsOfOnePluginSucceed(t *testing.T) {
 // via destroyer (create_before_destroy order).
 func replacePluginVersionFirst(t *testing.T, creator, destroyer *PluginResource) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
-	createResp := &resource.CreateResponse{State: pluginResourceNullState()}
+	createResp := &resource.CreateResponse{State: pluginResourceNullState(ctx)}
 	creator.Create(ctx, resource.CreateRequest{Plan: pluginResourcePlan(t, PluginResourceModel{
 		ID:               types.StringUnknown(),
 		Name:             types.StringValue("Bookshelf"),
@@ -416,7 +416,7 @@ func TestUnitPluginWaitIgnoresVersionPendingDeletion(t *testing.T) {
 	}}
 	r := newFakePluginResource(t, fake)
 
-	if p, err := r.waitForPlugin(context.Background(), "Bookshelf", "13.0.0.0", time.Millisecond); err == nil {
+	if p, err := r.waitForPlugin(t.Context(), "Bookshelf", "13.0.0.0", time.Millisecond); err == nil {
 		t.Fatalf("waitForPlugin returned %+v, want an error while only a version pending deletion is listed", p)
 	}
 }
@@ -427,10 +427,10 @@ func TestUnitPluginWaitIgnoresVersionPendingDeletion(t *testing.T) {
 func TestUnitPluginCreateReportsAVersionNoRepositoryOffers(t *testing.T) {
 	fake := &fakePluginServer{installStatus: http.StatusNotFound}
 	r := newFakePluginResource(t, fake)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
-	resp := &resource.CreateResponse{State: pluginResourceNullState()}
+	resp := &resource.CreateResponse{State: pluginResourceNullState(ctx)}
 	r.Create(ctx, resource.CreateRequest{Plan: pluginResourcePlan(t, PluginResourceModel{
 		ID:               types.StringUnknown(),
 		Name:             types.StringValue("Bookshelf"),
@@ -448,7 +448,7 @@ func TestUnitPluginCreateReportsAVersionNoRepositoryOffers(t *testing.T) {
 
 func TestUnitPluginWaitStopsWhenCancelled(t *testing.T) {
 	r := newFakePluginResource(t, &fakePluginServer{})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	start := time.Now()
 	if _, err := r.waitForPlugin(ctx, "Bookshelf", "13.0.0.0", time.Minute); err == nil {

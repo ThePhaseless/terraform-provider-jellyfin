@@ -337,7 +337,7 @@ func testAccSecurityPluginPayloadShape(t *testing.T, c *client.Client) []string 
 		t.Fatalf("reading the JellyfinSecurity configuration: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := c.UpdatePluginConfiguration(context.Background(), jellyfinSecurityPluginID, original); err != nil {
+		if err := c.UpdatePluginConfiguration(context.WithoutCancel(t.Context()), jellyfinSecurityPluginID, original); err != nil {
 			t.Errorf("restoring the JellyfinSecurity configuration: %v", err)
 		}
 	})

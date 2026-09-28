@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -238,7 +237,7 @@ func TestAccLibraryResourceImportWithoutCollectionTypeAsMixed(t *testing.T) {
 				// Jellyfin's web UI creates a Mixed Movies and Shows library
 				// like this, without a collection type.
 				PreConfig: func() {
-					if err := testAccClient(t).AddVirtualFolder(context.Background(), "TestUntyped", "", []string{"/media/movies"}, nil); err != nil {
+					if err := testAccClient(t).AddVirtualFolder(t.Context(), "TestUntyped", "", []string{"/media/movies"}, nil); err != nil {
 						t.Fatalf("creating a library without a collection type: %v", err)
 					}
 				},
@@ -610,7 +609,7 @@ func testAccCheckLibraryOption(t *testing.T, library, key, want string) resource
 }
 
 func testAccServedLibraryOptions(t *testing.T, library string) (json.RawMessage, error) {
-	folders, err := testAccClient(t).GetVirtualFolders(context.Background())
+	folders, err := testAccClient(t).GetVirtualFolders(t.Context())
 	if err != nil {
 		return nil, err
 	}
@@ -625,7 +624,7 @@ func testAccServedLibraryOptions(t *testing.T, library string) (json.RawMessage,
 // of a duplicate name.
 func testAccCheckNoLibraryNamed(t *testing.T, prefix string) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		folders, err := testAccClient(t).GetVirtualFolders(context.Background())
+		folders, err := testAccClient(t).GetVirtualFolders(t.Context())
 		if err != nil {
 			return err
 		}

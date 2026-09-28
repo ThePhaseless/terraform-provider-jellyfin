@@ -78,7 +78,7 @@ func testAccPutBackServerConfiguration(t *testing.T, taskID string) {
 	t.Cleanup(func() {
 		// t.Context() is done by now, and the provider's sign-in has signed c
 		// out, since both share a device ID.
-		c, ctx := testAccClient(t), context.Background()
+		c, ctx := testAccClient(t), context.WithoutCancel(t.Context())
 		if err := errors.Join(
 			c.UpdateSystemConfiguration(ctx, system),
 			c.UpdateNetworkConfiguration(ctx, network),
@@ -298,7 +298,7 @@ func TestAccSecurityPluginUpgradeFromV038(t *testing.T) {
 		t.Fatalf("reading the JellyfinSecurity configuration: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := testAccClient(t).UpdatePluginConfiguration(context.Background(), jellyfinSecurityPluginID, original); err != nil {
+		if err := testAccClient(t).UpdatePluginConfiguration(context.WithoutCancel(t.Context()), jellyfinSecurityPluginID, original); err != nil {
 			t.Errorf("putting back the JellyfinSecurity configuration: %v", err)
 		}
 	})

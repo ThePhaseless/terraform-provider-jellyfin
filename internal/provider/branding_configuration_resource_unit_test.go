@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -15,7 +14,7 @@ func TestUnitBrandingConfigurationRoundTrip(t *testing.T) {
 }
 
 func TestUnitBrandingSplashscreenLocationIsNotComputedReadOrWritten(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if schemaOf(&BrandingConfigurationResource{}).Attributes["splashscreen_location"].IsComputed() {
 		t.Error("splashscreen_location is computed, so create plans show it as known after apply although it always reads as null")

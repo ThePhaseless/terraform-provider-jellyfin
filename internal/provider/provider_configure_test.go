@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -67,7 +66,7 @@ func TestConfigureClientBootstrapsUnconfiguredServer(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	c, _, err := configureClient(context.Background(), server.URL, "", "admin", "Admin123!")
+	c, _, err := configureClient(t.Context(), server.URL, "", "admin", "Admin123!")
 	if err != nil {
 		t.Fatalf("configureClient() error = %v", err)
 	}
@@ -88,7 +87,7 @@ func TestConfigureClientRequiresCredentialsForUnconfiguredServer(t *testing.T) {
 	server := httptest.NewServer(servePublicInfo(t, false))
 	defer server.Close()
 
-	_, _, err := configureClient(context.Background(), server.URL, "stale-api-key", "", "")
+	_, _, err := configureClient(t.Context(), server.URL, "stale-api-key", "", "")
 	if err == nil {
 		t.Fatal("configureClient() error = nil, want missing credentials error")
 	}
@@ -103,7 +102,7 @@ func TestConfigureClientUsesAPIKeyForConfiguredServer(t *testing.T) {
 	server := httptest.NewServer(servePublicInfo(t, true))
 	defer server.Close()
 
-	c, _, err := configureClient(context.Background(), server.URL, "api-key", "", "")
+	c, _, err := configureClient(t.Context(), server.URL, "api-key", "", "")
 	if err != nil {
 		t.Fatalf("configureClient() error = %v", err)
 	}
@@ -121,7 +120,7 @@ func TestConfigureClientAuthenticatesConfiguredServerWithCredentials(t *testing.
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	c, _, err := configureClient(context.Background(), server.URL, "", "admin", "Admin123!")
+	c, _, err := configureClient(t.Context(), server.URL, "", "admin", "Admin123!")
 	if err != nil {
 		t.Fatalf("configureClient() error = %v", err)
 	}
@@ -166,7 +165,7 @@ func writeProviderJSON(t *testing.T, w http.ResponseWriter, v any) {
 func TestConfigureRefusesUnknownConfiguration(t *testing.T) {
 	t.Setenv("JELLYFIN_ENDPOINT", "http://another-server.invalid")
 	t.Setenv("JELLYFIN_API_KEY", "key-of-another-server")
-	ctx := context.Background()
+	ctx := t.Context()
 	p := New("test")()
 	var schemaResp provider.SchemaResponse
 	p.Schema(ctx, provider.SchemaRequest{}, &schemaResp)

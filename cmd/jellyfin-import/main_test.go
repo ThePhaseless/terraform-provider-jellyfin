@@ -1113,7 +1113,7 @@ func TestFromEnvFillsOnlyFlagsTheCommandLineLeavesOut(t *testing.T) {
 	}
 }
 
-func testAccImportClient(t *testing.T) *client.Client {
+func testAccImportClient(ctx context.Context, t *testing.T) *client.Client {
 	t.Helper()
 
 	endpoint := os.Getenv("JELLYFIN_ENDPOINT")
@@ -1127,9 +1127,9 @@ func testAccImportClient(t *testing.T) *client.Client {
 		}
 		skip("JELLYFIN_ENDPOINT and either JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD must be set for acceptance tests")
 	}
-	testAccBootstrap(t, endpoint)
+	testAccBootstrap(ctx, t, endpoint)
 
-	c, err := importClient(context.Background(), endpoint, apiKey, username, password)
+	c, err := importClient(ctx, endpoint, apiKey, username, password)
 	if err != nil {
 		t.Fatalf("failed to configure Jellyfin import acceptance test client: %v", err)
 	}
@@ -1139,10 +1139,10 @@ func testAccImportClient(t *testing.T) *client.Client {
 // testAccBootstrap completes a fresh server's startup wizard the way a first
 // terraform run does, by configuring the provider. Until then Jellyfin has no
 // user for the importer to log in as.
-func testAccBootstrap(t *testing.T, endpoint string) {
+func testAccBootstrap(ctx context.Context, t *testing.T, endpoint string) {
 	t.Helper()
 
-	info, err := client.NewClient(endpoint, "").GetPublicSystemInfo(context.Background())
+	info, err := client.NewClient(endpoint, "").GetPublicSystemInfo(ctx)
 	if err != nil {
 		t.Fatalf("reading Jellyfin startup status: %v", err)
 	}
@@ -1184,16 +1184,17 @@ func terraformFmtCheck(t *testing.T, dir string) {
 func seedFixtures(t *testing.T, c *client.Client) {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	const tricky = `import-e2e ${a} %{b} "q" \ $${c} %%{d} ${`
 
-	var restore []func(*client.Client) error
+	var restore []func(context.Context, *client.Client) error
 	t.Cleanup(func() {
 		// The provider logs in under the same device ID during the plan, and
 		// Jellyfin then revokes the session token c holds.
-		fresh := testAccImportClient(t)
+		ctx := context.WithoutCancel(t.Context())
+		fresh := testAccImportClient(ctx, t)
 		for _, undo := range slices.Backward(restore) {
-			if err := undo(fresh); err != nil {
+			if err := undo(ctx, fresh); err != nil {
 				t.Error(err)
 			}
 		}
@@ -1203,7 +1204,7 @@ func seedFixtures(t *testing.T, c *client.Client) {
 	if err != nil {
 		t.Fatalf("reading branding configuration: %v", err)
 	}
-	restore = append(restore, func(c *client.Client) error {
+	restore = append(restore, func(ctx context.Context, c *client.Client) error {
 		return c.UpdateBrandingConfiguration(ctx, branding)
 	})
 	seeded, err := json.Marshal(map[string]any{
@@ -1222,7 +1223,7 @@ func seedFixtures(t *testing.T, c *client.Client) {
 	if err != nil {
 		t.Fatalf("reading system configuration: %v", err)
 	}
-	restore = append(restore, func(c *client.Client) error {
+	restore = append(restore, func(ctx context.Context, c *client.Client) error {
 		return c.UpdateSystemConfiguration(ctx, system)
 	})
 	var systemDoc map[string]any
@@ -1251,7 +1252,7 @@ func seedFixtures(t *testing.T, c *client.Client) {
 	if err != nil {
 		t.Fatalf("reading API keys: %v", err)
 	}
-	restore = append(restore, func(c *client.Client) error {
+	restore = append(restore, func(ctx context.Context, c *client.Client) error {
 		keys, err := c.GetAPIKeys(ctx)
 		if err != nil {
 			return err
@@ -1274,7 +1275,7 @@ func seedFixtures(t *testing.T, c *client.Client) {
 	if err != nil {
 		t.Fatalf("reading plugin repositories: %v", err)
 	}
-	restore = append(restore, func(c *client.Client) error {
+	restore = append(restore, func(ctx context.Context, c *client.Client) error {
 		return c.SetPluginRepositories(ctx, repos)
 	})
 	// Disabled, so Jellyfin never fetches the unreachable URL.
@@ -1299,7 +1300,7 @@ func seedFixtures(t *testing.T, c *client.Client) {
 		if err := c.AddVirtualFolder(ctx, lib.name, lib.collectionType, []string{"/media/movies"}, &client.LibraryOptions{RawJSON: "{}"}); err != nil {
 			t.Fatalf("seeding library %q: %v", lib.name, err)
 		}
-		restore = append(restore, func(c *client.Client) error {
+		restore = append(restore, func(ctx context.Context, c *client.Client) error {
 			return c.RemoveVirtualFolder(ctx, lib.name)
 		})
 	}
@@ -1314,7 +1315,7 @@ func seedFixtures(t *testing.T, c *client.Client) {
 // Set JELLYFIN_ENDPOINT and either JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD to enable this test.
 func TestAccImportToolE2E(t *testing.T) {
 	outputDir := t.TempDir()
-	c := testAccImportClient(t)
+	c := testAccImportClient(t.Context(), t)
 	seedFixtures(t, c)
 
 	var warnings strings.Builder
@@ -1413,7 +1414,7 @@ func TestAccImportToolE2E(t *testing.T) {
 // TestAccImportToolIndividualGenerators tests each generator function against a real
 // Jellyfin instance to verify they produce valid output.
 func TestAccImportToolIndividualGenerators(t *testing.T) {
-	c := testAccImportClient(t)
+	c := testAccImportClient(t.Context(), t)
 
 	t.Run("Users", func(t *testing.T) {
 		g := &generator{client: c}

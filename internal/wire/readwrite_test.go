@@ -5,7 +5,6 @@ package wire
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -72,7 +71,7 @@ func at(t *testing.T, v attr.Value, p string) attr.Value {
 
 func with(t *testing.T, obj attr.Value, p string, v attr.Value) attr.Value {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	head, rest, nested := strings.Cut(p, ".")
 	name, index, hasIndex := strings.Cut(strings.TrimSuffix(head, "]"), "[")
 	o, ok := obj.(basetypes.ObjectValue)
@@ -132,7 +131,7 @@ const testServed = `{
 }`
 
 func TestUnitFlattenReadsEachAttribute(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := testBinding(t)
 	nullPrior := types.ObjectNull(b.AttrTypes)
 	priorWith := func(values map[string]attr.Value) types.Object {
@@ -190,7 +189,7 @@ func TestUnitFlattenReadsEachAttribute(t *testing.T) {
 
 func TestUnitFlattenReadsAKeySpelledOtherwise(t *testing.T) {
 	var logs bytes.Buffer
-	ctx := tflogtest.RootLogger(context.Background(), &logs)
+	ctx := tflogtest.RootLogger(t.Context(), &logs)
 	b := testBinding(t)
 	got, d := b.Flatten(ctx, doc(t, `{"name": "lower", "RATIO": 2.5, "Tags": ["exact"], "t_a_g_s": ["other"], "Si_zes": [1], "sizes": [2]}`), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
@@ -205,7 +204,7 @@ func TestUnitFlattenReadsAKeySpelledOtherwise(t *testing.T) {
 func TestUnitFlattenRejectsAnUnreadableNestedValue(t *testing.T) {
 	b := testBinding(t)
 	for _, raw := range []string{`{"Hosts": "x"}`, `{"Opts": 3}`, `{"Types": [1]}`} {
-		if _, d := b.Flatten(context.Background(), doc(t, raw), types.ObjectNull(b.AttrTypes)); !d.HasError() {
+		if _, d := b.Flatten(t.Context(), doc(t, raw), types.ObjectNull(b.AttrTypes)); !d.HasError() {
 			t.Errorf("%s reads without an error", raw)
 		}
 	}
@@ -213,7 +212,7 @@ func TestUnitFlattenRejectsAnUnreadableNestedValue(t *testing.T) {
 
 func TestUnitOverlayWritesTheConfiguredValues(t *testing.T) {
 	var logs bytes.Buffer
-	ctx := tflogtest.RootLogger(context.Background(), &logs)
+	ctx := tflogtest.RootLogger(t.Context(), &logs)
 	b := testBinding(t)
 	model, d := b.Flatten(ctx, doc(t, testServed), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
@@ -252,7 +251,7 @@ func TestUnitOverlayWritesTheConfiguredValues(t *testing.T) {
 }
 
 func TestUnitOverlayKeepsAServedKeySpelledOtherwise(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := testBinding(t)
 	model, _ := b.Flatten(ctx, doc(t, testServed), types.ObjectNull(b.AttrTypes))
 	served := doc(t, `{"name": "shadow"}`)
@@ -265,7 +264,7 @@ func TestUnitOverlayKeepsAServedKeySpelledOtherwise(t *testing.T) {
 }
 
 func TestUnitSelectWritesAndReadsOnlyTheNamedAttributes(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := testBinding(t)
 	sel, err := b.Select("name", "hoisted")
 	if err != nil {
@@ -304,7 +303,7 @@ func subDocument(t *testing.T) (*Binding, types.Object) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	model, d := b.Flatten(context.Background(), doc(t, testServed), types.ObjectNull(b.AttrTypes))
+	model, d := b.Flatten(t.Context(), doc(t, testServed), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
 		t.Fatal(d)
 	}
@@ -317,7 +316,7 @@ func TestUnitDocumentWriteLeavesTheAttributesOfANullObjectOut(t *testing.T) {
 	m := with(t, model, "sub", types.ObjectNull(subType.AttrTypes))
 	m = with(t, m, "hoisted", types.BoolValue(true))
 	served := doc(t, `{"Flag": false, "Limit": 9}`)
-	if d := sub.Overlay(context.Background(), served, object(t, m)); d.HasError() {
+	if d := sub.Overlay(t.Context(), served, object(t, m)); d.HasError() {
 		t.Fatal(d)
 	}
 	if got, want := canonical(t, served), `{"Flag":false,"Limit":9,"Other":true}`; got != want {
@@ -328,7 +327,7 @@ func TestUnitDocumentWriteLeavesTheAttributesOfANullObjectOut(t *testing.T) {
 func TestUnitDocumentReadKeepsTheAttributesOutsideIt(t *testing.T) {
 	sub, model := subDocument(t)
 	prior := object(t, with(t, model, "name", types.StringValue("kept")))
-	read, d := sub.Flatten(context.Background(), doc(t, `{"Flag": true, "Other": false, "Limit": 1}`), prior)
+	read, d := sub.Flatten(t.Context(), doc(t, `{"Flag": true, "Other": false, "Limit": 1}`), prior)
 	if d.HasError() {
 		t.Fatal(d)
 	}
@@ -336,7 +335,7 @@ func TestUnitDocumentReadKeepsTheAttributesOutsideIt(t *testing.T) {
 }
 
 func TestUnitAnUnreadableServedListFailsAMergeButNotACarry(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := testBinding(t)
 	model, _ := b.Flatten(ctx, doc(t, testServed), types.ObjectNull(b.AttrTypes))
 	if d := b.Overlay(ctx, doc(t, `{"Types": "x"}`), model); !d.HasError() {
@@ -348,7 +347,7 @@ func TestUnitAnUnreadableServedListFailsAMergeButNotACarry(t *testing.T) {
 }
 
 func TestUnitOverlayRejectsAnUnknownOrNullListElement(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := testBinding(t)
 	model, _ := b.Flatten(ctx, doc(t, testServed), types.ObjectNull(b.AttrTypes))
 	hosts, _ := at(t, model, "hosts").(basetypes.ListValue)
@@ -362,7 +361,7 @@ func TestUnitOverlayRejectsAnUnknownOrNullListElement(t *testing.T) {
 }
 
 func TestUnitKeepPlannedNullsInsideListElements(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := testBinding(t)
 	full, _ := b.Flatten(ctx, doc(t, testServed), types.ObjectNull(b.AttrTypes))
 	planned := with(t, full, "hosts[1].kind", types.StringNull())
@@ -392,7 +391,7 @@ func TestUnitKeepPlannedNullsInsideListElements(t *testing.T) {
 }
 
 func TestUnitDroppedNamesEachAttributeReadBackAsNull(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := testBinding(t)
 	planned, _ := b.Flatten(ctx, doc(t, testServed), types.ObjectNull(b.AttrTypes))
 	got := with(t, planned, "fresh", types.StringNull())
@@ -422,7 +421,7 @@ func TestUnitDroppedNamesEachAttributeReadBackAsNull(t *testing.T) {
 
 func configOf(t *testing.T, attrs map[string]schema.Attribute, v attr.Value) tfsdk.Config {
 	t.Helper()
-	raw, err := v.ToTerraformValue(context.Background())
+	raw, err := v.ToTerraformValue(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +449,7 @@ func versionErrorLines(diags diag.Diagnostics) []string {
 }
 
 func TestUnitVersionErrors(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := testBinding(t)
 	full, _ := b.Flatten(ctx, doc(t, testServed), types.ObjectNull(b.AttrTypes))
 	config := func(v attr.Value) tfsdk.Config { return configOf(t, testAttrs(), v) }
@@ -495,7 +494,7 @@ func TestUnitVersionErrors(t *testing.T) {
 }
 
 func TestUnitVersionErrorsUseTheDeclaredMessage(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	message := func(g VersionGap) (string, string) {
 		return "No " + g.Key, fmt.Sprintf("%s since=%s until=%s server=%s", g.Path, g.Since, g.Until, g.ServerVersion)
 	}
@@ -517,7 +516,7 @@ func TestUnitVersionErrorsUseTheDeclaredMessage(t *testing.T) {
 }
 
 func TestUnitVersionErrorsGateANewNestedAttributeAsAWhole(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	c := &catalog{
 		pinned:      parseAPIGolden("schema Doc.Name: string\nschema Doc.News: []#New\nschema New.Title: string\n"),
 		floor:       parseAPIGolden("schema Doc.Name: string\n"),
@@ -550,7 +549,7 @@ func TestUnitVersionErrorsGateANewNestedAttributeAsAWhole(t *testing.T) {
 }
 
 func TestUnitCodecs(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	for _, c := range []struct {
 		codec Codec
 		raw   string
@@ -581,7 +580,7 @@ func TestUnitCodecs(t *testing.T) {
 
 func mustEncode(t *testing.T, c Codec, v attr.Value) []byte {
 	t.Helper()
-	raw, d := c.Encode(context.Background(), v)
+	raw, d := c.Encode(t.Context(), v)
 	if d.HasError() {
 		t.Fatal(d)
 	}

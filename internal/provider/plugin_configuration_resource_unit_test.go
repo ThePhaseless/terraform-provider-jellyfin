@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"maps"
@@ -29,7 +28,7 @@ import (
 // plan modifiers in order, handing each the previous one's plan value as the
 // framework does.
 func TestUnitPluginIDPlan(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	const dashed = "94879a0c-da24-4eb1-aa06-f28b4b9333b1"
 
 	cases := []struct {
@@ -101,7 +100,7 @@ func TestUnitPluginIDPlan(t *testing.T) {
 // every key back, those the configuration leaves out with their defaults; a
 // configuration that names some keys reads back as itself.
 func TestUnitPluginConfigurationReadsBackTheKeysItManages(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	const defaults = `{"Server": "https://musicbrainz.org", "RateLimit": 1, "ReplaceArtistName": false}`
 	stored := defaults
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

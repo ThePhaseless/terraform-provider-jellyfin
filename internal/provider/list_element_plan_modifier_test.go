@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -59,7 +58,7 @@ func testPlanModifyList(t *testing.T, m planmodifier.List, tests map[string]plan
 			t.Parallel()
 
 			resp := planmodifier.ListResponse{PlanValue: test.plan}
-			m.PlanModifyList(context.Background(), planmodifier.ListRequest{
+			m.PlanModifyList(t.Context(), planmodifier.ListRequest{
 				StateValue:  test.state,
 				ConfigValue: test.config,
 				PlanValue:   test.plan,

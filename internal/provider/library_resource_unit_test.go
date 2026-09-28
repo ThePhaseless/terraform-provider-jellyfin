@@ -73,7 +73,7 @@ func TestUnitLibraryOptionsRoundTrip(t *testing.T) {
 }
 
 func TestUnitTypeOptionsWriteKeepsUnsetServerValues(t *testing.T) {
-	ctx := testUnitOfferingNoSubtitleFetchers()
+	ctx := testUnitOfferingNoSubtitleFetchers(t.Context())
 	b := mustWire(t, libraryOptionsWire)
 	base := map[string]json.RawMessage{
 		"TypeOptions": json.RawMessage(`[
@@ -120,7 +120,7 @@ func TestUnitTypeOptionsWithoutSimilarItemKeysReadAsNull(t *testing.T) {
 	data := testUnitLibraryRead(t, mustWire(t, libraryOptionsWire), `{"TypeOptions": [{"Type": "Movie", "MetadataFetchers": ["TheMovieDb"]}]}`)
 
 	var entries []TypeOptionsModel
-	if d := data.LibraryOptions.TypeOptions.ElementsAs(context.Background(), &entries, false); d.HasError() {
+	if d := data.LibraryOptions.TypeOptions.ElementsAs(t.Context(), &entries, false); d.HasError() {
 		t.Fatalf("elements: %v", d)
 	}
 	for name, v := range map[string]types.List{
@@ -134,7 +134,7 @@ func TestUnitTypeOptionsWithoutSimilarItemKeysReadAsNull(t *testing.T) {
 }
 
 func TestUnitPlanTypeOptionsByTypeUsesPriorEntryOfSameType(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	priorMovie := testUnitTypeOptions("Movie")
 	priorMovie.MetadataFetchers = testUnitStringList(t, "The Open Movie Database")
@@ -196,7 +196,7 @@ func TestUnitPlanTypeOptionsByTypeUsesPriorEntryOfSameType(t *testing.T) {
 }
 
 func TestUnitPlanTypeOptionsByTypePlansTheOrderOfAChangedListUnknown(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	prior := testUnitTypeOptions("Movie")
 	prior.MetadataFetchers = testUnitStringList(t, "TheMovieDb")
@@ -240,7 +240,7 @@ func TestUnitPlanTypeOptionsByTypePlansTheOrderOfAChangedListUnknown(t *testing.
 }
 
 func TestUnitUnknownWhileSharedKeysChange(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	listType := types.ListType{ElemType: types.StringType}.TerraformType(ctx)
 	s := schema.Schema{Attributes: map[string]schema.Attribute{
 		"entries": schema.ListNestedAttribute{Optional: true, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
@@ -301,7 +301,7 @@ func TestUnitUnknownWhileSharedKeysChange(t *testing.T) {
 // A combined list stands for two attributes, and a change to either one
 // makes it unknown.
 func TestUnitUnknownWhileSharedKeysChangeFollowsEverySibling(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := schema.Schema{Attributes: map[string]schema.Attribute{
 		"enabled":  schema.ListAttribute{ElementType: types.StringType, Optional: true, Computed: true},
 		"disabled": schema.ListAttribute{ElementType: types.StringType, Optional: true, Computed: true},
@@ -335,7 +335,7 @@ func TestUnitUnknownWhileSharedKeysChangeFollowsEverySibling(t *testing.T) {
 }
 
 func TestUnitLibraryUpdateWritesTheKeysItsListsShare(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	const served = `{"Name": "Movies", "ItemId": "item", "CollectionType": "movies", "Locations": ["/media"],
 		"LibraryOptions": {"TypeOptions": [{"Type": "Movie", "MetadataFetchers": ["A"], "MetadataFetcherOrder": ["B", "A"]}]}}`
 	var mu sync.Mutex
@@ -429,7 +429,7 @@ func TestUnitReplacedLibraryListsNameTheirReplacement(t *testing.T) {
 }
 
 func TestUnitLibraryReadAfterApplyKeepsPlannedNullTypeOptionsLists(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := mustWire(t, libraryOptionsWire)
 	data := testUnitLibraryRead(t, b, `{"TypeOptions": [{"Type": "Movie"}]}`)
 
@@ -451,7 +451,7 @@ func TestUnitLibraryReadAfterApplyKeepsPlannedNullTypeOptionsLists(t *testing.T)
 }
 
 func TestUnitLibraryReadAfterApplyReportsDroppedSimilarItemSettings(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	b := mustWire(t, libraryOptionsWire)
 	planned := `{"TypeOptions": [{"Type": "Movie", "SimilarItemProviders": ["Local Genre/Tag"], "SimilarItemProviderOrder": ["Local Genre/Tag"]}]}`
 
@@ -511,7 +511,7 @@ func testUnitAssertStringValidation(t *testing.T, a schema.StringAttribute, expe
 	for value, want := range expectError {
 		resp := validator.StringResponse{}
 		for _, v := range a.Validators {
-			v.ValidateString(context.Background(), validator.StringRequest{
+			v.ValidateString(t.Context(), validator.StringRequest{
 				Path:        path.Root("value"),
 				ConfigValue: types.StringValue(value),
 			}, &resp)
@@ -569,7 +569,7 @@ func TestUnitNetworkPathPlansPriorValueWhenUnset(t *testing.T) {
 	for name, test := range tests {
 		resp := planmodifier.StringResponse{PlanValue: test.plan}
 		for _, m := range a.PlanModifiers {
-			m.PlanModifyString(context.Background(), planmodifier.StringRequest{
+			m.PlanModifyString(t.Context(), planmodifier.StringRequest{
 				ConfigValue: test.config,
 				PlanValue:   resp.PlanValue,
 				StateValue:  test.state,
@@ -611,7 +611,7 @@ func TestUnitCollectionTypeChangeRequiresReplaceExceptEmptyToMixed(t *testing.T)
 	} {
 		resp := planmodifier.StringResponse{PlanValue: types.StringValue(test.plan)}
 		for _, m := range collectionType.PlanModifiers {
-			m.PlanModifyString(context.Background(), planmodifier.StringRequest{
+			m.PlanModifyString(t.Context(), planmodifier.StringRequest{
 				State:       tfsdk.State{Raw: existing},
 				Plan:        tfsdk.Plan{Raw: existing},
 				ConfigValue: types.StringValue(test.plan),
@@ -643,7 +643,7 @@ func TestUnitLibraryPathsReplaceOnlyForOtherPaths(t *testing.T) {
 		plan := testUnitStringList(t, test.plan...)
 		resp := planmodifier.ListResponse{PlanValue: plan}
 		for _, m := range paths.PlanModifiers {
-			m.PlanModifyList(context.Background(), planmodifier.ListRequest{
+			m.PlanModifyList(t.Context(), planmodifier.ListRequest{
 				State:       tfsdk.State{Raw: existing},
 				Plan:        tfsdk.Plan{Raw: existing},
 				ConfigValue: plan,
@@ -660,7 +660,7 @@ func TestUnitLibraryPathsReplaceOnlyForOtherPaths(t *testing.T) {
 // Jellyfin lists a library's locations sorted, which must not read as a
 // change to paths listed in another order.
 func TestUnitLibraryPathsKeepTheirOrder(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	for _, test := range []struct {
 		name        string
 		want        types.List
@@ -686,7 +686,7 @@ func TestUnitLibraryPathsKeepTheirOrder(t *testing.T) {
 // unchanged, Update writes nothing, as writing them would read back options
 // the older state does not hold.
 func TestUnitLibraryUpdateWritesNoOptionsOverOlderState(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected request %s %s", r.Method, r.URL)
 		http.NotFound(w, r)
@@ -721,7 +721,7 @@ func TestUnitLibraryUpdateWritesNoOptionsOverOlderState(t *testing.T) {
 }
 
 func TestUnitLibraryVersionErrorsFollowServerVersion(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	similarItems := path.Root("library_options").AtName("type_options").AtListIndex(0).AtName("similar_item_providers")
 	networkPath := path.Root("library_options").AtName("path_infos").AtListIndex(0).AtName("network_path")
 	root, config := testUnitLibraryGatedConfig(t)
@@ -760,7 +760,7 @@ func TestUnitLibraryVersionErrorsFollowServerVersion(t *testing.T) {
 func TestUnitLibraryVersionErrorWording(t *testing.T) {
 	root, config := testUnitLibraryGatedConfig(t)
 
-	diags := root.VersionErrors(context.Background(), config, func() (string, error) { return "10.11.11", nil })
+	diags := root.VersionErrors(t.Context(), config, func() (string, error) { return "10.11.11", nil })
 	var got []string
 	for _, d := range diags {
 		withPath, ok := d.(diag.DiagnosticWithPath)
@@ -783,7 +783,7 @@ func TestUnitLibraryVersionErrorWording(t *testing.T) {
 // path, which some Jellyfin versions lack.
 func testUnitLibraryGatedConfig(t *testing.T) (*wire.Binding, tfsdk.Config) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	root := mustWire(t, libraryWire)
 	data := testUnitLibraryRead(t, mustWire(t, libraryOptionsWire),
 		`{"TypeOptions": [{"Type": "Movie", "SimilarItemProviders": ["Local Genre/Tag"]}], "PathInfos": [{"Path": "/media", "NetworkPath": "//nas/media"}]}`)
@@ -835,7 +835,7 @@ func testUnitTFStringList(values ...string) tftypes.Value {
 
 func testUnitList(t *testing.T, elemType attr.Type, elements any) types.List {
 	t.Helper()
-	list, d := types.ListValueFrom(context.Background(), elemType, elements)
+	list, d := types.ListValueFrom(t.Context(), elemType, elements)
 	if d.HasError() {
 		t.Fatalf("building list: %v", d)
 	}
@@ -853,15 +853,15 @@ func testUnitLibraryRead(t *testing.T, b *wire.Binding, options string) LibraryR
 		Paths:          testUnitStringList(t, "/media"),
 		ItemID:         types.StringValue("item"),
 	}
-	if d := b.FlattenInto(testUnitOfferingNoSubtitleFetchers(), options, &data); d.HasError() {
+	if d := b.FlattenInto(testUnitOfferingNoSubtitleFetchers(t.Context()), options, &data); d.HasError() {
 		t.Fatalf("read: %v", d)
 	}
 	return data
 }
 
 // testUnitOfferingNoSubtitleFetchers lists nothing for any item type either.
-func testUnitOfferingNoSubtitleFetchers() context.Context {
-	return wire.WithAvailable(context.Background(), func(_ context.Context, list, scope string) ([]string, error) {
+func testUnitOfferingNoSubtitleFetchers(ctx context.Context) context.Context {
+	return wire.WithAvailable(ctx, func(_ context.Context, list, scope string) ([]string, error) {
 		switch {
 		case scope != "":
 			return nil, fmt.Errorf("item type %q: %w", scope, wire.ErrNotOffered)

@@ -171,7 +171,7 @@ func testAccPutBackSystemConfiguration(t *testing.T) {
 		t.Fatalf("reading the system configuration: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := testAccClient(t).UpdateSystemConfiguration(context.Background(), original); err != nil {
+		if err := testAccClient(t).UpdateSystemConfiguration(context.WithoutCancel(t.Context()), original); err != nil {
 			t.Errorf("putting back the system configuration: %v", err)
 		}
 	})
@@ -409,7 +409,7 @@ resource "jellyfin_system_configuration" "test" {
 // options for itemType.
 func testAccCheckMetadataOptions(t *testing.T, itemType string, want map[string][]string) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		cfg, err := testAccClient(t).GetSystemConfiguration(context.Background())
+		cfg, err := testAccClient(t).GetSystemConfiguration(t.Context())
 		if err != nil {
 			return err
 		}

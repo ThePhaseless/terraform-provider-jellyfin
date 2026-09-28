@@ -116,19 +116,20 @@ resource "jellyfin_user" "test" {
 }
 
 func TestAccUserResourcePasswordChange(t *testing.T) {
+	ctx := t.Context()
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserResourcePasswordConfig("firstpass123"),
-				Check:  testAccCheckUserSignIn("pwuser", "firstpass123", true),
+				Check:  testAccCheckUserSignIn(ctx, "pwuser", "firstpass123", true),
 			},
 			{
 				Config: testAccUserResourcePasswordConfig("secondpass123"),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckUserSignIn("pwuser", "secondpass123", true),
-					testAccCheckUserSignIn("pwuser", "firstpass123", false),
+					testAccCheckUserSignIn(ctx, "pwuser", "secondpass123", true),
+					testAccCheckUserSignIn(ctx, "pwuser", "firstpass123", false),
 				),
 			},
 		},
@@ -278,7 +279,7 @@ func (e expectPriorStateAttributesSet) CheckPlan(_ context.Context, req planchec
 // jellyfin_user.test outside Terraform.
 func testAccSetUserSubtitleLanguage(t *testing.T, language string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		ctx := context.Background()
+		ctx := t.Context()
 		c := testAccClient(t)
 		id := s.RootModule().Resources["jellyfin_user.test"].Primary.ID
 
@@ -309,7 +310,7 @@ func testAccSetUserSubtitleLanguage(t *testing.T, language string) resource.Test
 func testAccCheckUserSubtitleLanguage(t *testing.T, want string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		id := s.RootModule().Resources["jellyfin_user.test"].Primary.ID
-		raw, err := testAccClient(t).GetUserRaw(context.Background(), id)
+		raw, err := testAccClient(t).GetUserRaw(t.Context(), id)
 		if err != nil {
 			return err
 		}
@@ -329,9 +330,9 @@ func testAccCheckUserSubtitleLanguage(t *testing.T, want string) resource.TestCh
 	}
 }
 
-func testAccCheckUserSignIn(name, password string, wantAccepted bool) resource.TestCheckFunc {
+func testAccCheckUserSignIn(ctx context.Context, name, password string, wantAccepted bool) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		_, err := client.NewClient(os.Getenv("JELLYFIN_ENDPOINT"), "").AuthenticateByName(context.Background(), name, password)
+		_, err := client.NewClient(os.Getenv("JELLYFIN_ENDPOINT"), "").AuthenticateByName(ctx, name, password)
 		var httpErr *client.HTTPError
 		switch {
 		case wantAccepted && err != nil:

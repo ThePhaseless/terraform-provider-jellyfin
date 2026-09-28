@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -268,7 +267,7 @@ func TestUnitPluginRepositoryWritesTheServedList(t *testing.T) {
 
 // A rename plans the id Update stores, the new name.
 func TestUnitPluginRepositoryIDFollowsName(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := schemaOf(&PluginRepositoryResource{})
 	plan := tfsdk.Plan{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nil)}
 	if d := plan.Set(ctx, &PluginRepositoryResourceModel{ID: types.StringUnknown(), Name: types.StringValue("new"), URL: types.StringValue("u"), Enabled: types.BoolValue(true)}); d.HasError() {

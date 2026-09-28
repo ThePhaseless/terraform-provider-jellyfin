@@ -4,7 +4,6 @@
 package provider
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -246,7 +245,7 @@ func testAccWaitForLiveTVMediaLocations(t *testing.T, want ...string) resource.T
 		c := testAccClient(t)
 		deadline := time.Now().Add(timeout)
 		for {
-			current, err := c.GetLiveTVConfiguration(context.Background())
+			current, err := c.GetLiveTVConfiguration(t.Context())
 			if err != nil {
 				return err
 			}
