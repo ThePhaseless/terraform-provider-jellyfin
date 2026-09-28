@@ -106,8 +106,8 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 				},
 			},
 			"key": schema.StringAttribute{
-				Description:         "The task's key, the readable name Jellyfin lists next to its ID in GET /ScheduledTasks, such as RefreshLibrary (Scan Media Library) or PluginUpdates (Update Plugins). It matches exactly, case included, and set without task_id must belong to one task only. Set key, task_id, or both naming the same task; with only task_id set, key reads the task's key.",
-				MarkdownDescription: "The task's key, the readable name Jellyfin lists next to its ID in `GET /ScheduledTasks`, such as `RefreshLibrary` (*Scan Media Library*) or `PluginUpdates` (*Update Plugins*). It matches exactly, case included, and set without `task_id` must belong to one task only. Set `key`, `task_id`, or both naming the same task; with only `task_id` set, `key` reads the task's key.",
+				Description:         "The task's key, the readable name Jellyfin lists next to its ID in GET /ScheduledTasks, such as RefreshLibrary (Scan Media Library) or PluginUpdates (Update Plugins). It matches exactly, case included, and set without task_id must belong to one task only. Set key, task_id, or both naming the same task; with only task_id set, key reads the task's key. A key no task has fails the plan, terraform destroy included, so once its task is gone, such as after removing the plugin that added it, remove the resource from the configuration or destroy with -refresh=false.",
+				MarkdownDescription: "The task's key, the readable name Jellyfin lists next to its ID in `GET /ScheduledTasks`, such as `RefreshLibrary` (*Scan Media Library*) or `PluginUpdates` (*Update Plugins*). It matches exactly, case included, and set without `task_id` must belong to one task only. Set `key`, `task_id`, or both naming the same task; with only `task_id` set, `key` reads the task's key. A key no task has fails the plan, `terraform destroy` included, so once its task is gone, such as after removing the plugin that added it, remove the resource from the configuration or destroy with `-refresh=false`.",
 				Optional:            true,
 				Computed:            true,
 				Validators: []validator.String{
@@ -434,18 +434,21 @@ func findTask(tasks []client.ScheduledTask, ref string, byID bool) (string, diag
 	case 1:
 		return ids[0], nil
 	case 0:
-		what := "key"
-		if byID {
-			what = "ID or key"
-		}
 		slices.Sort(keys)
+		what, gone := "key", " If a plugin or a Jellyfin upgrade removed the task, remove the resource from the configuration, or destroy it with -refresh=false."
+		if byID {
+			what, gone = "ID or key", ""
+		}
 		return "", diag.NewErrorDiagnostic("Scheduled task not found", fmt.Sprintf(
-			"No scheduled task has the %s %q. Keys match exactly, case included. The server's tasks have these keys: %s.",
-			what, ref, strings.Join(keys, ", ")))
+			"No scheduled task has the %s %q. Keys match exactly, case included. The server's tasks have these keys: %s.%s",
+			what, ref, strings.Join(keys, ", "), gone))
+	}
+	choose := "set task_id to the ID of the one to manage"
+	if byID {
+		choose = "import the one to manage by its ID"
 	}
 	return "", diag.NewErrorDiagnostic("Ambiguous scheduled task key", fmt.Sprintf(
-		"Several tasks have the key %q (IDs %s); set task_id to the ID of the one to manage.",
-		ref, strings.Join(ids, ", ")))
+		"Several tasks have the key %q (IDs %s); %s.", ref, strings.Join(ids, ", "), choose))
 }
 
 func (r *ScheduledTaskResource) writeTriggers(ctx context.Context, data *ScheduledTaskResourceModel, operation string, diags *diag.Diagnostics, state *tfsdk.State) {

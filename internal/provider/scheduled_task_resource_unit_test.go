@@ -453,12 +453,14 @@ func TestFindTask(t *testing.T) {
 			ref: "RefreshInternetChannels", want: refreshChannelsID,
 		},
 		"key in another case": {
-			ref:        "refreshlibrary",
-			wantDetail: `No scheduled task has the key "refreshlibrary". Keys match exactly, case included. The server's tasks have these keys: PluginUpdates, RefreshInternetChannels, RefreshLibrary.`,
+			ref: "refreshlibrary",
+			wantDetail: `No scheduled task has the key "refreshlibrary". Keys match exactly, case included. The server's tasks have these keys: PluginUpdates, RefreshInternetChannels, RefreshLibrary.` +
+				` If a plugin or a Jellyfin upgrade removed the task, remove the resource from the configuration, or destroy it with -refresh=false.`,
 		},
 		"ID given as a key": {
-			ref:        scanMediaLibraryID,
-			wantDetail: `No scheduled task has the key "` + scanMediaLibraryID + `".`,
+			ref: scanMediaLibraryID,
+			wantDetail: `No scheduled task has the key "` + scanMediaLibraryID + `". Keys match exactly, case included. The server's tasks have these keys: PluginUpdates, RefreshInternetChannels, RefreshLibrary.` +
+				` If a plugin or a Jellyfin upgrade removed the task, remove the resource from the configuration, or destroy it with -refresh=false.`,
 		},
 		"key several tasks have": {
 			tasks: shared, ref: "Shared",
@@ -472,7 +474,11 @@ func TestFindTask(t *testing.T) {
 		},
 		"import of neither": {
 			ref: "Nothing", byID: true,
-			wantDetail: `No scheduled task has the ID or key "Nothing".`,
+			wantDetail: `No scheduled task has the ID or key "Nothing". Keys match exactly, case included. The server's tasks have these keys: PluginUpdates, RefreshInternetChannels, RefreshLibrary.`,
+		},
+		"import by a key several tasks have": {
+			tasks: shared, ref: "Shared", byID: true,
+			wantDetail: `Several tasks have the key "Shared" (IDs aaaa, bbbb); import the one to manage by its ID.`,
 		},
 	}
 
@@ -491,8 +497,8 @@ func TestFindTask(t *testing.T) {
 				}
 				return
 			}
-			if d == nil || !strings.HasPrefix(d.Detail(), tc.wantDetail) {
-				t.Fatalf("findTask(%q) = %q, %v; want an error starting %q", tc.ref, got, d, tc.wantDetail)
+			if d == nil || d.Detail() != tc.wantDetail {
+				t.Fatalf("findTask(%q) = %q, %v; want the error %q", tc.ref, got, d, tc.wantDetail)
 			}
 		})
 	}
