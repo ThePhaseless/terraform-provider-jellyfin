@@ -27,7 +27,6 @@ for i in $(seq 1 "$MAX_WAIT"); do
     sleep 1
 done
 
-# Create test media directories inside the container.
 echo "Creating test media directories..."
 docker compose --env-file "${ENV_FILE}" exec -T jellyfin mkdir -p /media/movies /media/tvshows
 echo "  - Media directories created"
