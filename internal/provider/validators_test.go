@@ -49,7 +49,7 @@ func TestUnsupportedLibraryOptionValidatorRejectsOnlySetValues(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	v := unsupportedLibraryOptionValidator{}
+	v := unsupportedLibraryOptionValidator
 	p := path.Root("library_options").AtName("disabled_metadata_savers")
 	validateBool := func(value types.Bool) diag.Diagnostics {
 		resp := validator.BoolResponse{}

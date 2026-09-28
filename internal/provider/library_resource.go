@@ -312,7 +312,7 @@ func libraryOptionsAttributes() map[string]schema.Attribute {
 			MarkdownDescription: desc + " " + unsupportedLibraryOptionMessage,
 			Optional:            true,
 			DeprecationMessage:  unsupportedLibraryOptionMessage,
-			Validators:          []validator.Bool{unsupportedLibraryOptionValidator{}},
+			Validators:          []validator.Bool{unsupportedLibraryOptionValidator},
 		}
 	}
 	unsupportedInt := func(desc string) schema.Int64Attribute {
@@ -321,7 +321,7 @@ func libraryOptionsAttributes() map[string]schema.Attribute {
 			MarkdownDescription: desc + " " + unsupportedLibraryOptionMessage,
 			Optional:            true,
 			DeprecationMessage:  unsupportedLibraryOptionMessage,
-			Validators:          []validator.Int64{unsupportedLibraryOptionValidator{}},
+			Validators:          []validator.Int64{unsupportedLibraryOptionValidator},
 		}
 	}
 	unsupportedString := func(desc string) schema.StringAttribute {
@@ -330,7 +330,7 @@ func libraryOptionsAttributes() map[string]schema.Attribute {
 			MarkdownDescription: desc + " " + unsupportedLibraryOptionMessage,
 			Optional:            true,
 			DeprecationMessage:  unsupportedLibraryOptionMessage,
-			Validators:          []validator.String{unsupportedLibraryOptionValidator{}},
+			Validators:          []validator.String{unsupportedLibraryOptionValidator},
 		}
 	}
 	unsupportedStringList := func(desc string) schema.ListAttribute {
@@ -340,7 +340,7 @@ func libraryOptionsAttributes() map[string]schema.Attribute {
 			MarkdownDescription: desc + " " + unsupportedLibraryOptionMessage,
 			Optional:            true,
 			DeprecationMessage:  unsupportedLibraryOptionMessage,
-			Validators:          []validator.List{unsupportedLibraryOptionValidator{}},
+			Validators:          []validator.List{unsupportedLibraryOptionValidator},
 		}
 	}
 
@@ -409,7 +409,7 @@ func pathInfoAttributes() map[string]schema.Attribute {
 			Optional:            true,
 			Sensitive:           sensitive,
 			DeprecationMessage:  unsupportedLibraryOptionMessage,
-			Validators:          []validator.String{unsupportedLibraryOptionValidator{}},
+			Validators:          []validator.String{unsupportedLibraryOptionValidator},
 		}
 	}
 	return map[string]schema.Attribute{

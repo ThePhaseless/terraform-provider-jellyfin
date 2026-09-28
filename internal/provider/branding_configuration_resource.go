@@ -75,32 +75,18 @@ func (r *BrandingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 			"login_disclaimer":      optionalString("The login disclaimer text."),
 			"custom_css":            optionalString("Custom CSS content."),
 			"splashscreen_enabled":  optionalBool("Whether the splash screen is enabled."),
-			"splashscreen_location": schema.StringAttribute{Description: "The splash screen location. " + splashscreenLocationUnsupportedMessage, MarkdownDescription: "The splash screen location. " + splashscreenLocationUnsupportedMessage, Optional: true, DeprecationMessage: splashscreenLocationUnsupportedMessage, Validators: []validator.String{splashscreenLocationValidator{}}},
+			"splashscreen_location": schema.StringAttribute{Description: "The splash screen location. " + splashscreenLocationUnsupportedMessage, MarkdownDescription: "The splash screen location. " + splashscreenLocationUnsupportedMessage, Optional: true, DeprecationMessage: splashscreenLocationUnsupportedMessage, Validators: []validator.String{splashscreenLocationValidator}},
 		},
 	}
 }
 
 const splashscreenLocationUnsupportedMessage = "Jellyfin ignores a splash screen location in the branding configuration, so setting it is an error. The attribute will be removed in a future release."
 
-// splashscreenLocationValidator rejects a configured splashscreen_location at
-// plan time. Jellyfin 10.11 and 12 drop the key and read it back as null,
-// which Terraform reports only as an inconsistent result after apply.
-type splashscreenLocationValidator struct{}
-
-func (splashscreenLocationValidator) Description(context.Context) string {
-	return "must not be set, because Jellyfin ignores the splash screen location"
-}
-
-func (v splashscreenLocationValidator) MarkdownDescription(ctx context.Context) string {
-	return v.Description(ctx)
-}
-
-func (splashscreenLocationValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
-	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
-		return
-	}
-	resp.Diagnostics.AddAttributeError(req.Path, "Unsupported branding option",
-		"Jellyfin ignores a splash screen location in the branding configuration, so the server would drop this value. Remove it from the configuration.")
+// splashscreenLocationValidator rejects a configured splashscreen_location:
+// Jellyfin 10.11 and 12 drop the key and read it back as null.
+var splashscreenLocationValidator = unsetValidator{
+	summary: "Unsupported branding option",
+	reason:  "Jellyfin ignores a splash screen location in the branding configuration, so the server would drop this value",
 }
 
 func (r *BrandingConfigurationResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
