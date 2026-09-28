@@ -247,6 +247,9 @@ func TestUserUpdatesRejectBlankIDWithoutSendingRequest(t *testing.T) {
 		if err := c.UpdateUserPassword(t.Context(), id, "", "new"); !errors.Is(err, errBlankUserID) {
 			t.Errorf("UpdateUserPassword(%q) error = %v, want errBlankUserID", id, err)
 		}
+		if err := c.UpdateUserPolicyRaw(t.Context(), id, `{"IsDisabled":true}`); !errors.Is(err, errBlankUserID) {
+			t.Errorf("UpdateUserPolicyRaw(%q) error = %v, want errBlankUserID", id, err)
+		}
 	}
 }
 

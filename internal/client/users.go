@@ -141,6 +141,9 @@ func (c *Client) GetUserPolicyRaw(ctx context.Context, id string) (string, error
 
 // UpdateUserPolicyRaw POSTs a raw policy JSON to /Users/{id}/Policy.
 func (c *Client) UpdateUserPolicyRaw(ctx context.Context, id, policyJSON string) error {
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("updating policy: %w", errBlankUserID)
+	}
 	if err := c.postRaw(ctx, fmt.Sprintf("/Users/%s/Policy", url.PathEscape(id)), policyJSON); err != nil {
 		return fmt.Errorf("updating policy for user %s: %w", id, err)
 	}
