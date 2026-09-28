@@ -176,6 +176,8 @@ func (g *generator) Generate(ctx context.Context) error {
 	return nil
 }
 
+const providerSource = "ThePhaseless/jellyfin"
+
 // terraformBlock names the provider's registry address, without which
 // terraform init looks for hashicorp/jellyfin.
 const terraformBlock = `terraform {
@@ -186,8 +188,6 @@ const terraformBlock = `terraform {
   }
 }
 `
-
-const providerSource = "ThePhaseless/jellyfin"
 
 // warnIfOtherConfiguration points out that Terraform rejects a second
 // required_providers entry for jellyfin, which configuration already in the
