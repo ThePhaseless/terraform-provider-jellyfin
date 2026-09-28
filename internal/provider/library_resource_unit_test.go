@@ -78,7 +78,7 @@ func TestUnitLibraryOptionsRoundTrip(t *testing.T) {
 }
 
 func TestUnitTypeOptionsWriteKeepsUnsetServerValues(t *testing.T) {
-	ctx := context.Background()
+	ctx := testUnitOfferingSubtitleFetchers()
 	b := testUnitLibraryOptionsWire(t)
 	base := map[string]json.RawMessage{
 		"TypeOptions": json.RawMessage(`[
@@ -338,7 +338,8 @@ func TestUnitLibraryUpdateWritesTheKeysItsListsShare(t *testing.T) {
 			posted = body.LibraryOptions
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/Libraries/AvailableOptions" && r.URL.Query().Get("libraryContentType") == "movies":
-			_, _ = io.WriteString(w, `{"SubtitleFetchers": [{"Name": "A"}, {"Name": "B"}, {"Name": "C"}]}`)
+			_, _ = io.WriteString(w, `{"SubtitleFetchers": [{"Name": "A"}, {"Name": "B"}, {"Name": "C"}],
+				"TypeOptions": [{"Type": "Movie", "MetadataFetchers": [{"Name": "A"}, {"Name": "B"}, {"Name": "C"}]}]}`)
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL)
 			http.NotFound(w, r)
@@ -355,7 +356,7 @@ func TestUnitLibraryUpdateWritesTheKeysItsListsShare(t *testing.T) {
 		planValue{options.AtName("subtitle_fetchers"), testUnitStringList(t, "B", "A")},
 		planValue{options.AtName("disabled_subtitle_fetchers"), types.ListUnknown(types.StringType)},
 		planValue{options.AtName("subtitle_fetcher_order"), types.ListUnknown(types.StringType)},
-		planValue{movie.AtName("metadata_fetchers"), testUnitStringList(t, "C")},
+		planValue{movie.AtName("metadata_fetchers"), testUnitStringList(t, "c")},
 		planValue{movie.AtName("metadata_fetcher_order"), types.ListUnknown(types.StringType)},
 	)
 	resp := resource.UpdateResponse{State: tfsdk.State(state)}
@@ -368,8 +369,9 @@ func TestUnitLibraryUpdateWritesTheKeysItsListsShare(t *testing.T) {
 	defer mu.Unlock()
 	checkSameJSON(t, jsonAt(t, posted, "SubtitleFetcherOrder"), `["B","A","C"]`)
 	checkSameJSON(t, jsonAt(t, posted, "DisabledSubtitleFetchers"), `["C"]`)
-	checkSameJSON(t, jsonAt(t, posted, "TypeOptions", 0, "MetadataFetchers"), `["C"]`)
-	checkSameJSON(t, jsonAt(t, posted, "TypeOptions", 0, "MetadataFetcherOrder"), `["C","B","A"]`)
+	checkSameJSON(t, jsonAt(t, posted, "TypeOptions", 0, "MetadataFetchers"), `["c"]`)
+	// Jellyfin enables c, but ranks only the name it offers, C.
+	checkSameJSON(t, jsonAt(t, posted, "TypeOptions", 0, "MetadataFetcherOrder"), `["c","C","B","A"]`)
 
 	for at, want := range map[string]types.List{
 		"subtitle_fetchers":          testUnitStringList(t, "B", "A"),
@@ -381,7 +383,7 @@ func TestUnitLibraryUpdateWritesTheKeysItsListsShare(t *testing.T) {
 		}
 	}
 	var order types.List
-	if d := resp.State.GetAttribute(ctx, movie.AtName("metadata_fetcher_order"), &order); d.HasError() || !order.Equal(testUnitStringList(t, "C", "B", "A")) {
+	if d := resp.State.GetAttribute(ctx, movie.AtName("metadata_fetcher_order"), &order); d.HasError() || !order.Equal(testUnitStringList(t, "c", "C", "B", "A")) {
 		t.Errorf("metadata_fetcher_order = %v after apply (%v), want the written order", order, d)
 	}
 }
@@ -759,11 +761,14 @@ func testUnitLibraryRead(t *testing.T, b *wire.Binding, options string) LibraryR
 }
 
 // testUnitOfferingSubtitleFetchers returns a context whose server offers the
-// subtitle fetchers named.
+// subtitle fetchers named, and lists nothing for any item type.
 func testUnitOfferingSubtitleFetchers(offered ...string) context.Context {
 	return wire.WithAvailable(context.Background(), func(_ context.Context, list, scope string) ([]string, error) {
-		if list != "SubtitleFetchers" || scope != "" {
-			return nil, fmt.Errorf("asked for %s of %q", list, scope)
+		switch {
+		case scope != "":
+			return nil, fmt.Errorf("item type %q: %w", scope, wire.ErrNotOffered)
+		case list != "SubtitleFetchers":
+			return nil, fmt.Errorf("asked for %s of the library", list)
 		}
 		return offered, nil
 	})

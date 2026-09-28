@@ -80,11 +80,12 @@ func (bb *binder) share(b *Binding, f *Field, opt *attrOption) {
 			f.Since = s.Since
 		}
 	}
-	if f.Mode != ModeComplement {
-		return
-	}
-	if strings.TrimSpace(opt.offered) == "" {
+	switch {
+	case f.Mode == ModeComplement && strings.TrimSpace(opt.offered) == "":
 		bb.errorf("%s: Complement needs the name of the offered list", f.Path)
+	case opt.offered == "" && opt.scope != "":
+		bb.errorf("%s: the scope attribute %q scopes no offered list", f.Path, opt.scope)
+		return
 	}
 	f.Offered = opt.offered
 	if opt.scope != "" {
@@ -131,11 +132,15 @@ func (b *Binding) writeShared(ctx context.Context, doc map[string]json.RawMessag
 		return diags
 	}
 
+	scope, scoped, diags := b.scopeOf(obj, f)
+	if diags.HasError() {
+		return diags
+	}
 	var values [][]string
 	if f.Mode == ModeComplement {
-		scope, diags := b.writtenScope(obj, f, at)
-		if diags.HasError() {
-			return diags
+		if !scoped {
+			return diag.Diagnostics{diag.NewAttributeErrorDiagnostic(at, "Missing "+f.Scope.Name,
+				fmt.Sprintf("%s is written for the %s next to it, so set %s.", at, f.Scope.Name, f.Scope.Name))}
 		}
 		offered, listed, diags := offeredNames(ctx, f, scope, at)
 		if diags.HasError() {
@@ -152,7 +157,14 @@ func (b *Binding) writeShared(ctx context.Context, doc map[string]json.RawMessag
 		order, disabled := complementOf(names, offered)
 		values = [][]string{order, disabled}
 	} else {
-		values = [][]string{ordered(names, servedStrings(ctx, doc, targets[0].keyPath, at))}
+		var offered []string
+		if f.Offered != "" && scoped {
+			offered, _, diags = offeredNames(ctx, f, scope, at)
+			if diags.HasError() {
+				return diags
+			}
+		}
+		values = [][]string{ordered(names, servedStrings(ctx, doc, targets[0].keyPath, at), offered)}
 	}
 
 	for i, sd := range targets {
@@ -171,21 +183,22 @@ func (b *Binding) writeShared(ctx context.Context, doc map[string]json.RawMessag
 	return nil
 }
 
-func (b *Binding) writtenScope(obj types.Object, f *Field, at path.Path) (string, diag.Diagnostics) {
+// scopeOf returns the value of f's scope attribute in obj, or "" when f has
+// none; scoped is false while that attribute is null or unknown.
+func (b *Binding) scopeOf(obj types.Object, f *Field) (scope string, scoped bool, diags diag.Diagnostics) {
 	if f.Scope == nil {
-		return "", nil
+		return "", true, nil
 	}
 	sd, ok := b.docOf(f.Scope)
 	if !ok {
-		return "", missingShare(f)
+		return "", false, missingShare(f)
 	}
 	sv, _ := valueAt(obj, sd.attrPath)
 	s, ok := sv.(types.String)
 	if !ok || s.IsNull() || s.IsUnknown() {
-		return "", diag.Diagnostics{diag.NewAttributeErrorDiagnostic(at, "Missing "+f.Scope.Name,
-			fmt.Sprintf("%s is written for the %s next to it, so set %s.", at, f.Scope.Name, f.Scope.Name))}
+		return "", false, nil
 	}
-	return s.ValueString(), nil
+	return s.ValueString(), true, nil
 }
 
 // offeredNames asks the context's AvailableFunc; listed is false when the
@@ -288,13 +301,13 @@ func containsFold(names []string, name string) bool {
 
 // ordered returns names followed by the served names it leaves out, so the
 // names keep their priority over every name the order held before. A served
-// name that matches one of names only ignoring case follows it, as it may be
-// the spelling Jellyfin ranks the provider by.
-func ordered(names, served []string) []string {
+// or offered name that matches one of names only ignoring case follows it, as
+// it may be the spelling Jellyfin ranks the provider by.
+func ordered(names, served, offered []string) []string {
 	out := []string{}
 	for _, n := range names {
 		out = append(out, n)
-		for _, s := range served {
+		for _, s := range slices.Concat(served, offered) {
 			if strings.EqualFold(s, n) && !slices.Contains(names, s) && !slices.Contains(out, s) {
 				out = append(out, s)
 			}

@@ -551,6 +551,32 @@ func TestAccLibraryResourceProviderLists(t *testing.T) {
 	})
 }
 
+// Jellyfin enables a fetcher whatever the case of its name, but ranks only the
+// name it offers, and a new library's order holds no name to take it from.
+func TestAccLibraryResourceOrderTakesTheOfferedSpelling(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckNoLibraryNamed(t, "TestLists"),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccLibraryProviderListsConfig(`
+    type_options = [{
+      type           = "Movie"
+      image_fetchers = ["the open movie database", "TheMovieDb"]
+    }]`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.type_options.0.image_fetchers.0", "the open movie database"),
+					testAccCheckLibraryTypeOptions(t, "TestLists", "Movie", map[string][]string{
+						"ImageFetchers":     {"the open movie database", "TheMovieDb"},
+						"ImageFetcherOrder": {"the open movie database", "The Open Movie Database", "TheMovieDb"},
+					}),
+				),
+			},
+		},
+	})
+}
+
 func TestAccLibraryResourceCreateWithUnofferedSubtitleFetcherLeavesNoLibrary(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },

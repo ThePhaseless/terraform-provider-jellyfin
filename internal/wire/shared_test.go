@@ -65,7 +65,7 @@ func sharedAttrs() map[string]schema.Attribute {
 func sharedOptions() []Option {
 	return []Option{
 		MergeByKey("types", "type"),
-		Orders("types.fetchers", "fetcher_order"),
+		Orders("types.fetchers", "fetcher_order", "Fetchers", "type"),
 		Complement("enabled", "order", "disabled", "Fetchers", ""),
 		Complement("opts.fetchers", "fetcher_order", "disabled_fetchers", "Fetchers", "item_type"),
 	}
@@ -114,7 +114,7 @@ func TestUnitSharedKeysDescribe(t *testing.T) {
 		"order -> Lib.Order []string",
 		"types -> Lib.Types []#TypeOpt merge-by=type",
 		"types.fetcher_order -> TypeOpt.FetcherOrder []string",
-		"types.fetchers -> TypeOpt.Fetchers []string orders=FetcherOrder",
+		"types.fetchers -> TypeOpt.Fetchers []string orders=FetcherOrder spelt-as=Fetchers/type",
 		"types.type -> TypeOpt.Type string",
 	}, "\n")
 	if got := strings.Join(sharedBinding(t).Describe(), "\n"); got != want {
@@ -124,8 +124,9 @@ func TestUnitSharedKeysDescribe(t *testing.T) {
 
 func TestUnitOrdersWritesTheOrderKeyUnlessItsAttributeWritesIt(t *testing.T) {
 	b := sharedBinding(t)
+	ctx := WithAvailable(context.Background(), offering(map[string][]string{"Movie": {"A", "B", "C"}}, new([]string)))
 	served := `{"Types": [{"Type": "Movie", "Fetchers": ["A", "B"], "FetcherOrder": ["b", "C", "A"]}]}`
-	model, d := b.Flatten(context.Background(), doc(t, served), types.ObjectNull(b.AttrTypes))
+	model, d := b.Flatten(ctx, doc(t, served), types.ObjectNull(b.AttrTypes))
 	if d.HasError() {
 		t.Fatal(d)
 	}
@@ -141,12 +142,55 @@ func TestUnitOrdersWritesTheOrderKeyUnlessItsAttributeWritesIt(t *testing.T) {
 		m := with(t, model, "types[0].fetchers", strs("A"))
 		m = with(t, m, "types[0].fetcher_order", c.order)
 		got := doc(t, served)
-		if d := b.Overlay(context.Background(), got, object(t, m)); d.HasError() {
+		if d := b.Overlay(ctx, got, object(t, m)); d.HasError() {
 			t.Fatalf("%s: %v", c.name, d)
 		}
 		if s := canonical(t, jsonValue(t, got["Types"], 0)); s != c.want {
 			t.Errorf("with the order %s, the entry is %s, want %s", c.name, s, c.want)
 		}
+	}
+}
+
+func TestUnitOrdersSpellsEachNameAsTheServerOffersItForTheEntrysScope(t *testing.T) {
+	b := sharedBinding(t)
+	served := `{"Types": [{"Type": "Movie", "Fetchers": [], "FetcherOrder": []}]}`
+	model, d := b.Flatten(context.Background(), doc(t, served), types.ObjectNull(b.AttrTypes))
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	for _, c := range []struct {
+		name  string
+		scope attr.Value
+		want  string
+		asked string
+	}{
+		{"an offered scope", types.StringValue("Movie"), `["a","A","B"]`, "Fetchers/Movie"},
+		{"a scope the server does not list", types.StringValue("Trailer"), `["a","B"]`, "Fetchers/Trailer"},
+		{"an unknown scope", types.StringUnknown(), `["a","B"]`, ""},
+	} {
+		var asked []string
+		ctx := WithAvailable(context.Background(), offering(map[string][]string{"Movie": {"C", "B", "A"}}, &asked))
+		m := with(t, model, "types[0].type", c.scope)
+		m = with(t, m, "types[0].fetchers", strs("a", "B"))
+		m = with(t, m, "types[0].fetcher_order", types.ListUnknown(types.StringType))
+		got := doc(t, served)
+		if d := b.Overlay(ctx, got, object(t, m)); d.HasError() {
+			t.Fatalf("%s: %v", c.name, d)
+		}
+		entry, ok := jsonValue(t, got["Types"], 0).(map[string]any)
+		if !ok {
+			t.Fatalf("%s: wrote the entry %s", c.name, got["Types"])
+		}
+		if s := canonical(t, entry["FetcherOrder"]); s != c.want || strings.Join(asked, " ") != c.asked {
+			t.Errorf("%s: wrote the order %s after asking for %q, want %s after asking for %q", c.name, s, asked, c.want, c.asked)
+		}
+	}
+
+	failing := WithAvailable(context.Background(), func(context.Context, string, string) ([]string, error) { return nil, errors.New("offline") })
+	m := with(t, model, "types[0].fetchers", strs("a"))
+	m = with(t, m, "types[0].fetcher_order", types.ListUnknown(types.StringType))
+	if d := b.Overlay(failing, doc(t, served), object(t, m)); !d.HasError() || !strings.Contains(d[0].Detail(), "offline") {
+		t.Errorf("a failed lookup is not reported: %v", d)
 	}
 }
 
@@ -315,29 +359,33 @@ func TestUnitBindRejectsSharedKeysItCannotWrite(t *testing.T) {
 		want string
 	}{
 		"an order attribute the object lacks": {
-			opts: append(neither, Orders("types.fetchers", "nope")),
+			opts: append(neither, Orders("types.fetchers", "nope", "", "")),
 			want: `types.fetchers: the order attribute "nope" is no attribute of the same object`,
 		},
 		"an order attribute that is no list": {
-			opts: append(neither, Orders("types.fetchers", "type")),
+			opts: append(neither, Orders("types.fetchers", "type", "", "")),
 			want: "types.fetchers: the order attribute types.type must be a configurable",
 		},
 		"ordering a string": {
-			opts: append(neither, Orders("name", "order")),
+			opts: append(neither, Orders("name", "order", "", "")),
 			want: "name: Orders and Complement need a list of strings",
 		},
 		"ordering twice": {
-			opts: append(neither, Orders("types.fetchers", "fetcher_order"), Orders("types.fetchers", "fetcher_order")),
+			opts: append(neither, Orders("types.fetchers", "fetcher_order", "", ""), Orders("types.fetchers", "fetcher_order", "", "")),
 			want: "types.fetchers is given Orders or Complement twice",
 		},
 		"orders on a keyless attribute": {
-			opts: []Option{MergeByKey("types", "type"), NeverSent("opts.fetchers", "unbound"), NeverSent("enabled", "unbound"), Orders("enabled", "order")},
+			opts: []Option{MergeByKey("types", "type"), NeverSent("opts.fetchers", "unbound"), NeverSent("enabled", "unbound"), Orders("enabled", "order", "", "")},
 			want: "enabled is never sent, so it takes no Orders option",
 		},
 		"two attributes on one key": {
 			opts: []Option{MergeByKey("types", "type"), NeverSent("opts.fetchers", "unbound"),
-				Complement("enabled", "order", "disabled", "Fetchers", ""), Orders("disabled", "order")},
+				Complement("enabled", "order", "disabled", "Fetchers", ""), Orders("disabled", "order", "", "")},
 			want: "disabled and enabled both write the key of order",
+		},
+		"a scope without an offered list": {
+			opts: append(neither, Orders("types.fetchers", "fetcher_order", "", "type")),
+			want: `types.fetchers: the scope attribute "type" scopes no offered list`,
 		},
 		"a complement with a key of its own": {
 			opts: append(sharedOptions(), Key("enabled", "Name")),
@@ -372,23 +420,25 @@ func TestUnitComplementFunctions(t *testing.T) {
 	if got := fmt.Sprint(enabledOf([]string{"b", "A"}, nil, []string{"A", "B"})); got != "[b A B]" {
 		t.Errorf("enabledOf = %s, want B last, as an order that spells it otherwise does not rank it", got)
 	}
-	if got, _ := marshal(ordered(nil, nil)); string(got) != "[]" {
+	if got, _ := marshal(ordered(nil, nil, nil)); string(got) != "[]" {
 		t.Errorf("an empty order encodes as %s", got)
 	}
 }
 
-func TestUnitOrderedRanksEachServedSpellingOfANameWithIt(t *testing.T) {
+func TestUnitOrderedRanksEachServedOrOfferedSpellingOfANameWithIt(t *testing.T) {
 	for _, c := range []struct {
-		names, served []string
-		want          string
+		names, served, offered []string
+		want                   string
 	}{
-		{[]string{"C"}, []string{"a", "C", "B"}, "[C a B]"},
-		{[]string{"C"}, []string{"a", "c", "B"}, "[C c a B]"},
-		{[]string{"themoviedb", "The Open Movie Database"}, []string{"TheMovieDb", "The Open Movie Database"}, "[themoviedb TheMovieDb The Open Movie Database]"},
-		{[]string{"A", "a"}, []string{"a", "A"}, "[A a]"},
+		{[]string{"C"}, []string{"a", "C", "B"}, nil, "[C a B]"},
+		{[]string{"C"}, []string{"a", "c", "B"}, nil, "[C c a B]"},
+		{[]string{"themoviedb", "The Open Movie Database"}, []string{"TheMovieDb", "The Open Movie Database"}, nil, "[themoviedb TheMovieDb The Open Movie Database]"},
+		{[]string{"A", "a"}, []string{"a", "A"}, nil, "[A a]"},
+		{[]string{"themoviedb", "The Open Movie Database"}, nil, []string{"The Open Movie Database", "TheMovieDb", "Screen Grabber"}, "[themoviedb TheMovieDb The Open Movie Database]"},
+		{[]string{"c"}, []string{"B", "c"}, []string{"C", "B"}, "[c C B]"},
 	} {
-		if got := fmt.Sprint(ordered(c.names, c.served)); got != c.want {
-			t.Errorf("ordered(%q, %q) = %s, want %s", c.names, c.served, got, c.want)
+		if got := fmt.Sprint(ordered(c.names, c.served, c.offered)); got != c.want {
+			t.Errorf("ordered(%q, %q, %q) = %s, want %s", c.names, c.served, c.offered, got, c.want)
 		}
 	}
 }

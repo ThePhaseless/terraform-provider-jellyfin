@@ -172,14 +172,18 @@ func VersionMessage(attrPath string, message func(VersionGap) (summary, detail s
 // key of orderAttr, a list attribute of the same object: its names, then the
 // names orderAttr's key serves that it leaves out. orderAttr still writes its
 // key itself whenever it has a value to write, so Orders writes it only while
-// orderAttr has none, such as while it is unknown.
-func Orders(attrPath, orderAttr string) Option {
+// orderAttr has none, such as while it is unknown. Jellyfin enables a name
+// whatever its case but ranks only the exact name, so after each name comes
+// every served or offered name that differs from it only in case. The offered
+// names are those Complement describes for offered and scopeAttr; with
+// offered "", Orders asks for none.
+func Orders(attrPath, orderAttr, offered, scopeAttr string) Option {
 	return func(o *options) {
 		a := o.attr(attrPath)
 		if a.shares != nil {
 			o.errs = append(o.errs, fmt.Sprintf("%s is given Orders or Complement twice", attrPath))
 		}
-		a.shares = []string{orderAttr}
+		a.shares, a.offered, a.scope = []string{orderAttr}, offered, scopeAttr
 	}
 }
 

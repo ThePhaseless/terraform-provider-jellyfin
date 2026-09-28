@@ -91,6 +91,13 @@ func describeField(x *Binding, f *Field) string {
 	for _, s := range f.Shares {
 		flags = append(flags, "orders="+s.key())
 	}
+	if f.Offered != "" {
+		spelt := "spelt-as=" + f.Offered
+		if f.Scope != nil {
+			spelt += "/" + f.Scope.Name
+		}
+		flags = append(flags, spelt)
+	}
 	if f.Document {
 		flags = append(flags, "document")
 	}

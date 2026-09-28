@@ -369,9 +369,10 @@ func TestGetAvailableLibraryOptionsAsksForTheContentType(t *testing.T) {
 		writeJSON(t, w, map[string]any{
 			"SubtitleFetchers": []map[string]any{{"Name": "Open Subtitles", "DefaultEnabled": true}},
 			"TypeOptions": []map[string]any{{
-				"Type":             "Movie",
-				"MetadataFetchers": []map[string]any{{"Name": "TheMovieDb", "DefaultEnabled": true}},
-				"ImageFetchers":    []map[string]any{{"Name": "Screen Grabber", "DefaultEnabled": false}},
+				"Type":                 "Movie",
+				"MetadataFetchers":     []map[string]any{{"Name": "TheMovieDb", "DefaultEnabled": true}},
+				"ImageFetchers":        []map[string]any{{"Name": "Screen Grabber", "DefaultEnabled": false}},
+				"SimilarItemProviders": []map[string]any{{"Name": "Local Genre/Tag", "DefaultEnabled": true}},
 			}},
 		})
 	}))
@@ -384,9 +385,10 @@ func TestGetAvailableLibraryOptionsAsksForTheContentType(t *testing.T) {
 	want := AvailableLibraryOptions{
 		SubtitleFetchers: []AvailableOption{{Name: "Open Subtitles"}},
 		TypeOptions: []AvailableLibraryTypeInfo{{
-			Type:             "Movie",
-			MetadataFetchers: []AvailableOption{{Name: "TheMovieDb"}},
-			ImageFetchers:    []AvailableOption{{Name: "Screen Grabber"}},
+			Type:                 "Movie",
+			MetadataFetchers:     []AvailableOption{{Name: "TheMovieDb"}},
+			ImageFetchers:        []AvailableOption{{Name: "Screen Grabber"}},
+			SimilarItemProviders: []AvailableOption{{Name: "Local Genre/Tag"}},
 		}},
 	}
 	if !reflect.DeepEqual(*got, want) {

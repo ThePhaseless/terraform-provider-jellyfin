@@ -5,6 +5,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -20,8 +21,8 @@ import (
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
-// offeredProviders answers the Complement attributes' wire.AvailableFunc from
-// GET /Libraries/AvailableOptions, asking once per content type.
+// offeredProviders answers wire.AvailableFunc from GET
+// /Libraries/AvailableOptions, asking once per content type.
 type offeredProviders struct {
 	c      *client.Client
 	served map[string]*client.AvailableLibraryOptions
@@ -54,18 +55,42 @@ func optionNames(options []client.AvailableOption) []string {
 	return out
 }
 
-// forLibrary answers the lists of a whole library of collectionType.
-func (o *offeredProviders) forLibrary(collectionType string) wire.AvailableFunc {
+// forLibrary answers the lists of a library of contentType: its own, and
+// those of each item type it holds.
+func (o *offeredProviders) forLibrary(contentType string) wire.AvailableFunc {
 	return func(ctx context.Context, offered, scope string) ([]string, error) {
-		if offered != "SubtitleFetchers" || scope != "" {
-			return nil, fmt.Errorf("a library lists no %s for %q", offered, scope)
-		}
-		served, err := o.forContentType(ctx, collectionType)
+		served, err := o.forContentType(ctx, contentType)
 		if err != nil {
 			return nil, err
 		}
+		if scope != "" {
+			return typeOptionNames(served, offered, scope)
+		}
+		if offered != "SubtitleFetchers" {
+			return nil, fmt.Errorf("a library lists no %s", offered)
+		}
 		return optionNames(served.SubtitleFetchers), nil
 	}
+}
+
+// typeOptionNames answers the list offered of the item type itemType, or
+// wraps wire.ErrNotOffered when served has no such item type.
+func typeOptionNames(served *client.AvailableLibraryOptions, offered, itemType string) ([]string, error) {
+	for _, t := range served.TypeOptions {
+		if !strings.EqualFold(t.Type, itemType) {
+			continue
+		}
+		switch offered {
+		case "MetadataFetchers":
+			return optionNames(t.MetadataFetchers), nil
+		case "ImageFetchers":
+			return optionNames(t.ImageFetchers), nil
+		case "SimilarItemProviders":
+			return optionNames(t.SimilarItemProviders), nil
+		}
+		return nil, fmt.Errorf("an item type lists no %s", offered)
+	}
+	return nil, fmt.Errorf("item type %q: %w", itemType, wire.ErrNotOffered)
 }
 
 // contentTypesByItemType are library content types that between them hold
@@ -81,17 +106,9 @@ func (o *offeredProviders) byItemType(ctx context.Context, offered, scope string
 		if err != nil {
 			return nil, err
 		}
-		for _, t := range served.TypeOptions {
-			if !strings.EqualFold(t.Type, scope) {
-				continue
-			}
-			switch offered {
-			case "MetadataFetchers":
-				return optionNames(t.MetadataFetchers), nil
-			case "ImageFetchers":
-				return optionNames(t.ImageFetchers), nil
-			}
-			return nil, fmt.Errorf("an item type lists no %s", offered)
+		names, err := typeOptionNames(served, offered, scope)
+		if !errors.Is(err, wire.ErrNotOffered) {
+			return names, err
 		}
 	}
 	return nil, fmt.Errorf("item type %q: %w", scope, wire.ErrNotOffered)

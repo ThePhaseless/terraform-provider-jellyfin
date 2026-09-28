@@ -138,10 +138,12 @@ type AvailableLibraryOptions struct {
 }
 
 // AvailableLibraryTypeInfo is what Jellyfin offers for one item type.
+// Jellyfin 10.x lists no SimilarItemProviders.
 type AvailableLibraryTypeInfo struct {
-	Type             string            `json:"Type"`
-	MetadataFetchers []AvailableOption `json:"MetadataFetchers"`
-	ImageFetchers    []AvailableOption `json:"ImageFetchers"`
+	Type                 string            `json:"Type"`
+	MetadataFetchers     []AvailableOption `json:"MetadataFetchers"`
+	ImageFetchers        []AvailableOption `json:"ImageFetchers"`
+	SimilarItemProviders []AvailableOption `json:"SimilarItemProviders"`
 }
 
 // AvailableOption names one provider Jellyfin offers.
