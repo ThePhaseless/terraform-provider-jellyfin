@@ -153,9 +153,9 @@ variable "oidc_client_secret" {
 - `webauthn_origins` (List of String) WebAuthn allowed origins.
 - `webauthn_rp_id` (String) WebAuthn relying party ID.
 - `webhook_ed25519_private_key` (String, Sensitive) Webhook Ed25519 private key.
-- `webhook_headers` (List of String) Extra webhook headers, one "Name: Value" entry each.
+- `webhook_headers` (List of String, Sensitive) Extra webhook headers, one "Name: Value" entry each. Sensitive, as receivers authenticate with a header such as Authorization.
 - `webhook_secret` (String, Sensitive) Webhook signing secret.
-- `webhook_url` (String) Webhook notification URL.
+- `webhook_url` (String, Sensitive) Webhook notification URL. Sensitive, as receivers such as Discord and Slack take a token in the URL.
 
 ### Read-Only
 

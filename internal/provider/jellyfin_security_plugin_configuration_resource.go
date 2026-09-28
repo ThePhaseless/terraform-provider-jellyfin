@@ -282,6 +282,11 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 			},
 		}
 	}
+	sensitiveStringList := func(desc string) schema.ListAttribute {
+		a := optionalStringList(desc)
+		a.Sensitive = true
+		return a
+	}
 
 	// Attributes of list elements take no UseStateForUnknown, which pairs
 	// elements by index, so that removing or reordering an element would plan
@@ -399,9 +404,9 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 			"nat_hairpin_self_ip_bypass":         optionalBool("Enable NAT hairpin self-IP bypass."),
 			"default_max_concurrent_sessions":    optionalInt("Default max concurrent sessions per user (0 = unlimited)."),
 			"enrollment_deadline":                enrollmentDeadline,
-			"webhook_url":                        optionalString("Webhook notification URL."),
+			"webhook_url":                        sensitiveString("Webhook notification URL. Sensitive, as receivers such as Discord and Slack take a token in the URL."),
 			"webhook_secret":                     sensitiveString("Webhook signing secret."),
-			"webhook_headers":                    optionalStringList("Extra webhook headers, one \"Name: Value\" entry each."),
+			"webhook_headers":                    sensitiveStringList("Extra webhook headers, one \"Name: Value\" entry each. Sensitive, as receivers authenticate with a header such as Authorization."),
 			"geo_ip_asn_db_path":                 optionalString("Path to GeoIP ASN database."),
 			"geo_ip_country_db_path":             optionalString("Path to GeoIP country database."),
 			"webauthn_rp_id":                     optionalString("WebAuthn relying party ID."),
