@@ -34,8 +34,8 @@ resource "jellyfin_scheduled_task" "example" {
 
 ### Optional
 
-- `key` (String) The task's key, the readable name Jellyfin lists next to its ID in `GET /ScheduledTasks`, such as `RefreshLibrary` (*Scan Media Library*) or `PluginUpdates` (*Update Plugins*). It matches exactly, case included. Set `key` or `task_id`, not both; with `task_id` set, `key` reads the task's key.
-- `task_id` (String) The task's ID, which Jellyfin derives from an MD5 hash of the full name of the .NET type that runs the task and matches ignoring case, such as `7738148ffcd07979c7ceb148e06b3aed` for *Scan Media Library*. Set `key` or `task_id`, not both; with `key` set, `task_id` reads the ID of the task the key selects.
+- `key` (String) The task's key, the readable name Jellyfin lists next to its ID in `GET /ScheduledTasks`, such as `RefreshLibrary` (*Scan Media Library*) or `PluginUpdates` (*Update Plugins*). It matches exactly, case included, and set without `task_id` must belong to one task only. Set `key`, `task_id`, or both naming the same task; with only `task_id` set, `key` reads the task's key.
+- `task_id` (String) The task's ID, which Jellyfin derives from an MD5 hash of the full name of the .NET type that runs the task and matches ignoring case, such as `7738148ffcd07979c7ceb148e06b3aed` for *Scan Media Library*. Set `key`, `task_id`, or both naming the same task; with only `key` set, `task_id` reads the ID of the task the key selects.
 
 ### Read-Only
 

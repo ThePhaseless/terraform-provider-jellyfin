@@ -175,7 +175,6 @@ resource "jellyfin_scheduled_task" "test" {
 
 func TestAccScheduledTaskResourceKey(t *testing.T) {
 	const name = "jellyfin_scheduled_task.test"
-	const cleanLogDirectoryID = "1c8ede62c521bea0bf851344f5b8ca40"
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
@@ -206,6 +205,20 @@ func TestAccScheduledTaskResourceKey(t *testing.T) {
 				ImportStateVerify: true,
 			},
 			{
+				ResourceName:    name,
+				ImportState:     true,
+				ImportStateKind: resource.ImportBlockWithID,
+				ImportStateId:   "RefreshLibrary",
+				GenerateConfig:  true,
+			},
+			{
+				ResourceName:    name,
+				ImportState:     true,
+				ImportStateKind: resource.ImportBlockWithID,
+				ImportStateId:   scanMediaLibraryID,
+				GenerateConfig:  true,
+			},
+			{
 				Config: testAccScheduledTaskIntervalConfig(`key = "RefreshLibrary"`, 864000000000),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -215,7 +228,6 @@ func TestAccScheduledTaskResourceKey(t *testing.T) {
 				},
 				Check: resource.TestCheckResourceAttr(name, "triggers.0.interval_ticks", "864000000000"),
 			},
-			// The same task by its ID.
 			{
 				Config: testAccScheduledTaskIntervalConfig(`task_id = "`+scanMediaLibraryID+`"`, 864000000000),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
@@ -227,12 +239,66 @@ func TestAccScheduledTaskResourceKey(t *testing.T) {
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(name, plancheck.ResourceActionReplace),
-						plancheck.ExpectKnownValue(name, tfjsonpath.New("task_id"), knownvalue.StringExact(cleanLogDirectoryID)),
+						plancheck.ExpectKnownValue(name, tfjsonpath.New("task_id"), knownvalue.StringExact(cleanLogFilesID)),
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(name, "id", cleanLogDirectoryID),
+					resource.TestCheckResourceAttr(name, "id", cleanLogFilesID),
 					resource.TestCheckResourceAttr(name, "key", "CleanLogFiles"),
+				),
+			},
+		},
+	})
+}
+
+func testAccScheduledTaskFromDataConfig(input, selector string) string {
+	return fmt.Sprintf(`
+resource "terraform_data" "selector" {
+  input = %q
+}
+`, input) + testAccScheduledTaskConfig(selector)
+}
+
+func TestAccScheduledTaskResourceKeyUnknownAtPlan(t *testing.T) {
+	const name = "jellyfin_scheduled_task.test"
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccScheduledTaskFromDataConfig("RefreshLibrary", "key = terraform_data.selector.output"),
+				Check:  resource.TestCheckResourceAttr(name, "task_id", scanMediaLibraryID),
+			},
+			{
+				Config: testAccScheduledTaskFromDataConfig("CleanLogFiles", "key = terraform_data.selector.output"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(name, plancheck.ResourceActionReplace)},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(name, "id", cleanLogFilesID),
+					resource.TestCheckResourceAttr(name, "task_id", cleanLogFilesID),
+					resource.TestCheckResourceAttr(name, "key", "CleanLogFiles"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccScheduledTaskResourceKeyWithTaskIDUnknownAtPlan(t *testing.T) {
+	const name = "jellyfin_scheduled_task.test"
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccScheduledTaskFromDataConfig(cleanLogFilesID, `key = "RefreshLibrary"`+"\n  task_id = terraform_data.selector.output"),
+				ExpectError: regexp.MustCompile(`task_id\s+"` + cleanLogFilesID + `"\s+names\s+the\s+task\s+with\s+the\s+key\s+"CleanLogFiles"`),
+			},
+			{
+				Config: testAccScheduledTaskFromDataConfig(scanMediaLibraryID, `key = "RefreshLibrary"`+"\n  task_id = terraform_data.selector.output"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(name, "id", scanMediaLibraryID),
+					resource.TestCheckResourceAttr(name, "key", "RefreshLibrary"),
 				),
 			},
 		},
@@ -245,9 +311,9 @@ func TestAccScheduledTaskResourceRejectsSelectorsAtPlan(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config:      testAccScheduledTaskConfig(`key = "RefreshLibrary"` + "\n  task_id = \"" + scanMediaLibraryID + `"`),
+				Config:      testAccScheduledTaskConfig(`key = "RefreshLibrary"` + "\n  task_id = \"" + cleanLogFilesID + `"`),
 				PlanOnly:    true,
-				ExpectError: regexp.MustCompile(`key and task_id each select the scheduled task on their own`),
+				ExpectError: regexp.MustCompile(`task_id\s+"` + cleanLogFilesID + `"\s+names\s+the\s+task\s+with\s+the\s+key\s+"CleanLogFiles"`),
 			},
 			{
 				Config:      testAccScheduledTaskConfig(""),
@@ -263,8 +329,8 @@ func TestAccScheduledTaskResourceRejectsSelectorsAtPlan(t *testing.T) {
 	})
 }
 
-// The state 0.3.8 saved for a task_id plans no change once the configuration
-// names the same task by its key.
+// A state saved before the key attribute existed holds no key until the
+// refresh reads one.
 func TestAccScheduledTaskResourceKeyForTaskIDFromV038(t *testing.T) {
 	testAccPreCheck(t)
 	testAccPutBackServerConfiguration(t, scanMediaLibraryID)

@@ -106,8 +106,8 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 				},
 			},
 			"key": schema.StringAttribute{
-				Description:         "The task's key, the readable name Jellyfin lists next to its ID in GET /ScheduledTasks, such as RefreshLibrary (Scan Media Library) or PluginUpdates (Update Plugins). It matches exactly, case included. Set key or task_id, not both; with task_id set, key reads the task's key.",
-				MarkdownDescription: "The task's key, the readable name Jellyfin lists next to its ID in `GET /ScheduledTasks`, such as `RefreshLibrary` (*Scan Media Library*) or `PluginUpdates` (*Update Plugins*). It matches exactly, case included. Set `key` or `task_id`, not both; with `task_id` set, `key` reads the task's key.",
+				Description:         "The task's key, the readable name Jellyfin lists next to its ID in GET /ScheduledTasks, such as RefreshLibrary (Scan Media Library) or PluginUpdates (Update Plugins). It matches exactly, case included, and set without task_id must belong to one task only. Set key, task_id, or both naming the same task; with only task_id set, key reads the task's key.",
+				MarkdownDescription: "The task's key, the readable name Jellyfin lists next to its ID in `GET /ScheduledTasks`, such as `RefreshLibrary` (*Scan Media Library*) or `PluginUpdates` (*Update Plugins*). It matches exactly, case included, and set without `task_id` must belong to one task only. Set `key`, `task_id`, or both naming the same task; with only `task_id` set, `key` reads the task's key.",
 				Optional:            true,
 				Computed:            true,
 				Validators: []validator.String{
@@ -118,8 +118,8 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 				},
 			},
 			"task_id": schema.StringAttribute{
-				Description:         "The task's ID, which Jellyfin derives from an MD5 hash of the full name of the .NET type that runs the task and matches ignoring case, such as 7738148ffcd07979c7ceb148e06b3aed for Scan Media Library. Set key or task_id, not both; with key set, task_id reads the ID of the task the key selects.",
-				MarkdownDescription: "The task's ID, which Jellyfin derives from an MD5 hash of the full name of the .NET type that runs the task and matches ignoring case, such as `7738148ffcd07979c7ceb148e06b3aed` for *Scan Media Library*. Set `key` or `task_id`, not both; with `key` set, `task_id` reads the ID of the task the key selects.",
+				Description:         "The task's ID, which Jellyfin derives from an MD5 hash of the full name of the .NET type that runs the task and matches ignoring case, such as 7738148ffcd07979c7ceb148e06b3aed for Scan Media Library. Set key, task_id, or both naming the same task; with only key set, task_id reads the ID of the task the key selects.",
+				MarkdownDescription: "The task's ID, which Jellyfin derives from an MD5 hash of the full name of the .NET type that runs the task and matches ignoring case, such as `7738148ffcd07979c7ceb148e06b3aed` for *Scan Media Library*. Set `key`, `task_id`, or both naming the same task; with only `key` set, `task_id` reads the ID of the task the key selects.",
 				Optional:            true,
 				Computed:            true,
 				Validators:          requiredIdentifierValidators(),
@@ -221,12 +221,7 @@ func (r *ScheduledTaskResource) ValidateConfig(ctx context.Context, req resource
 		return
 	}
 
-	switch {
-	case key.IsUnknown() || taskID.IsUnknown():
-	case !key.IsNull() && !taskID.IsNull():
-		resp.Diagnostics.AddAttributeError(path.Root("key"), "Conflicting scheduled task attributes",
-			"key and task_id each select the scheduled task on their own; set only one of them.")
-	case key.IsNull() && taskID.IsNull():
+	if key.IsNull() && taskID.IsNull() {
 		resp.Diagnostics.AddError("Missing scheduled task attribute",
 			`Set key, such as "RefreshLibrary", or task_id to select the scheduled task.`)
 	}
@@ -263,17 +258,6 @@ func (r *ScheduledTaskResource) Create(ctx context.Context, req resource.CreateR
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
 		return
-	}
-
-	// ModifyPlan resolves a key known at plan time, so this is a key known
-	// only now.
-	if data.TaskID.IsUnknown() {
-		id, d := r.lookUpTask(ctx, data.Key.ValueString(), false)
-		if d != nil {
-			resp.Diagnostics.Append(diag.WithPath(path.Root("key"), d))
-			return
-		}
-		data.TaskID = types.StringValue(id)
 	}
 
 	// Verify the task exists.
@@ -342,8 +326,8 @@ func (r *ScheduledTaskResource) Update(ctx context.Context, req resource.UpdateR
 }
 
 // ModifyPlan gates each configured field on the Jellyfin version it needs, so
-// a field a later pin adds is checked without a change here, and resolves a
-// configured key to its task.
+// a field a later pin adds is checked without a change here, and checks a
+// configured key against the server's tasks.
 func (r *ScheduledTaskResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	if req.Plan.Raw.IsNull() {
 		return
@@ -354,41 +338,62 @@ func (r *ScheduledTaskResource) ModifyPlan(ctx context.Context, req resource.Mod
 	resp.Diagnostics.Append(r.planTaskForKey(ctx, req, resp)...)
 }
 
-// planTaskForKey plans task_id as the ID of the task a configured key
-// selects, and a replacement when that is no longer the task in the state.
+// planTaskForKey plans task_id as the ID of the task a key configured alone
+// selects, and a replacement when that is not the task in the state. With
+// task_id also configured, task_id selects the task and key must be its key;
+// both may be set because terraform plan -generate-config-out writes both
+// from an imported state.
+//
+// Terraform plans each resource again in the refresh that precedes a destroy,
+// as a create when the refresh found its task gone, so a key alone that no
+// task has any more, such as that of a task a plugin or a Jellyfin upgrade
+// removed, also fails terraform destroy unless it runs with -refresh=false.
 func (r *ScheduledTaskResource) planTaskForKey(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) diag.Diagnostics {
 	var diags diag.Diagnostics
-	var key types.String
+	var key, taskID types.String
 	diags.Append(req.Config.GetAttribute(ctx, path.Root("key"), &key)...)
-	if diags.HasError() || key.IsNull() || key.IsUnknown() || r.client == nil {
+	diags.Append(req.Config.GetAttribute(ctx, path.Root("task_id"), &taskID)...)
+	switch {
+	case diags.HasError() || key.IsNull():
 		return diags
-	}
-
-	var state *ScheduledTaskResourceModel
-	if !req.State.Raw.IsNull() {
-		state = &ScheduledTaskResourceModel{}
-		diags.Append(req.State.Get(ctx, state)...)
-		if diags.HasError() {
-			return diags
+	case key.IsUnknown() && taskID.IsNull():
+		// Terraform plans again at apply, once the key is known, and rejects
+		// that plan if it replaces what this one updates.
+		if !req.State.Raw.IsNull() {
+			resp.RequiresReplace.Append(path.Root("key"))
 		}
-		// The refresh read this key from the task task_id names.
-		if state.Key.Equal(key) && !state.TaskID.IsNull() {
-			return diags
+		return diags
+	case key.IsUnknown() || taskID.IsUnknown() || r.client == nil:
+		// The plan Terraform makes at apply checks what is unknown now.
+		return diags
+	case !taskID.IsNull():
+		task, err := r.client.GetScheduledTask(ctx, taskID.ValueString())
+		switch {
+		case client.IsNotFound(err):
+			// task_id fails at apply as it does without a key.
+		case err != nil:
+			diags.AddError("Failed to read scheduled task", err.Error())
+		case task.Key != key.ValueString():
+			diags.AddAttributeError(path.Root("key"), "Conflicting scheduled task attributes", fmt.Sprintf(
+				"task_id %q names the task with the key %q, not %q. Set key or task_id alone, or both to the same task.",
+				taskID.ValueString(), task.Key, key.ValueString()))
 		}
+		return diags
 	}
 
 	id, d := r.lookUpTask(ctx, key.ValueString(), false)
 	if d != nil {
 		return append(diags, diag.WithPath(path.Root("key"), d))
 	}
-	if state != nil && strings.EqualFold(state.TaskID.ValueString(), id) {
-		return diags
-	}
-	diags.Append(resp.Plan.SetAttribute(ctx, path.Root("task_id"), id)...)
-	if state != nil {
+	if !req.State.Raw.IsNull() {
+		var stored types.String
+		diags.Append(req.State.GetAttribute(ctx, path.Root("task_id"), &stored)...)
+		if diags.HasError() || strings.EqualFold(stored.ValueString(), id) {
+			return diags
+		}
 		resp.RequiresReplace.Append(path.Root("key"))
 	}
-	return diags
+	return append(diags, resp.Plan.SetAttribute(ctx, path.Root("task_id"), id)...)
 }
 
 func (r *ScheduledTaskResource) lookUpTask(ctx context.Context, ref string, byID bool) (string, diag.Diagnostic) {
@@ -430,7 +435,7 @@ func findTask(tasks []client.ScheduledTask, ref string, byID bool) (string, diag
 			what, ref, strings.Join(keys, ", ")))
 	}
 	return "", diag.NewErrorDiagnostic("Ambiguous scheduled task key", fmt.Sprintf(
-		"Several tasks have the key %q (IDs %s); set task_id to the ID of the one to manage instead.",
+		"Several tasks have the key %q (IDs %s); set task_id to the ID of the one to manage.",
 		ref, strings.Join(ids, ", ")))
 }
 
