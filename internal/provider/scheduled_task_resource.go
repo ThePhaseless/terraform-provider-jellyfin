@@ -237,6 +237,29 @@ func (r *ScheduledTaskResource) ValidateConfig(ctx context.Context, req resource
 	}
 }
 
+// missingTriggerAttributes returns the attributes the trigger's type requires that are null.
+func missingTriggerAttributes(t ScheduledTaskTriggerModel) []string {
+	var missing []string
+	switch t.Type.ValueString() {
+	case triggerTypeDaily:
+		if t.TimeOfDayTicks.IsNull() {
+			missing = append(missing, "time_of_day_ticks")
+		}
+	case triggerTypeWeekly:
+		if t.TimeOfDayTicks.IsNull() {
+			missing = append(missing, "time_of_day_ticks")
+		}
+		if t.DayOfWeek.IsNull() {
+			missing = append(missing, "day_of_week")
+		}
+	case triggerTypeInterval:
+		if t.IntervalTicks.IsNull() {
+			missing = append(missing, "interval_ticks")
+		}
+	}
+	return missing
+}
+
 func (r *ScheduledTaskResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var data ScheduledTaskResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
@@ -469,27 +492,4 @@ func (r *ScheduledTaskResource) Delete(_ context.Context, _ resource.DeleteReque
 
 func (r *ScheduledTaskResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
-}
-
-// missingTriggerAttributes returns the attributes the trigger's type requires that are null.
-func missingTriggerAttributes(t ScheduledTaskTriggerModel) []string {
-	var missing []string
-	switch t.Type.ValueString() {
-	case triggerTypeDaily:
-		if t.TimeOfDayTicks.IsNull() {
-			missing = append(missing, "time_of_day_ticks")
-		}
-	case triggerTypeWeekly:
-		if t.TimeOfDayTicks.IsNull() {
-			missing = append(missing, "time_of_day_ticks")
-		}
-		if t.DayOfWeek.IsNull() {
-			missing = append(missing, "day_of_week")
-		}
-	case triggerTypeInterval:
-		if t.IntervalTicks.IsNull() {
-			missing = append(missing, "interval_ticks")
-		}
-	}
-	return missing
 }
