@@ -5,12 +5,20 @@ A [Terraform](https://www.terraform.io) provider for managing [Jellyfin](https:/
 ## Features
 
 - **User Management** — Create, update, and delete users with policy control
+- **API Keys** — Create API keys for external applications
 - **Library Management** — Configure media libraries with custom paths and options
 - **Plugin Repositories** — Manage plugin repository sources
 - **Plugin Installation** — Install and uninstall plugins from repositories
 - **Plugin Configuration** — Universal plugin settings via JSON (supports SSO-Auth, and any other plugin)
+- **JellyfinSecurity Plugin Configuration** — Typed settings for the JellyfinSecurity plugin
 - **System Configuration** — Full server configuration management
 - **Encoding Configuration** — Transcoding and hardware acceleration settings
+- **Networking Configuration** — Ports, HTTPS, remote access, and proxy settings
+- **Branding Configuration** — Login disclaimer, custom CSS, and splash screen
+- **Live TV Configuration** — Tuner hosts, guide listing providers, and recording settings
+- **Metadata Configuration** — Server-wide metadata settings
+- **Scheduled Tasks** — Set the triggers of scheduled tasks
+- **Server Restart** — Restart the server, for example to load newly installed plugins
 - **Initial Setup** — Configure a fresh Jellyfin instance after installation
 - **Data Sources** — Read server information and status
 
@@ -163,7 +171,7 @@ TF_ACC=1 go test -v ./internal/provider/
 
 In order to run the full suite of Acceptance tests, run `make testacc`.
 
-*Note:* Acceptance tests create real resources, and often cost money to run.
+*Note:* Acceptance tests create real resources on a Jellyfin server. They run against the local Jellyfin in Docker that `docker-compose.yml` starts and `scripts/setup_jellyfin.sh` prepares, as shown above.
 
 ### Linting
 
