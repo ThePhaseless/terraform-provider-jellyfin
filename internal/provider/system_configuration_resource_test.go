@@ -4,10 +4,17 @@
 package provider
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"regexp"
+	"slices"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 func TestAccSystemConfigurationResource(t *testing.T) {
@@ -155,4 +162,162 @@ resource "jellyfin_system_configuration" "test" {
   path_substitutions         = ` + v.pathSubstitutions + `
 }
 `
+}
+
+func TestAccSystemConfigurationFetchers(t *testing.T) {
+	testAccPreCheck(t)
+	c := testAccClient(t)
+	original, err := c.GetSystemConfiguration(t.Context())
+	if err != nil {
+		t.Fatalf("reading the system configuration: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := testAccClient(t).UpdateSystemConfiguration(context.Background(), original); err != nil {
+			t.Errorf("putting back the system configuration: %v", err)
+		}
+	})
+
+	movie := tfjsonpath.New("metadata_options").AtSliceIndex(0)
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccSystemConfigurationFetchersConfig(`
+    item_type         = "Movie"
+    metadata_fetchers = ["TheMovieDb", "The Open Movie Database"]
+    image_fetchers    = ["TheMovieDb", "The Open Movie Database", "Embedded Image Extractor", "Screen Grabber"]`),
+				Check: testAccCheckMovieMetadataOptions(t, map[string][]string{
+					"DisabledMetadataFetchers": {},
+					"MetadataFetcherOrder":     {"TheMovieDb", "The Open Movie Database"},
+					"DisabledImageFetchers":    {},
+					"ImageFetcherOrder":        {"TheMovieDb", "The Open Movie Database", "Embedded Image Extractor", "Screen Grabber"},
+				}),
+			},
+			// Reordering a list reorders the server's order, and leaving a
+			// fetcher out disables it.
+			{
+				Config: testAccSystemConfigurationFetchersConfig(`
+    item_type         = "Movie"
+    metadata_fetchers = ["The Open Movie Database"]
+    image_fetchers    = ["Screen Grabber", "TheMovieDb"]`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectUnknownValue("jellyfin_system_configuration.test", movie.AtMapKey("disabled_metadata_fetchers")),
+						plancheck.ExpectUnknownValue("jellyfin_system_configuration.test", movie.AtMapKey("metadata_fetcher_order")),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "metadata_options.0.disabled_metadata_fetchers.0", "TheMovieDb"),
+					testAccCheckMovieMetadataOptions(t, map[string][]string{
+						"DisabledMetadataFetchers": {"TheMovieDb"},
+						"MetadataFetcherOrder":     {"The Open Movie Database", "TheMovieDb"},
+						"DisabledImageFetchers":    {"The Open Movie Database", "Embedded Image Extractor"},
+						"ImageFetcherOrder":        {"Screen Grabber", "TheMovieDb", "The Open Movie Database", "Embedded Image Extractor"},
+					}),
+				),
+			},
+			{
+				Config: testAccSystemConfigurationFetchersConfig(`
+    item_type         = "Movie"
+    metadata_fetchers = ["TheMovieDb", "The Open Movie Database"]
+    image_fetchers    = ["Screen Grabber", "TheMovieDb"]`),
+				Check: testAccCheckMovieMetadataOptions(t, map[string][]string{
+					"DisabledMetadataFetchers": {},
+					"MetadataFetcherOrder":     {"TheMovieDb", "The Open Movie Database"},
+				}),
+			},
+			{
+				ResourceName:            "jellyfin_system_configuration.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateId:           "system",
+				ImportStateVerifyIgnore: []string{"server_name"},
+			},
+			{
+				Config: testAccSystemConfigurationFetchersConfig(`
+    item_type                  = "Movie"
+    metadata_fetchers          = ["TheMovieDb"]
+    disabled_metadata_fetchers = []`),
+				ExpectError: regexp.MustCompile(`Attribute\s+"metadata_options\[0\].disabled_metadata_fetchers"\s+cannot\s+be\s+specified\s+when\s+"metadata_options\[0\].metadata_fetchers"\s+is\s+specified`),
+			},
+			{
+				Config: testAccSystemConfigurationFetchersConfig(`
+    item_type         = "Movie"
+    metadata_fetchers = ["TheTVDB"]`),
+				ExpectError: regexp.MustCompile(`metadata_options\[0\].metadata_fetchers\s+lists\s+"TheTVDB",\s+which\s+is\s+not\s+one\s+of\s+the\s+MetadataFetchers\s+the\s+Jellyfin\s+server\s+offers\s+for\s+Movie:\s+"TheMovieDb",\s+"The\s+Open\s+Movie\s+Database"`),
+			},
+			{
+				Config: testAccSystemConfigurationFetchersConfig(`
+    item_type         = "Person"
+    metadata_fetchers = []`),
+				ExpectError: regexp.MustCompile(`does\s+not\s+list\s+the\s+MetadataFetchers\s+it\s+offers\s+for\s+Person`),
+			},
+			// The attributes metadata_fetchers replaces still work alone.
+			{
+				Config: testAccSystemConfigurationFetchersConfig(`
+    item_type                  = "Movie"
+    disabled_metadata_fetchers = ["The Open Movie Database"]
+    metadata_fetcher_order     = ["The Open Movie Database", "TheMovieDb"]`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectUnknownValue("jellyfin_system_configuration.test", movie.AtMapKey("metadata_fetchers")),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "metadata_options.0.metadata_fetchers.#", "1"),
+					resource.TestCheckResourceAttr("jellyfin_system_configuration.test", "metadata_options.0.metadata_fetchers.0", "TheMovieDb"),
+					testAccCheckMovieMetadataOptions(t, map[string][]string{
+						"DisabledMetadataFetchers": {"The Open Movie Database"},
+						"MetadataFetcherOrder":     {"The Open Movie Database", "TheMovieDb"},
+					}),
+				),
+			},
+		},
+	})
+}
+
+func testAccSystemConfigurationFetchersConfig(entry string) string {
+	return `
+resource "jellyfin_system_configuration" "test" {
+  metadata_options = [{
+    ` + entry + `
+  }]
+}
+`
+}
+
+// testAccCheckMovieMetadataOptions checks string lists of the server's
+// metadata options for movies.
+func testAccCheckMovieMetadataOptions(t *testing.T, want map[string][]string) resource.TestCheckFunc {
+	const itemType = "Movie"
+	return func(*terraform.State) error {
+		cfg, err := testAccClient(t).GetSystemConfiguration(context.Background())
+		if err != nil {
+			return err
+		}
+		var doc struct {
+			MetadataOptions []map[string]json.RawMessage
+		}
+		if err := json.Unmarshal([]byte(cfg.RawJSON), &doc); err != nil {
+			return fmt.Errorf("parsing the system configuration: %w", err)
+		}
+		entry := slices.IndexFunc(doc.MetadataOptions, func(e map[string]json.RawMessage) bool {
+			var got string
+			return json.Unmarshal(e["ItemType"], &got) == nil && got == itemType
+		})
+		if entry < 0 {
+			return fmt.Errorf("the server has no %s metadata options", itemType)
+		}
+		for key, values := range want {
+			var got []string
+			if err := json.Unmarshal(doc.MetadataOptions[entry][key], &got); err != nil {
+				return fmt.Errorf("parsing %s of %s: %w", key, itemType, err)
+			}
+			if !slices.Equal(got, values) {
+				return fmt.Errorf("%s metadata options %s = %q on the server, want %q", itemType, key, got, values)
+			}
+		}
+		return nil
+	}
 }

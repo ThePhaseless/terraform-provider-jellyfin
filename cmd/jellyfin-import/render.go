@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/provider"
 )
 
@@ -30,17 +31,18 @@ var omittedAttributes = map[string][]string{
 
 // rendered reports whether the importer writes the attribute at attrPath of
 // resourceType into the configuration. Sensitive values stay out of
-// resources.tf.
+// resources.tf, and a deprecated attribute leaves the imported value to the
+// attribute that replaces it.
 func rendered(resourceType, attrPath string, a schema.Attribute) bool {
-	return (a.IsOptional() || a.IsRequired()) && !a.IsSensitive() && !slices.Contains(omittedAttributes[resourceType], attrPath)
+	return (a.IsOptional() || a.IsRequired()) && !a.IsSensitive() && a.GetDeprecationMessage() == "" && !slices.Contains(omittedAttributes[resourceType], attrPath)
 }
 
 // importedAttributes renders the attributes of resourceType as the Read that
 // follows its import with importID reads them from raw, the document
-// Jellyfin serves, so the configuration sets exactly what the imported state
-// holds.
-func importedAttributes(ctx context.Context, resourceType, importID, raw string) (map[string]string, error) {
-	s, state, err := provider.ReadForImport(ctx, resourceType, importID, raw)
+// Jellyfin serves, and from what else c serves, so the configuration sets
+// exactly what the imported state holds.
+func importedAttributes(ctx context.Context, c *client.Client, resourceType, importID, raw string) (map[string]string, error) {
+	s, state, err := provider.ReadForImport(ctx, c, resourceType, importID, raw)
 	if err != nil {
 		return nil, err
 	}

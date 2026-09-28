@@ -122,7 +122,12 @@ record it.`, wireBindingsGolden, msg.String())
 // attribute is null, as the read that follows an import does.
 func readWire[T any](t *testing.T, b *wire.Binding, raw string) T {
 	t.Helper()
-	ctx := context.Background()
+	return readWireIn[T](context.Background(), t, b, raw)
+}
+
+// readWireIn is readWire with ctx, for a binding that asks it for more.
+func readWireIn[T any](ctx context.Context, t *testing.T, b *wire.Binding, raw string) T {
+	t.Helper()
 	var doc map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
 		t.Fatalf("parsing %s: %v", raw, err)

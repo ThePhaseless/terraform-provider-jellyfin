@@ -5,6 +5,9 @@ resource "jellyfin_system_configuration" "example" {
   metadata_options = [
     {
       item_type = "Movie"
+      # The enabled fetchers, in priority order; the others are disabled.
+      metadata_fetchers = ["TheMovieDb", "The Open Movie Database"]
+      image_fetchers    = ["TheMovieDb", "Embedded Image Extractor", "Screen Grabber"]
     }
   ]
 

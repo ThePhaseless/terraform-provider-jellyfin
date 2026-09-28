@@ -68,6 +68,35 @@ func (o *offeredProviders) forLibrary(collectionType string) wire.AvailableFunc 
 	}
 }
 
+// contentTypesByItemType are library content types that between them hold
+// every item type Jellyfin lists providers of, ordered to find those of a
+// fresh server's metadata options in few requests.
+var contentTypesByItemType = []string{"movies", "tvshows", "music", "boxsets", "books", "homevideos", "playlists"}
+
+// byItemType answers the lists of the item type scope names, from the first
+// content type whose libraries hold that item type.
+func (o *offeredProviders) byItemType(ctx context.Context, offered, scope string) ([]string, error) {
+	for _, contentType := range contentTypesByItemType {
+		served, err := o.forContentType(ctx, contentType)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range served.TypeOptions {
+			if !strings.EqualFold(t.Type, scope) {
+				continue
+			}
+			switch offered {
+			case "MetadataFetchers":
+				return optionNames(t.MetadataFetchers), nil
+			case "ImageFetchers":
+				return optionNames(t.ImageFetchers), nil
+			}
+			return nil, fmt.Errorf("an item type lists no %s", offered)
+		}
+	}
+	return nil, fmt.Errorf("item type %q: %w", scope, wire.ErrNotOffered)
+}
+
 // combinedStringList is an optional list that replaces the list attributes of
 // the same object named replaced, whose Jellyfin keys it writes, so it
 // conflicts with them.

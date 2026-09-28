@@ -166,6 +166,14 @@ resource "jellyfin_system_configuration" "test" {
 
   cast_receiver_applications = [{ id = "F007D354", name = "Stable" }]
   path_substitutions         = [{ from = "/mnt/upgrade", to = "/media/upgrade" }]
+
+  metadata_options = [{
+    item_type                  = "Movie"
+    disabled_metadata_fetchers = ["The Open Movie Database"]
+    metadata_fetcher_order     = ["The Open Movie Database", "TheMovieDb"]
+    disabled_image_fetchers    = []
+    image_fetcher_order        = ["TheMovieDb"]
+  }]
 }
 `},
 		{name: "livetv", config: `

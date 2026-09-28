@@ -230,6 +230,18 @@ func setupTestServer(t *testing.T) *httptest.Server {
 		})
 	})
 
+	mux.HandleFunc("/Libraries/AvailableOptions", func(w http.ResponseWriter, r *http.Request) {
+		typeOptions := []map[string]interface{}{}
+		if r.URL.Query().Get("libraryContentType") == "movies" {
+			typeOptions = append(typeOptions, map[string]interface{}{
+				"Type":             "Movie",
+				"MetadataFetchers": []map[string]interface{}{{"Name": "TheMovieDb"}, {"Name": "OMDb"}},
+				"ImageFetchers":    []map[string]interface{}{{"Name": "TheMovieDb"}},
+			})
+		}
+		writeJSON(t, w, map[string]interface{}{"TypeOptions": typeOptions})
+	})
+
 	mux.HandleFunc("/System/Configuration/encoding", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, map[string]interface{}{
 			"EncodingThreadCount": -1,
@@ -572,8 +584,8 @@ func TestGenerateSingletonConfigs(t *testing.T) {
   enable_normalized_item_by_name_ids = true
   metadata_options = [
     {
-      disabled_metadata_fetchers = ["OMDb"]
-      item_type                  = "Movie"
+      item_type         = "Movie"
+      metadata_fetchers = ["TheMovieDb"]
     },
   ]
   server_name       = "Test Server"

@@ -13,6 +13,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
 // ReadForImport returns the schema of resourceType and the values that
@@ -20,8 +23,9 @@ import (
 // follows has read raw, the JSON document Jellyfin serves for the resource.
 // Only resources that read a Jellyfin document through a wire binding have
 // one; an attribute the Read sets without the document, such as a computed
-// id, holds what ImportState gave it.
-func ReadForImport(ctx context.Context, resourceType, importID, raw string) (schema.Schema, types.Object, error) {
+// id, holds what ImportState gave it. c answers what the Read asks the server
+// besides the document: the providers it offers each item type.
+func ReadForImport(ctx context.Context, c *client.Client, resourceType, importID, raw string) (schema.Schema, types.Object, error) {
 	var r resource.Resource
 	for _, newResource := range New("import")().Resources(ctx) {
 		candidate := newResource()
@@ -65,7 +69,7 @@ func ReadForImport(ctx context.Context, resourceType, importID, raw string) (sch
 	if err != nil {
 		return s, types.Object{}, fmt.Errorf("reading %s: %w", resourceType, err)
 	}
-	got, diags := b.Flatten(ctx, doc, prior)
+	got, diags := b.Flatten(wire.WithAvailable(ctx, newOfferedProviders(c).byItemType), doc, prior)
 	if diags.HasError() {
 		return s, types.Object{}, fmt.Errorf("reading %s: %v", resourceType, diags)
 	}

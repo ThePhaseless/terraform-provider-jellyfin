@@ -105,7 +105,10 @@ type SystemConfigurationResourceModel struct {
 }
 
 var systemWire = sync.OnceValues(func() (*wire.Binding, error) {
-	return wire.Bind(schemaOf(&SystemConfigurationResource{}), "ServerConfiguration", wire.Identity("id"))
+	return wire.Bind(schemaOf(&SystemConfigurationResource{}), "ServerConfiguration",
+		wire.Identity("id"),
+		wire.Complement("metadata_options.metadata_fetchers", "metadata_fetcher_order", "disabled_metadata_fetchers", "MetadataFetchers", "item_type"),
+		wire.Complement("metadata_options.image_fetchers", "image_fetcher_order", "disabled_image_fetchers", "ImageFetchers", "item_type"))
 })
 
 func (r *SystemConfigurationResource) Wire() (*wire.Binding, error) { return systemWire() }
@@ -200,10 +203,12 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 		"item_type":                   nonNullStateString(optionalString("Item type.")),
 		"disabled_metadata_savers":    nonNullStateList(optionalStringList("Disabled metadata savers.")),
 		"local_metadata_reader_order": nonNullStateList(optionalStringList("Local metadata reader order.")),
-		"disabled_metadata_fetchers":  nonNullStateList(optionalStringList("Disabled metadata fetchers.")),
-		"metadata_fetcher_order":      nonNullStateList(optionalStringList("Metadata fetcher order.")),
-		"disabled_image_fetchers":     nonNullStateList(optionalStringList("Disabled image fetchers.")),
-		"image_fetcher_order":         nonNullStateList(optionalStringList("Image fetcher order.")),
+		"metadata_fetchers":           combinedStringList(itemTypeFetchersDescription("metadata", "disabled_metadata_fetchers", "metadata_fetcher_order"), "disabled_metadata_fetchers", "metadata_fetcher_order"),
+		"disabled_metadata_fetchers":  replacedBy(nonNullStateList(optionalStringList("Disabled metadata fetchers.")), itemTypeFetchersDeprecation("metadata"), "metadata_fetchers"),
+		"metadata_fetcher_order":      replacedBy(nonNullStateList(optionalStringList("Metadata fetcher order.")), itemTypeFetchersDeprecation("metadata"), "metadata_fetchers"),
+		"image_fetchers":              combinedStringList(itemTypeFetchersDescription("image", "disabled_image_fetchers", "image_fetcher_order"), "disabled_image_fetchers", "image_fetcher_order"),
+		"disabled_image_fetchers":     replacedBy(nonNullStateList(optionalStringList("Disabled image fetchers.")), itemTypeFetchersDeprecation("image"), "image_fetchers"),
+		"image_fetcher_order":         replacedBy(nonNullStateList(optionalStringList("Image fetcher order.")), itemTypeFetchersDeprecation("image"), "image_fetchers"),
 	}
 
 	nameValuePairAttributes := map[string]schema.Attribute{
@@ -361,6 +366,14 @@ func (r *SystemConfigurationResource) Schema(_ context.Context, _ resource.Schem
 	}
 }
 
+func itemTypeFetchersDescription(kind, disabledAttr, orderAttr string) string {
+	return fmt.Sprintf("Enabled %[1]s fetchers for `item_type`, in priority order: Jellyfin asks the first one first and disables every other %[1]s fetcher it offers for the item type. Jellyfin applies them to items whose library has no `type_options` entry for their type. Each name must match one the server offers exactly, so it works only for an item type whose fetchers Jellyfin lists, such as Movie or Series but not Person. Jellyfin enables any %[1]s fetcher installed later, which then shows up as a change to this list. Conflicts with `%[2]s` and `%[3]s`, which it replaces.", kind, disabledAttr, orderAttr)
+}
+
+func itemTypeFetchersDeprecation(kind string) string {
+	return fmt.Sprintf("Deprecated: list the enabled %[1]s fetchers in priority order in `%[1]s_fetchers` instead, which disables the rest. It will be removed in a future release.", kind)
+}
+
 func (r *SystemConfigurationResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
@@ -436,6 +449,7 @@ func (r *SystemConfigurationResource) apply(ctx context.Context, data *SystemCon
 	if b == nil {
 		return
 	}
+	ctx = wire.WithAvailable(ctx, newOfferedProviders(r.client).byItemType)
 
 	current, err := r.client.GetSystemConfiguration(ctx)
 	if err != nil {
@@ -481,6 +495,7 @@ func (r *SystemConfigurationResource) read(ctx context.Context, data *SystemConf
 	if b == nil {
 		return
 	}
+	ctx = wire.WithAvailable(ctx, newOfferedProviders(r.client).byItemType)
 
 	current, err := r.client.GetSystemConfiguration(ctx)
 	if err != nil {
