@@ -32,8 +32,6 @@ func optionalString(desc string) schema.StringAttribute {
 	}
 }
 
-// optionalEnum is an optional string that takes one of values, which its
-// description lists.
 func optionalEnum(desc string, values ...string) schema.StringAttribute {
 	a := optionalString(desc + " One of `" + strings.Join(values, "`, `") + "`.")
 	a.Validators = []validator.String{stringvalidator.OneOf(values...)}

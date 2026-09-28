@@ -72,7 +72,6 @@ func hclString(s string) string {
 	return b.String()
 }
 
-// importBlock generates a Terraform import block.
 func importBlock(resourceType, name, id string) string {
 	return fmt.Sprintf(`import {
   to = %s.%s
@@ -81,7 +80,6 @@ func importBlock(resourceType, name, id string) string {
 `, resourceType, name, hclString(id))
 }
 
-// resourceBlock generates a Terraform resource block from a map of attributes.
 func resourceBlock(resourceType, name string, attrs map[string]string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "resource %s %s {\n", hclString(resourceType), hclString(name))
@@ -90,7 +88,6 @@ func resourceBlock(resourceType, name string, attrs map[string]string) string {
 	return b.String()
 }
 
-// sortedKeys returns map keys in sorted order.
 func sortedKeys(m map[string]string) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {

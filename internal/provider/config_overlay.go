@@ -8,8 +8,6 @@ import (
 	"fmt"
 )
 
-// parseJSONObject parses a raw JSON string into a map of raw JSON messages.
-// An empty string or "{}" returns an empty map.
 func parseJSONObject(raw string) (map[string]json.RawMessage, error) {
 	if raw == "" || raw == "{}" {
 		return map[string]json.RawMessage{}, nil

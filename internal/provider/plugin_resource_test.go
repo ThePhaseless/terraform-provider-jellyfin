@@ -30,7 +30,6 @@ func TestAccPluginResource(t *testing.T) {
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Install plugin.
 			{
 				Config: fmt.Sprintf(`
 resource "jellyfin_plugin" "test" {
@@ -517,7 +516,6 @@ func testAccFindUninstalledPackage(t *testing.T, repoURL string, minVersions int
 	c := testAccClient(t)
 	ctx := t.Context()
 
-	// Query available packages.
 	pkgs, err := c.GetAvailablePackages(ctx)
 	if err != nil {
 		t.Skipf("failed to list packages (repository may be unavailable): %v", err)
@@ -526,7 +524,6 @@ func testAccFindUninstalledPackage(t *testing.T, repoURL string, minVersions int
 		t.Skip("no packages available in the stable repository")
 	}
 
-	// Get currently installed plugins to avoid picking one that's already installed.
 	installed, err := c.GetInstalledPlugins(ctx)
 	if err != nil {
 		t.Fatalf("failed to get installed plugins: %v", err)
@@ -536,7 +533,6 @@ func testAccFindUninstalledPackage(t *testing.T, repoURL string, minVersions int
 		installedNames[p.Name] = true
 	}
 
-	// Return the first available package that is not already installed.
 	for _, pkg := range pkgs {
 		if !installedNames[pkg.Name] && len(pkg.Versions) >= minVersions {
 			return pkg

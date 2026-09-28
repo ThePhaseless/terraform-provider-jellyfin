@@ -106,7 +106,6 @@ func writeJSON(t *testing.T, w http.ResponseWriter, v interface{}) {
 	}
 }
 
-// setupTestServer creates a mock Jellyfin server for testing.
 func setupTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
@@ -306,7 +305,6 @@ func TestGenerateUsers(t *testing.T) {
 		t.Errorf("expected 2 resource blocks, got %d", len(resources))
 	}
 
-	// Check admin user import
 	if !strings.Contains(imports[0], "jellyfin_user.admin") {
 		t.Errorf("expected import to contain jellyfin_user.admin, got: %s", imports[0])
 	}
@@ -314,7 +312,6 @@ func TestGenerateUsers(t *testing.T) {
 		t.Errorf("expected import ID user-id-1, got: %s", imports[0])
 	}
 
-	// Check admin user resource
 	if !strings.Contains(resources[0], "is_administrator   = true") {
 		t.Errorf("expected admin to be administrator: %s", resources[0])
 	}
@@ -418,7 +415,6 @@ func TestGenerateScheduledTasks(t *testing.T) {
 		t.Fatalf("generateScheduledTasks() error: %v", err)
 	}
 
-	// Hidden tasks should be skipped
 	if len(imports) != 1 {
 		t.Errorf("expected 1 import block (hidden tasks skipped), got %d", len(imports))
 	}
@@ -772,7 +768,6 @@ func TestFullGenerate(t *testing.T) {
 		t.Errorf("expected only the API key token warning for an empty output directory, got %q", got)
 	}
 
-	// Check that files were created
 	importsPath := filepath.Join(outputDir, "imports.tf")
 	if _, err := os.Stat(importsPath); os.IsNotExist(err) {
 		t.Error("imports.tf was not created")
@@ -783,7 +778,6 @@ func TestFullGenerate(t *testing.T) {
 		t.Error("resources.tf was not created")
 	}
 
-	// Verify imports.tf content
 	importsContent, err := os.ReadFile(importsPath)
 	if err != nil {
 		t.Fatalf("Failed to read imports.tf: %v", err)
@@ -811,7 +805,6 @@ func TestFullGenerate(t *testing.T) {
 		}
 	}
 
-	// Verify resources.tf content
 	resourcesContent, err := os.ReadFile(resourcesPath)
 	if err != nil {
 		t.Fatalf("Failed to read resources.tf: %v", err)
@@ -877,7 +870,6 @@ func TestGenerateWarnsAboutOtherConfigurationInOutputDir(t *testing.T) {
 }
 
 func TestGenerateWithServerError(t *testing.T) {
-	// Server that returns errors
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprint(w, "Internal Server Error")
@@ -927,25 +919,21 @@ func TestSanitizeNameEdgeCases(t *testing.T) {
 func TestUniqueName(t *testing.T) {
 	g := &generator{usedNames: make(map[string]bool)}
 
-	// First use: no suffix
 	name1 := g.uniqueName("jellyfin_user", "admin")
 	if name1 != "admin" {
 		t.Errorf("first uniqueName() = %q, want %q", name1, "admin")
 	}
 
-	// Second use of same type+name: gets suffix _1
 	name2 := g.uniqueName("jellyfin_user", "admin")
 	if name2 != "admin_1" {
 		t.Errorf("second uniqueName() = %q, want %q", name2, "admin_1")
 	}
 
-	// Third use: suffix _2
 	name3 := g.uniqueName("jellyfin_user", "admin")
 	if name3 != "admin_2" {
 		t.Errorf("third uniqueName() = %q, want %q", name3, "admin_2")
 	}
 
-	// Different resource type: no suffix
 	name4 := g.uniqueName("jellyfin_library", "admin")
 	if name4 != "admin" {
 		t.Errorf("different type uniqueName() = %q, want %q", name4, "admin")
@@ -1016,7 +1004,6 @@ func TestGenerateLibrariesGivesEachLibraryItsOwnAddress(t *testing.T) {
 }
 
 func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
-	// Server that has /Plugins but returns 500 for /Packages
 	mux := http.NewServeMux()
 	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, []map[string]interface{}{
@@ -1444,12 +1431,10 @@ func TestAccImportToolE2E(t *testing.T) {
 		warnings:  &warnings,
 	}
 
-	// Run the full generation.
 	if err := g.Generate(); err != nil {
 		t.Fatalf("Generate() against live Jellyfin failed: %v", err)
 	}
 
-	// Verify imports.tf was created and has content.
 	importsPath := filepath.Join(outputDir, "imports.tf")
 	importsContent, err := os.ReadFile(importsPath)
 	if err != nil {
@@ -1459,7 +1444,6 @@ func TestAccImportToolE2E(t *testing.T) {
 		t.Fatal("imports.tf is empty")
 	}
 
-	// Verify resources.tf was created and has content.
 	resourcesPath := filepath.Join(outputDir, "resources.tf")
 	resourcesContent, err := os.ReadFile(resourcesPath)
 	if err != nil {
@@ -1480,7 +1464,6 @@ func TestAccImportToolE2E(t *testing.T) {
 		t.Error("resources.tf should contain at least one jellyfin_user resource block")
 	}
 
-	// Singleton configs should always be present.
 	singletonTypes := []string{
 		"jellyfin_system_configuration",
 		"jellyfin_encoding_configuration",
@@ -1502,7 +1485,6 @@ func TestAccImportToolE2E(t *testing.T) {
 		t.Error("resources.tf should keep the disabled metadata fetchers of the seeded Person metadata options")
 	}
 
-	// All import blocks should have 'to' and 'id' fields.
 	importBlocks := strings.Count(importsStr, "import {")
 	toFields := strings.Count(importsStr, "to = ")
 	idFields := strings.Count(importsStr, "id = ")
@@ -1510,7 +1492,6 @@ func TestAccImportToolE2E(t *testing.T) {
 		t.Errorf("import block count mismatch: blocks=%d, to=%d, id=%d", importBlocks, toFields, idFields)
 	}
 
-	// All resource blocks should have opening and closing braces.
 	resourceBlocks := strings.Count(resourcesStr, "resource \"")
 	if resourceBlocks == 0 {
 		t.Error("resources.tf should contain at least one resource block")
@@ -1561,7 +1542,6 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 			t.Error("expected at least 1 user resource block")
 		}
 
-		// Verify structure of first user.
 		if len(imports) > 0 && !strings.Contains(imports[0], "jellyfin_user.") {
 			t.Errorf("import block should reference jellyfin_user: %s", imports[0])
 		}
@@ -1610,7 +1590,6 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 			t.Errorf("expected 6 singleton config resources, got %d", len(resources))
 		}
 
-		// System config should have server_name.
 		if len(resources) > 0 && !strings.Contains(resources[0], "server_name") {
 			t.Errorf("system config should contain server_name: %s", resources[0])
 		}

@@ -66,7 +66,6 @@ func newTransport() http.RoundTripper {
 	return t
 }
 
-// doRequest executes an HTTP request with authentication and returns the response.
 func (c *Client) doRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
 	url := c.BaseURL + path
 
@@ -113,14 +112,10 @@ func (c *Client) send(ctx context.Context, method, path string, body io.Reader, 
 	return nil
 }
 
-// getJSON performs an authenticated GET request and decodes the JSON response
-// into target.
 func (c *Client) getJSON(ctx context.Context, path string, target any) error {
 	return c.send(ctx, http.MethodGet, path, nil, decodeInto(target))
 }
 
-// getRaw performs an authenticated GET request and returns the raw response
-// body.
 func (c *Client) getRaw(ctx context.Context, path string) (string, error) {
 	var raw []byte
 	err := c.send(ctx, http.MethodGet, path, nil, func(r io.Reader) error {
@@ -131,23 +126,18 @@ func (c *Client) getRaw(ctx context.Context, path string) (string, error) {
 	return string(raw), err
 }
 
-// post performs an authenticated POST request with an optional JSON body.
 func (c *Client) post(ctx context.Context, path string, body []byte) error {
 	return c.send(ctx, http.MethodPost, path, bodyReader(body), nil)
 }
 
-// postRaw performs an authenticated POST request with a raw JSON body.
 func (c *Client) postRaw(ctx context.Context, path string, rawJSON string) error {
 	return c.send(ctx, http.MethodPost, path, strings.NewReader(rawJSON), nil)
 }
 
-// postJSON performs an authenticated POST request with a JSON body and
-// decodes the JSON response into target.
 func (c *Client) postJSON(ctx context.Context, path string, body []byte, target any) error {
 	return c.send(ctx, http.MethodPost, path, bodyReader(body), decodeInto(target))
 }
 
-// delete performs an authenticated DELETE request.
 func (c *Client) delete(ctx context.Context, path string) error {
 	return c.send(ctx, http.MethodDelete, path, nil, nil)
 }

@@ -313,7 +313,6 @@ func (r *UserResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 // lowercase hex digits, so any other spelling would read back otherwise.
 var guidPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
-// guidList takes only IDs spelled as Jellyfin lists them.
 func guidList(a schema.ListAttribute) schema.ListAttribute {
 	a.Validators = append(a.Validators, listvalidator.ValueStringsAre(stringvalidator.RegexMatches(guidPattern,
 		"must be an ID as Jellyfin lists it: 32 lowercase hex digits without dashes")))

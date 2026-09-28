@@ -201,7 +201,6 @@ func pause(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// randomID returns a 16-byte hex string for the resource id.
 func randomID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {

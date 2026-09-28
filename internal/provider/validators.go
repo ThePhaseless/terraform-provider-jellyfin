@@ -57,8 +57,6 @@ type unsetValidator struct {
 	summary, reason string
 }
 
-// unsupportedLibraryOptionValidator rejects the library options Jellyfin
-// does not have.
 var unsupportedLibraryOptionValidator = unsetValidator{
 	summary: "Unsupported library option",
 	reason:  "Jellyfin has no such library option, so the server would ignore this value",

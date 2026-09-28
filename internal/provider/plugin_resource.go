@@ -176,9 +176,6 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 		data.Version = types.StringValue(resolvedVersion)
 	}
 
-	// Jellyfin returns 404 when POSTing an install for a version that is
-	// already present, so detect that up front and treat it as idempotent
-	// rather than erroring.
 	installed, err := r.findInstalledPlugin(ctx, data.Name.ValueString(), resolvedVersion)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to check installed plugins", err.Error())

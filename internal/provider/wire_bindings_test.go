@@ -125,7 +125,6 @@ func readWire[T any](t *testing.T, b *wire.Binding, raw string) T {
 	return readWireIn[T](context.Background(), t, b, raw)
 }
 
-// readWireIn is readWire with ctx, for a binding that asks it for more.
 func readWireIn[T any](ctx context.Context, t *testing.T, b *wire.Binding, raw string) T {
 	t.Helper()
 	var doc map[string]json.RawMessage

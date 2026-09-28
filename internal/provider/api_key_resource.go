@@ -166,7 +166,6 @@ func (r *APIKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
-	// Look up the key by access token to verify it still exists.
 	keys, err := r.client.GetAPIKeys(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read API keys", err.Error())
@@ -184,7 +183,6 @@ func (r *APIKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 
 	if !found {
-		// Key was deleted outside of Terraform.
 		resp.State.RemoveResource(ctx)
 		return
 	}

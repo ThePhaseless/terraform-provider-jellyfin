@@ -146,7 +146,6 @@ func (g *generator) Generate() error {
 	var imports []string
 	var resources []string
 
-	// Users
 	userImports, userResources, err := g.generateUsers()
 	if err != nil {
 		return fmt.Errorf("generating users: %w", err)
@@ -154,7 +153,6 @@ func (g *generator) Generate() error {
 	imports = append(imports, userImports...)
 	resources = append(resources, userResources...)
 
-	// Libraries
 	libImports, libResources, err := g.generateLibraries()
 	if err != nil {
 		return fmt.Errorf("generating libraries: %w", err)
@@ -162,7 +160,6 @@ func (g *generator) Generate() error {
 	imports = append(imports, libImports...)
 	resources = append(resources, libResources...)
 
-	// API Keys
 	keyImports, keyResources, err := g.generateAPIKeys()
 	if err != nil {
 		return fmt.Errorf("generating API keys: %w", err)
@@ -170,7 +167,6 @@ func (g *generator) Generate() error {
 	imports = append(imports, keyImports...)
 	resources = append(resources, keyResources...)
 
-	// Plugin Repositories
 	repoImports, repoResources, err := g.generatePluginRepositories()
 	if err != nil {
 		return fmt.Errorf("generating plugin repositories: %w", err)
@@ -178,7 +174,6 @@ func (g *generator) Generate() error {
 	imports = append(imports, repoImports...)
 	resources = append(resources, repoResources...)
 
-	// Plugins
 	pluginImports, pluginResources, err := g.generatePlugins()
 	if err != nil {
 		return fmt.Errorf("generating plugins: %w", err)
@@ -186,7 +181,6 @@ func (g *generator) Generate() error {
 	imports = append(imports, pluginImports...)
 	resources = append(resources, pluginResources...)
 
-	// Scheduled Tasks
 	taskImports, taskResources, err := g.generateScheduledTasks()
 	if err != nil {
 		return fmt.Errorf("generating scheduled tasks: %w", err)
@@ -194,7 +188,6 @@ func (g *generator) Generate() error {
 	imports = append(imports, taskImports...)
 	resources = append(resources, taskResources...)
 
-	// Singleton configurations
 	singletonImports, singletonResources, err := g.generateSingletonConfigs()
 	if err != nil {
 		return fmt.Errorf("generating configurations: %w", err)
@@ -202,7 +195,6 @@ func (g *generator) Generate() error {
 	imports = append(imports, singletonImports...)
 	resources = append(resources, singletonResources...)
 
-	// Write imports.tf
 	if len(imports) > 0 {
 		if err := g.writeFile("imports.tf", strings.Join(imports, "\n")); err != nil {
 			return fmt.Errorf("writing imports.tf: %w", err)
@@ -212,7 +204,6 @@ func (g *generator) Generate() error {
 		}
 	}
 
-	// Write resources.tf
 	if len(resources) > 0 {
 		content := terraformBlock + "\n" + strings.Join(resources, "\n")
 		if err := g.writeFile("resources.tf", content); err != nil {
@@ -372,7 +363,6 @@ func (g *generator) generatePlugins() ([]string, []string, error) {
 	}
 	plugins := provider.ImportablePlugins(listed)
 
-	// Try to resolve repository URLs from available packages.
 	repoURLs := g.resolvePluginRepoURLs(plugins)
 
 	var imports, resources []string
