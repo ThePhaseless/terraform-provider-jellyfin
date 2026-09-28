@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 const sharedPinned = `schema Lib.Name: string
@@ -494,4 +495,73 @@ func TestUnitOrdersAsksNothingForAnEmptyScope(t *testing.T) {
 	if s := canonical(t, entry["FetcherOrder"]); s != `["a","B"]` || len(asked) != 0 {
 		t.Errorf("wrote the order %s after asking for %q, want [\"a\",\"B\"] without asking", s, asked)
 	}
+}
+
+// A Complement that the write leaves alone keeps its planned value after the
+// write, although the server offers more names by then: a plugin the same
+// apply installs adds its providers after the plan.
+func TestUnitComplementKeepsItsPlannedValueWhenTheWriteLeavesItAlone(t *testing.T) {
+	b := sharedBinding(t)
+	served := `{"Name": "n", "Order": ["A"], "Disabled": []}`
+	before := WithAvailable(context.Background(), offering(map[string][]string{"": {"A"}}, new([]string)))
+	after := WithAvailable(context.Background(), offering(map[string][]string{"": {"A", "B"}}, new([]string)))
+	prior, d := b.Flatten(before, doc(t, served), types.ObjectNull(b.AttrTypes))
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	if s := at(t, prior, "enabled").String(); s != `["A"]` {
+		t.Fatalf("enabled reads %s before the plugin", s)
+	}
+
+	for _, c := range []struct {
+		name  string
+		order attr.Value
+		want  string
+	}{
+		{"keys left to their attributes", strs("A"), `["A"]`},
+		{"keys written by the Complement", types.ListUnknown(types.StringType), `["A","B"]`},
+	} {
+		var model sharedModel
+		if d := object(t, with(t, prior, "order", c.order)).As(context.Background(), &model, basetypes.ObjectAsOptions{}); d.HasError() {
+			t.Fatal(d)
+		}
+		if d := b.FlattenAfterApply(after, served, &model); d.HasError() {
+			t.Fatalf("%s: %v", c.name, d)
+		}
+		if s := model.Enabled.String(); s != c.want {
+			t.Errorf("%s: enabled = %s after the write, want %s", c.name, s, c.want)
+		}
+	}
+}
+
+// State written before an entry had its Complement holds it as null, which a
+// plan that skips the refresh carries over; the write leaves the keys to
+// their attributes, so the Complement stays null until the next refresh.
+func TestUnitComplementKeepsAPlannedNullInAnEntry(t *testing.T) {
+	b := sharedBinding(t)
+	served := `{"Opts": [{"ItemType": "Movie", "FetcherOrder": [], "DisabledFetchers": []}]}`
+	ctx := WithAvailable(context.Background(), offering(map[string][]string{"Movie": {"A", "B"}}, new([]string)))
+	read, d := b.Flatten(ctx, doc(t, served), types.ObjectNull(b.AttrTypes))
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	var model sharedModel
+	if d := object(t, with(t, read, "opts[0].fetchers", types.ListNull(types.StringType))).As(context.Background(), &model, basetypes.ObjectAsOptions{}); d.HasError() {
+		t.Fatal(d)
+	}
+	if d := b.FlattenAfterApply(ctx, served, &model); d.HasError() {
+		t.Fatal(d)
+	}
+	if s := at(t, object(t, model.Opts.Elements()[0]), "fetchers").String(); s != "<null>" {
+		t.Errorf("opts[0].fetchers = %s after the write, want the planned null", s)
+	}
+}
+
+type sharedModel struct {
+	Name     types.String `tfsdk:"name"`
+	Order    types.List   `tfsdk:"order"`
+	Disabled types.List   `tfsdk:"disabled"`
+	Enabled  types.List   `tfsdk:"enabled"`
+	Types    types.List   `tfsdk:"types"`
+	Opts     types.List   `tfsdk:"opts"`
 }

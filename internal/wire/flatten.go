@@ -59,7 +59,8 @@ func (b *Binding) FlattenInto(ctx context.Context, raw string, model any) diag.D
 
 // FlattenAfterApply is FlattenInto for the read that follows a write, with
 // model holding the plan: it keeps the planned nulls KeepPlannedNulls
-// describes and reports what Dropped finds, and fills model either way.
+// describes and the planned Complements keepUnwrittenComplements describes,
+// reports what Dropped finds, and fills model either way.
 func (b *Binding) FlattenAfterApply(ctx context.Context, raw string, model any) diag.Diagnostics {
 	planned, diags := types.ObjectValueFrom(ctx, b.AttrTypes, model)
 	if diags.HasError() {
@@ -71,6 +72,7 @@ func (b *Binding) FlattenAfterApply(ctx context.Context, raw string, model any) 
 		return diags
 	}
 	got = KeepPlannedNulls(planned, got)
+	got = keepUnwrittenComplements(ctx, b.trie(), planned, got)
 	diags.Append(b.Dropped(planned, got)...)
 	return append(diags, got.As(ctx, model, basetypes.ObjectAsOptions{})...)
 }

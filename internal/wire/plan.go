@@ -6,6 +6,8 @@ package wire
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -95,6 +97,93 @@ func keepNullsInList(ctx context.Context, pv attr.Value, got basetypes.ListValue
 		return got
 	}
 	return out
+}
+
+// keepUnwrittenComplements returns got with each Complement that the write
+// left alone set back to its planned value. A Complement reads the names the
+// server offers at the time of the read, so it reads another value after a
+// plugin that the same apply installs offers more names, although neither of
+// its keys changed; the next refresh reads that value instead.
+func keepUnwrittenComplements(ctx context.Context, n *node, planned, got basetypes.ObjectValue) basetypes.ObjectValue {
+	if planned.IsNull() || planned.IsUnknown() || got.IsNull() || got.IsUnknown() {
+		return got
+	}
+	plannedAttrs := planned.Attributes()
+	out := maps.Clone(got.Attributes())
+	changed := false
+	for name, child := range n.children {
+		pv, gv := plannedAttrs[name], out[name]
+		if pv == nil || gv == nil {
+			continue
+		}
+		nv := gv
+		switch {
+		case child.field == nil:
+			if p, ok := pv.(basetypes.ObjectValue); ok {
+				if g, ok := gv.(basetypes.ObjectValue); ok {
+					nv = keepUnwrittenComplements(ctx, child, p, g)
+				}
+			}
+		case child.field.f.Mode == ModeComplement:
+			if !pv.IsUnknown() && !complementWrites(child.field.f, plannedAttrs) {
+				nv = pv
+			}
+		case child.field.f.Elem != nil:
+			nv = keepUnwrittenInElements(ctx, child.field.f.Elem.trie(), pv, gv)
+		}
+		if !nv.Equal(gv) {
+			out[name], changed = nv, true
+		}
+	}
+	if !changed {
+		return got
+	}
+	obj, diags := types.ObjectValue(got.AttributeTypes(ctx), out)
+	if diags.HasError() {
+		return got
+	}
+	return obj
+}
+
+func keepUnwrittenInElements(ctx context.Context, n *node, pv, gv attr.Value) attr.Value {
+	switch g := gv.(type) {
+	case basetypes.ObjectValue:
+		if p, ok := pv.(basetypes.ObjectValue); ok {
+			return keepUnwrittenComplements(ctx, n, p, g)
+		}
+	case basetypes.ListValue:
+		p, ok := pv.(basetypes.ListValue)
+		if !ok || p.IsNull() || p.IsUnknown() || g.IsNull() || g.IsUnknown() || len(p.Elements()) != len(g.Elements()) {
+			return gv
+		}
+		elems := slices.Clone(g.Elements())
+		for i, ge := range elems {
+			if gObj, ok := ge.(basetypes.ObjectValue); ok {
+				if pObj, ok := p.Elements()[i].(basetypes.ObjectValue); ok {
+					elems[i] = keepUnwrittenComplements(ctx, n, pObj, gObj)
+				}
+			}
+		}
+		if out, diags := types.ListValue(g.ElementType(ctx), elems); !diags.HasError() {
+			return out
+		}
+	}
+	return gv
+}
+
+// complementWrites reports whether writeShared writes f's keys, as it does
+// when f has a value and one of the attributes that share its keys has none,
+// such as while it is unknown.
+func complementWrites(f *Field, attrs map[string]attr.Value) bool {
+	if v := attrs[f.Name]; v == nil || v.IsNull() || v.IsUnknown() {
+		return false
+	}
+	for _, s := range f.Shares {
+		if v := attrs[s.Name]; v == nil || v.IsNull() || v.IsUnknown() {
+			return true
+		}
+	}
+	return false
 }
 
 // Dropped reports each attribute planned with a value that the server read
