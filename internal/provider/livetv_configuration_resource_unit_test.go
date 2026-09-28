@@ -29,11 +29,6 @@ func TestUnitLiveTVConfigurationRoundTrip(t *testing.T) {
 	checkSameJSON(t, base, fixture)
 }
 
-func mustJSON(v interface{}) []byte {
-	b, _ := json.Marshal(v)
-	return b
-}
-
 // A first apply plans the settings an entry leaves unset as unknown; the
 // write keeps those of the served entry with the same id.
 func TestUnitLiveTVTunerHostKeepsTheServedEntrysSettings(t *testing.T) {

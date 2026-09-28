@@ -28,7 +28,5 @@ func TestUnitMetadataConfigurationRoundTrip(t *testing.T) {
 	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
 		t.Fatalf("write: %v", d)
 	}
-	if got := string(mustJSON(base)); got != fixture {
-		t.Fatalf("round-trip mismatch\n got: %s\nwant: %s", got, fixture)
-	}
+	checkSameJSON(t, base, fixture)
 }

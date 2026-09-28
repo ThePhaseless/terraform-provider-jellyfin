@@ -49,7 +49,7 @@ func TestUnitUserPolicyRoundTrip(t *testing.T) {
 	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
 		t.Fatalf("write: %v", d)
 	}
-	testUnitAssertJSONEqual(t, mustJSON(base), fixture)
+	checkSameJSON(t, base, fixture)
 }
 
 func TestUnitUserPolicyWriteSendsNullParentalRatings(t *testing.T) {

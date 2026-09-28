@@ -30,16 +30,7 @@ func TestUnitBrandingConfigurationRoundTrip(t *testing.T) {
 		t.Fatalf("write: %v", d)
 	}
 
-	var got, want map[string]any
-	if err := json.Unmarshal(mustJSON(base), &got); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal([]byte(fixture), &want); err != nil {
-		t.Fatal(err)
-	}
-	if string(mustJSON(got)) != string(mustJSON(want)) {
-		t.Fatalf("round-trip mismatch\n got: %s\nwant: %s", mustJSON(got), mustJSON(want))
-	}
+	checkSameJSON(t, base, fixture)
 }
 
 func TestUnitBrandingSplashscreenLocationIsNotComputedReadOrWritten(t *testing.T) {

@@ -74,7 +74,7 @@ func TestUnitLibraryOptionsRoundTrip(t *testing.T) {
 	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
 		t.Fatalf("write: %v", d)
 	}
-	testUnitAssertJSONEqual(t, mustJSON(base), fixture)
+	checkSameJSON(t, base, fixture)
 }
 
 func TestUnitTypeOptionsWriteKeepsUnsetServerValues(t *testing.T) {
@@ -118,7 +118,7 @@ func TestUnitTypeOptionsWriteKeepsUnsetServerValues(t *testing.T) {
 		"SimilarItemProviders": ["Local Genre/Tag"],
 		"SimilarItemProviderOrder": ["Local Genre/Tag", "TheMovieDb"]
 	}]`
-	testUnitAssertJSONEqual(t, base["TypeOptions"], want)
+	checkSameJSON(t, base["TypeOptions"], want)
 }
 
 func TestUnitTypeOptionsWithoutSimilarItemKeysReadAsNull(t *testing.T) {
@@ -859,22 +859,6 @@ func testUnitList(t *testing.T, elemType attr.Type, elements any) types.List {
 		t.Fatalf("building list: %v", d)
 	}
 	return list
-}
-
-func testUnitAssertJSONEqual(t *testing.T, got json.RawMessage, want string) {
-	t.Helper()
-	var g, w any
-	if err := json.Unmarshal(got, &g); err != nil {
-		t.Fatalf("unmarshal got: %v", err)
-	}
-	if err := json.Unmarshal([]byte(want), &w); err != nil {
-		t.Fatalf("unmarshal want: %v", err)
-	}
-	gotJSON, _ := json.Marshal(g)
-	wantJSON, _ := json.Marshal(w)
-	if string(gotJSON) != string(wantJSON) {
-		t.Fatalf("JSON mismatch\n got: %s\nwant: %s", gotJSON, wantJSON)
-	}
 }
 
 func testUnitLibraryOptionsWire(t *testing.T) *wire.Binding {

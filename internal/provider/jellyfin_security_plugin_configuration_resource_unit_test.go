@@ -274,7 +274,11 @@ func TestUnitJellyfinSecurityWriteKeepsTheServedShape(t *testing.T) {
 	if d := b.OverlayModel(ctx, written, &data); d.HasError() {
 		t.Fatalf("overlay: %v", d.Errors())
 	}
-	got, err := reduceSecurityPluginPayload(string(mustJSON(written)))
+	payloadWritten, err := json.Marshal(written)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := reduceSecurityPluginPayload(string(payloadWritten))
 	if err != nil {
 		t.Fatalf("reduce: %v", err)
 	}
