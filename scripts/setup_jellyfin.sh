@@ -15,7 +15,7 @@ ENV_FILE="${JELLYFIN_ENV_FILE:-$(dirname "$0")/../internal/provider/supported_je
 echo "Waiting for Jellyfin to become ready at ${JELLYFIN_ENDPOINT}..." >&2
 for i in $(seq 1 "$MAX_WAIT"); do
     # /Startup/User returns JSON when not configured, or 401 when already configured.
-    HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "${JELLYFIN_ENDPOINT}/Startup/User" 2>/dev/null || true)
+    HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "${JELLYFIN_ENDPOINT}/Startup/User" 2>/dev/null || echo "000")
     if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "401" ]; then
         echo "Jellyfin is ready! (waited ${i}s)" >&2
         break
