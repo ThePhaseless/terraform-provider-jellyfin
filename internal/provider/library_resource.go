@@ -809,18 +809,20 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 	}
 
 	// With the options unchanged, the update can only be collection_type going
-	// from the "" earlier versions stored to mixed, which the server already
-	// has. Writing the options anyway would store them as the server reads
-	// them, and a plan made without a refresh, which carries the options from
-	// state written by an older version, need not match that.
+	// from the "" earlier versions stored to mixed, or the paths changing
+	// their order, which the server already has. Writing the options anyway
+	// would store them as the server reads them, and a plan made without a
+	// refresh, which carries the options from state written by an older
+	// version, need not match that.
 	var plannedOptions, priorOptions types.Object
 	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("library_options"), &plannedOptions)...)
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("library_options"), &priorOptions)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if plannedOptions.Equal(priorOptions) {
+	if unchangedOptions(plannedOptions, priorOptions) {
 		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("library_options"), priorOptions)...)
 		return
 	}
 
@@ -883,6 +885,28 @@ func (r *LibraryResource) Delete(ctx context.Context, req resource.DeleteRequest
 		}
 		resp.Diagnostics.AddError("Failed to delete library", err.Error())
 	}
+}
+
+// unchangedOptions reports whether planned holds the prior options. An
+// attribute planned unknown over a null prior counts as unchanged: state from
+// a release without the attribute holds it as null, and a plan that skips
+// the refresh leaves such a computed attribute unknown.
+func unchangedOptions(planned, prior types.Object) bool {
+	if planned.IsNull() || planned.IsUnknown() || prior.IsNull() || prior.IsUnknown() {
+		return planned.Equal(prior)
+	}
+	priorAttrs := prior.Attributes()
+	for name, v := range planned.Attributes() {
+		p, ok := priorAttrs[name]
+		switch {
+		case !ok:
+			return false
+		case v.IsUnknown() && p.IsNull(), v.Equal(p):
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 var errLibraryNotFound = errors.New("library not found")

@@ -664,6 +664,45 @@ func TestUnitLibraryPathsKeepTheirOrder(t *testing.T) {
 	}
 }
 
+// State written by a release without subtitle_fetchers holds it as null, and
+// a plan that skips the refresh leaves it unknown; with the options otherwise
+// unchanged, Update writes nothing, as writing them would read back options
+// the older state does not hold.
+func TestUnitLibraryUpdateWritesNoOptionsOverOlderState(t *testing.T) {
+	ctx := context.Background()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s %s", r.Method, r.URL)
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	r := NewLibraryResource()
+	configure(t, r, client.NewClient(srv.URL, "k"))
+
+	const served = `{"Name": "Lib", "Locations": ["/m"], "ItemId": "i", "LibraryOptions": {"EnableRealtimeMonitor": true}}`
+	options := path.Root("library_options")
+	olderState := []planValue{
+		{options.AtName("disabled"), types.BoolNull()},
+		{options.AtName("extract_chapters_during_library_scan"), types.BoolNull()},
+	}
+	state := planRead(t, r, served, append(olderState, planValue{path.Root("collection_type"), types.StringValue("")})...)
+	plan := planRead(t, r, served, append(olderState,
+		planValue{path.Root("collection_type"), types.StringValue("mixed")},
+		planValue{options.AtName("subtitle_fetchers"), types.ListUnknown(types.StringType)})...)
+
+	resp := resource.UpdateResponse{State: tfsdk.State(state)}
+	r.Update(ctx, resource.UpdateRequest{Plan: plan, State: tfsdk.State(state)}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("update: %v", resp.Diagnostics)
+	}
+	var collectionType types.String
+	var subtitleFetchers types.List
+	resp.Diagnostics.Append(resp.State.GetAttribute(ctx, path.Root("collection_type"), &collectionType)...)
+	resp.Diagnostics.Append(resp.State.GetAttribute(ctx, options.AtName("subtitle_fetchers"), &subtitleFetchers)...)
+	if collectionType.ValueString() != "mixed" || !subtitleFetchers.IsNull() {
+		t.Errorf("state after update: collection_type %s, subtitle_fetchers %s; want mixed and the prior null (%v)", collectionType, subtitleFetchers, resp.Diagnostics)
+	}
+}
+
 func TestUnitLibraryVersionErrorsFollowServerVersion(t *testing.T) {
 	ctx := context.Background()
 	similarItems := path.Root("library_options").AtName("type_options").AtListIndex(0).AtName("similar_item_providers")
