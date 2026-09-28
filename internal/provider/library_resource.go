@@ -27,6 +27,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
@@ -696,43 +697,7 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	base, err := parseJSONObject(folder.GetLibraryOptions().RawJSON)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to parse library options", err.Error())
-		return
-	}
-
-	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
-		resp.Diagnostics.Append(d...)
-		return
-	}
-
-	payload, err := json.Marshal(base)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to serialize library options", err.Error())
-		return
-	}
-
-	if err := r.client.UpdateVirtualFolder(ctx, folder.ItemID, &client.LibraryOptions{RawJSON: string(payload)}); err != nil {
-		resp.Diagnostics.AddError("Failed to update library options", err.Error())
-		return
-	}
-
-	updated, err := r.findFolder(ctx, data.Name.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to read library after options update", err.Error())
-		return
-	}
-
-	data.ItemID = types.StringValue(updated.ItemID)
-	data.ID = types.StringValue(updated.Name)
-	data.CollectionType = flattenCollectionType(updated.CollectionType)
-	pathValues, diags := pathsInOrder(ctx, data.Paths, updated.Locations)
-	resp.Diagnostics.Append(diags...)
-	data.Paths = pathValues
-	resp.Diagnostics.Append(b.FlattenAfterApply(ctx, updated.GetLibraryOptions().RawJSON, &data)...)
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	r.writeOptions(ctx, b, folder, &data, &resp.Diagnostics, &resp.State)
 }
 
 func (r *LibraryResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -758,12 +723,7 @@ func (r *LibraryResource) Read(ctx context.Context, req resource.ReadRequest, re
 	}
 	ctx = wire.WithAvailable(ctx, newOfferedProviders(r.client).forLibrary(folder.CollectionType))
 
-	data.CollectionType = flattenCollectionType(folder.CollectionType)
-	data.ItemID = types.StringValue(folder.ItemID)
-	data.ID = types.StringValue(folder.Name)
-	pathValues, diags := pathsInOrder(ctx, data.Paths, folder.Locations)
-	resp.Diagnostics.Append(diags...)
-	data.Paths = pathValues
+	resp.Diagnostics.Append(readFolder(ctx, folder, &data)...)
 	resp.Diagnostics.Append(b.FlattenInto(ctx, folder.GetLibraryOptions().RawJSON, &data)...)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -812,43 +772,54 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 	}
 	ctx = wire.WithAvailable(ctx, newOfferedProviders(r.client).forLibrary(folder.CollectionType))
 
+	r.writeOptions(ctx, b, folder, &data, &resp.Diagnostics, &resp.State)
+}
+
+// writeOptions writes the planned library options over those folder serves,
+// and stores the library as the server then lists it.
+func (r *LibraryResource) writeOptions(ctx context.Context, b *wire.Binding, folder *client.VirtualFolder, data *LibraryResourceModel, diags *diag.Diagnostics, state *tfsdk.State) {
 	base, err := parseJSONObject(folder.GetLibraryOptions().RawJSON)
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to parse library options", err.Error())
+		diags.AddError("Failed to parse library options", err.Error())
 		return
 	}
 
-	if d := b.OverlayModel(ctx, base, &data); d.HasError() {
-		resp.Diagnostics.Append(d...)
+	if d := b.OverlayModel(ctx, base, data); d.HasError() {
+		diags.Append(d...)
 		return
 	}
 
 	payload, err := json.Marshal(base)
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to serialize library options", err.Error())
+		diags.AddError("Failed to serialize library options", err.Error())
 		return
 	}
 
 	if err := r.client.UpdateVirtualFolder(ctx, folder.ItemID, &client.LibraryOptions{RawJSON: string(payload)}); err != nil {
-		resp.Diagnostics.AddError("Failed to update library options", err.Error())
+		diags.AddError("Failed to update library options", err.Error())
 		return
 	}
 
-	updated, err := r.findFolder(ctx, state.Name.ValueString())
+	updated, err := r.findFolder(ctx, folder.Name)
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to read library after update", err.Error())
+		diags.AddError("Failed to read library after options update", err.Error())
 		return
 	}
 
-	data.ItemID = types.StringValue(updated.ItemID)
-	data.ID = types.StringValue(updated.Name)
-	data.CollectionType = flattenCollectionType(updated.CollectionType)
-	pathValues, diags := pathsInOrder(ctx, data.Paths, updated.Locations)
-	resp.Diagnostics.Append(diags...)
-	data.Paths = pathValues
-	resp.Diagnostics.Append(b.FlattenAfterApply(ctx, updated.GetLibraryOptions().RawJSON, &data)...)
+	diags.Append(readFolder(ctx, updated, data)...)
+	diags.Append(b.FlattenAfterApply(ctx, updated.GetLibraryOptions().RawJSON, data)...)
+	diags.Append(state.Set(ctx, data)...)
+}
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+// readFolder sets the attributes the library listing holds outside the
+// library options.
+func readFolder(ctx context.Context, folder *client.VirtualFolder, data *LibraryResourceModel) diag.Diagnostics {
+	data.ID = types.StringValue(folder.Name)
+	data.ItemID = types.StringValue(folder.ItemID)
+	data.CollectionType = flattenCollectionType(folder.CollectionType)
+	paths, diags := pathsInOrder(ctx, data.Paths, folder.Locations)
+	data.Paths = paths
+	return diags
 }
 
 func (r *LibraryResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
