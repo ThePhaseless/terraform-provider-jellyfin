@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/provider"
 )
 
 var sanitizeRe = regexp.MustCompile(`[^a-zA-Z0-9]+`)
@@ -359,10 +360,11 @@ func (g *generator) generatePluginRepositories() ([]string, []string, error) {
 }
 
 func (g *generator) generatePlugins() ([]string, []string, error) {
-	plugins, err := g.client.GetInstalledPlugins(g.context())
+	listed, err := g.client.GetInstalledPlugins(g.context())
 	if err != nil {
 		return nil, nil, err
 	}
+	plugins := provider.ImportablePlugins(listed)
 
 	// Try to resolve repository URLs from available packages.
 	repoURLs := g.resolvePluginRepoURLs(plugins)

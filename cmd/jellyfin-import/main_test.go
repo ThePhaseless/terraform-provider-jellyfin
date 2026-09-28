@@ -1650,3 +1650,34 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		}
 	})
 }
+
+// Jellyfin lists each version of a plugin it holds, and a plugin it deletes at
+// the next restart, under the plugin's ID; the import reads one entry per ID.
+func TestGeneratePluginsImportsEachPluginOnce(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]any{
+			{"Id": "foo-id", "Name": "Foo", "Version": "1.0.0.0", "Status": "Superseded"},
+			{"Id": "foo-id", "Name": "Foo", "Version": "2.0.0.0", "Status": "Restart"},
+			{"Id": "bar-id", "Name": "Bar", "Version": "3.0.0.0", "Status": "Deleted"},
+		})
+	})
+	mux.HandleFunc("/Packages", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []any{})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	g := &generator{client: client.NewClient(server.URL, "k"), outputDir: t.TempDir(), usedNames: map[string]bool{}}
+	imports, resources, err := g.generatePlugins()
+	if err != nil {
+		t.Fatalf("generatePlugins() error: %v", err)
+	}
+	if len(imports) != 1 || !strings.Contains(imports[0], `id = "foo-id"`) {
+		t.Fatalf("imports = %q, want Foo alone", imports)
+	}
+	if !strings.Contains(resources[0], `version = "2.0.0.0"`) {
+		t.Errorf("resource = %s, want the version the import reads", resources[0])
+	}
+}
+

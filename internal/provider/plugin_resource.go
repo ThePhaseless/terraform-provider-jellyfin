@@ -467,6 +467,26 @@ func selectInstalledPlugin(plugins []client.InstalledPlugin, id, name, version s
 	return selected, found
 }
 
+// ImportablePlugins returns, for each plugin that plugins, the answer of GET
+// /Plugins, lists, the entry that a jellyfin_plugin imported by the plugin's
+// ID reads: one entry per plugin, although Jellyfin lists each version it
+// holds, and none for a plugin it deletes at the next restart.
+func ImportablePlugins(plugins []client.InstalledPlugin) []client.InstalledPlugin {
+	var out []client.InstalledPlugin
+	seen := map[string]bool{}
+	for _, p := range plugins {
+		id := normalizeGUID(p.ID)
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if selected, found := selectInstalledPlugin(plugins, p.ID, "", ""); found {
+			out = append(out, selected)
+		}
+	}
+	return out
+}
+
 // listedPlugins returns the entries GET /Plugins lists for the plugin with
 // the given id, leaving out versions Jellyfin deletes at the next restart.
 func (r *PluginResource) listedPlugins(ctx context.Context, id string) ([]client.InstalledPlugin, error) {
