@@ -19,6 +19,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -881,5 +882,42 @@ func TestScheduledTaskReadAfterImport(t *testing.T) {
 				t.Errorf("read id %v, task_id %v, key %v; want id and task_id %s, key %s", got.ID, got.TaskID, got.Key, tc.wantTaskID, tc.wantKey)
 			}
 		})
+	}
+}
+
+// A key missing from state, as in state from releases without it, stays
+// unknown in a plan that changes the task, since apply reads it back.
+func TestUnitScheduledTaskKeyPlansUnknownOverANullPriorKey(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	s := scheduledTaskSchema(t)
+	state := tfsdk.State{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nil)}
+	if d := state.Set(ctx, &ScheduledTaskResourceModel{
+		ID:       types.StringValue("abc"),
+		Key:      types.StringNull(),
+		TaskID:   types.StringValue("abc"),
+		Triggers: types.ListValueMust(scheduledTaskTriggerType(t), nil),
+	}); d.HasError() {
+		t.Fatal(d)
+	}
+
+	key, ok := s.Attributes["key"].(rschema.StringAttribute)
+	if !ok {
+		t.Fatalf("key is a %T", s.Attributes["key"])
+	}
+	req := planmodifier.StringRequest{
+		Path:        path.Root("key"),
+		ConfigValue: types.StringNull(),
+		PlanValue:   types.StringUnknown(),
+		StateValue:  types.StringNull(),
+		State:       state,
+	}
+	resp := planmodifier.StringResponse{PlanValue: req.PlanValue}
+	for _, m := range key.PlanModifiers {
+		m.PlanModifyString(ctx, req, &resp)
+	}
+	if !resp.PlanValue.IsUnknown() {
+		t.Errorf("planned key = %s, want unknown", resp.PlanValue)
 	}
 }

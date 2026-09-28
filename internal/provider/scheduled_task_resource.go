@@ -113,8 +113,10 @@ func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaReque
 				Validators: []validator.String{
 					stringvalidator.LengthAtLeast(1),
 				},
+				// State from releases without key holds it as null, which
+				// UseStateForUnknown would plan, although apply reads the key.
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.UseNonNullStateForUnknown(),
 				},
 			},
 			"task_id": schema.StringAttribute{
