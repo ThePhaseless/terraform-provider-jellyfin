@@ -1,1 +1,1 @@
-terraform import jellyfin_library.example <library-name>
+terraform import jellyfin_library.movies "<library-name>"
