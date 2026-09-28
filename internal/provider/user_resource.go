@@ -435,10 +435,7 @@ func (r *UserResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 		return
 	}
 
-	if err := r.client.DeleteUser(ctx, data.ID.ValueString()); err != nil {
-		if client.IsNotFound(err) {
-			return
-		}
+	if err := r.client.DeleteUser(ctx, data.ID.ValueString()); err != nil && !client.IsNotFound(err) {
 		resp.Diagnostics.AddError("Failed to delete user", err.Error())
 	}
 }

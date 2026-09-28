@@ -685,10 +685,7 @@ func (r *LibraryResource) Delete(ctx context.Context, req resource.DeleteRequest
 		return
 	}
 
-	if err := r.client.RemoveVirtualFolder(ctx, data.Name.ValueString()); err != nil {
-		if client.IsNotFound(err) {
-			return
-		}
+	if err := r.client.RemoveVirtualFolder(ctx, data.Name.ValueString()); err != nil && !client.IsNotFound(err) {
 		resp.Diagnostics.AddError("Failed to delete library", err.Error())
 	}
 }
