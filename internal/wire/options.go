@@ -36,6 +36,9 @@ type attrOption struct {
 	carryBy     string
 	readMissing attr.Value
 	versionMsg  func(VersionGap) (summary, detail string)
+	shares      []string
+	offered     string
+	scope       string
 	used        bool
 }
 
@@ -52,7 +55,7 @@ func (o *options) setMode(path string, m Mode, reason string) *attrOption {
 		o.errs = append(o.errs, fmt.Sprintf("%s is declared both %s and %s", path, a.mode, m))
 	}
 	a.mode, a.modeSet = m, true
-	if m != ModeSent && m != ModeIdentity && strings.TrimSpace(reason) == "" {
+	if m != ModeSent && m != ModeIdentity && m != ModeComplement && strings.TrimSpace(reason) == "" {
 		o.errs = append(o.errs, fmt.Sprintf("%s is declared %s without a reason", path, m))
 	}
 	a.reason = reason
@@ -163,6 +166,40 @@ func ReadMissingAs(attrPath string, v attr.Value) Option {
 // wording, so a resource keeps the message its users already know.
 func VersionMessage(attrPath string, message func(VersionGap) (summary, detail string)) Option {
 	return func(o *options) { o.attr(attrPath).versionMsg = message }
+}
+
+// Orders makes the list attribute at attrPath write, besides its own key, the
+// key of orderAttr, a list attribute of the same object: its names, then the
+// names orderAttr's key serves that it leaves out. orderAttr still writes its
+// key itself whenever it has a value to write, so Orders writes it only while
+// orderAttr has none, such as while it is unknown.
+func Orders(attrPath, orderAttr string) Option {
+	return func(o *options) {
+		a := o.attr(attrPath)
+		if a.shares != nil {
+			o.errs = append(o.errs, fmt.Sprintf("%s is given Orders or Complement twice", attrPath))
+		}
+		a.shares = []string{orderAttr}
+	}
+}
+
+// Complement maps the list attribute at attrPath, the enabled names in
+// priority order, to the keys of orderAttr and disabledAttr, list attributes
+// of the same object: it writes its names followed by the offered names it
+// leaves out to the first, and those offered names to the second, and reads
+// the ordered names that are not disabled followed by the offered names that
+// neither key lists. The offered names are what the AvailableFunc of the
+// context returns for offered and for the value of scopeAttr, a string
+// attribute of the same object, or "" when scopeAttr is "". Like Orders, it
+// writes each key only while the attribute that owns it has no value to write.
+func Complement(attrPath, orderAttr, disabledAttr, offered, scopeAttr string) Option {
+	return func(o *options) {
+		a := o.setMode(attrPath, ModeComplement, "")
+		if a.shares != nil {
+			o.errs = append(o.errs, fmt.Sprintf("%s is given Orders or Complement twice", attrPath))
+		}
+		a.shares, a.offered, a.scope = []string{orderAttr, disabledAttr}, offered, scopeAttr
+	}
 }
 
 // Unmanaged lets a rebuilt element of object leave out key, which no

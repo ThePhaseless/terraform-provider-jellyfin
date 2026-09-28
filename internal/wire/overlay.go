@@ -54,6 +54,9 @@ func (b *Binding) overlay(ctx context.Context, doc map[string]json.RawMessage, o
 			continue
 		}
 		diags.Append(writeField(ctx, doc, d, v, merged, attrPathOf(at, d.attrPath), trail)...)
+		if len(d.f.Shares) > 0 && !diags.HasError() {
+			diags.Append(b.writeShared(ctx, doc, obj, d, v, merged, attrPathOf(at, d.attrPath), trail)...)
+		}
 		if diags.HasError() {
 			return diags
 		}
@@ -93,16 +96,21 @@ func trailOf(trail string, keyPath []string) string {
 	return joinKeyPath(trail, strings.Join(keyPath, "."))
 }
 
+// writes reports whether writeField writes v, the value of f.
+func writes(f *Field, v attr.Value, merged bool) bool {
+	if !f.Mode.hasKey() || f.ReadOnly || v.IsUnknown() {
+		return false
+	}
+	return !v.IsNull() || f.NullClears && merged
+}
+
 func writeField(ctx context.Context, doc map[string]json.RawMessage, d docField, v attr.Value, merged bool, at path.Path, trail string) diag.Diagnostics {
 	f := d.f
-	if !f.Mode.hasKey() || f.ReadOnly || v.IsUnknown() {
+	if !writes(f, v, merged) {
 		return nil
 	}
 	keyTrail := trailOf(trail, d.keyPath)
 	if v.IsNull() {
-		if !f.NullClears || !merged {
-			return nil
-		}
 		tflog.Debug(ctx, "Clearing Jellyfin key", map[string]any{"attribute": at.String(), "key": keyTrail})
 		return put(ctx, doc, d.keyPath, json.RawMessage("null"))
 	}
