@@ -20,12 +20,18 @@ import (
 var sanitizeRe = regexp.MustCompile(`[^a-zA-Z0-9]+`)
 
 func main() {
-	endpoint := flag.String("endpoint", os.Getenv("JELLYFIN_ENDPOINT"), "Jellyfin server URL (or JELLYFIN_ENDPOINT env)")
-	apiKey := flag.String("api-key", os.Getenv("JELLYFIN_API_KEY"), "Jellyfin API key (or JELLYFIN_API_KEY env)")
-	username := flag.String("username", os.Getenv("JELLYFIN_USERNAME"), "Jellyfin username (or JELLYFIN_USERNAME env)")
-	password := flag.String("password", os.Getenv("JELLYFIN_PASSWORD"), "Jellyfin password (or JELLYFIN_PASSWORD env)")
+	// The environment fills in a flag only after parsing: as a flag default,
+	// the usage text that -h or a mistyped flag prints would show the secrets.
+	endpoint := flag.String("endpoint", "", "Jellyfin server URL (or JELLYFIN_ENDPOINT env)")
+	apiKey := flag.String("api-key", "", "Jellyfin API key (or JELLYFIN_API_KEY env)")
+	username := flag.String("username", "", "Jellyfin username (or JELLYFIN_USERNAME env)")
+	password := flag.String("password", "", "Jellyfin password (or JELLYFIN_PASSWORD env)")
 	outputDir := flag.String("output", ".", "Output directory for generated Terraform files")
 	flag.Parse()
+	fromEnv(endpoint, "JELLYFIN_ENDPOINT")
+	fromEnv(apiKey, "JELLYFIN_API_KEY")
+	fromEnv(username, "JELLYFIN_USERNAME")
+	fromEnv(password, "JELLYFIN_PASSWORD")
 
 	if *endpoint == "" {
 		fmt.Fprintln(os.Stderr, "Error: --endpoint or JELLYFIN_ENDPOINT is required")
@@ -60,6 +66,13 @@ func main() {
 	}
 
 	fmt.Println("Import files generated successfully in", *outputDir)
+}
+
+// fromEnv sets an unset flag's value from the environment variable env.
+func fromEnv(value *string, env string) {
+	if *value == "" {
+		*value = os.Getenv(env)
+	}
 }
 
 func importClient(ctx context.Context, endpoint, apiKey, username, password string) (*client.Client, error) {
