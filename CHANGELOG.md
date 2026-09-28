@@ -7,16 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `jellyfin_scheduled_task`: optional `key`, the readable task key Jellyfin lists (for example `PluginUpdates` or `RefreshLibrary`), instead of the hashed `task_id`, which is now optional and computed. `key` and `task_id` may both be set if they name the same task, so configuration written by `terraform plan -generate-config-out` plans cleanly. A key no task has, or one several tasks share, fails at plan time. Import accepts a key or an ID, and `jellyfin-import` writes `key`.
+- `jellyfin_library`: `library_options.subtitle_fetchers`, the enabled subtitle fetchers in priority order. Every other fetcher the server offers for the library's content type is disabled, and one installed later shows up as a change.
+- `jellyfin_system_configuration`: `metadata_options[].metadata_fetchers` and `image_fetchers`, the enabled fetchers for the entry's item type in priority order, with every other offered fetcher disabled. They read as null for item types Jellyfin offers no fetchers for, such as Person.
+
 ### Changed
 
 - Every JSON-backed resource now maps its attributes to Jellyfin's keys from the committed Jellyfin OpenAPI and JellyfinSecurity schema goldens, instead of about 340 key names typed by hand in the provider and again in `jellyfin-import`. A CI test proves each attribute resolves to exactly one real key, so a misspelt key (the kind that left `enable_case_sensitive_item_ids` always null) now fails CI instead of shipping. Schema, state and the payloads sent to Jellyfin are unchanged; an acceptance test applies each resource with v0.3.8 and plans it with this version to prove it.
 - `jellyfin_encoding_configuration`: setting `subtitle_extraction_timeout_minutes` or `hls_audio_seek_strategy` against a server older than Jellyfin 12.0 now fails at plan instead of apply, with the same message. The check uses the server version, so it also catches a value the server would have omitted. While such a value stays in the configuration, a destroy fails the same way.
 - When Jellyfin does not keep a value the plan set, apply now reports "Value not kept by Jellyfin" at that attribute instead of Terraform's generic "inconsistent result after apply". On `jellyfin_library` this replaces the combined "Similar item settings not supported" error.
 - `jellyfin-import` renders every configuration and scheduled task from the provider's own read, so its output cannot drift from what the provider reads.
+- `jellyfin_library`: `type_options[].metadata_fetchers`, `image_fetchers` and `similar_item_providers` are now priority-ordered. Changing one also writes Jellyfin's matching order key, as the web UI does: the listed names first, then the rest of the server's order. A list left unchanged keeps its order, so existing configurations plan no change.
+- `jellyfin_library` and `jellyfin_system_configuration` reads also call `GET /Libraries/AvailableOptions` to learn which providers the server offers.
+
+### Deprecated
+
+- `jellyfin_library`: `type_options[].metadata_fetcher_order`, `image_fetcher_order` and `similar_item_provider_order` (use the list attribute; while set, they still override the order), and `library_options.disabled_subtitle_fetchers` and `subtitle_fetcher_order` (use `subtitle_fetchers`).
+- `jellyfin_system_configuration`: `metadata_options[].disabled_metadata_fetchers`, `metadata_fetcher_order`, `disabled_image_fetchers` and `image_fetcher_order` (use `metadata_fetchers` and `image_fetchers`).
+- The deprecated attributes still work on their own. Setting a disabled or order list together with the combined attribute that replaces it is a plan-time error.
 
 ### Fixed
 
 - `jellyfin_system_configuration`, `jellyfin_livetv_configuration`, `jellyfin_scheduled_task`: an attribute left unset inside a list element (for example a tuner host's `source` or a trigger's `day_of_week`) that Jellyfin serves back as an empty string or list now stays null instead of failing the apply.
+- `jellyfin_system_configuration`: inserting or reordering `metadata_options` entries wrote another item type's fetcher, saver or reader lists into an entry that left them unset. Each entry now keeps its own values.
 
 ## [0.3.8] - 2026-09-27
 
