@@ -235,6 +235,15 @@ func TestAccScheduledTaskResourceKey(t *testing.T) {
 				},
 			},
 			{
+				Config: testAccScheduledTaskConfig(`task_id = "` + scanMediaLibraryID + `"`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(name, plancheck.ResourceActionUpdate),
+						plancheck.ExpectKnownValue(name, tfjsonpath.New("key"), knownvalue.StringExact("RefreshLibrary")),
+					},
+				},
+			},
+			{
 				Config: testAccScheduledTaskConfig(`key = "CleanLogFiles"`),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
