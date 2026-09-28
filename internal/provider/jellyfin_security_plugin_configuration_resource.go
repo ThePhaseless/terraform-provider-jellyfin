@@ -192,58 +192,6 @@ func (r *JellyfinSecurityPluginConfigurationResource) Wire() (*wire.Binding, err
 	return securityPluginWire()
 }
 
-// OidcProviderModel describes an OIDC provider configuration.
-type OidcProviderModel struct {
-	ID                           types.String `tfsdk:"id"`
-	DisplayName                  types.String `tfsdk:"display_name"`
-	Preset                       types.String `tfsdk:"preset"`
-	DiscoveryURL                 types.String `tfsdk:"discovery_url"`
-	ClientID                     types.String `tfsdk:"client_id"`
-	ClientSecret                 types.String `tfsdk:"client_secret"`
-	Scopes                       types.List   `tfsdk:"scopes"`
-	AcrValues                    types.List   `tfsdk:"acr_values"`
-	UsernameClaim                types.String `tfsdk:"username_claim"`
-	AllowedGroups                types.List   `tfsdk:"allowed_groups"`
-	AdminGroups                  types.List   `tfsdk:"admin_groups"`
-	AllowAdminGroupElevation     types.Bool   `tfsdk:"allow_admin_group_elevation"`
-	TemplateUserID               types.String `tfsdk:"template_user_id"`
-	AutoCreateUsers              types.Bool   `tfsdk:"auto_create_users"`
-	LinkExistingUsersByUsername  types.Bool   `tfsdk:"link_existing_users_by_username"`
-	RequireIdpMfa                types.Bool   `tfsdk:"require_idp_mfa"`
-	BypassPluginTwoFa            types.Bool   `tfsdk:"bypass_plugin_two_fa"`
-	Enabled                      types.Bool   `tfsdk:"enabled"`
-	ShowLoginButton              types.Bool   `tfsdk:"show_login_button"`
-	ForceHTTPS                   types.Bool   `tfsdk:"force_https"`
-	AllowPrivateNetworks         types.Bool   `tfsdk:"allow_private_networks"`
-	AdditionalAllowedCidrs       types.List   `tfsdk:"additional_allowed_cidrs"`
-	SyncProfilePicture           types.Bool   `tfsdk:"sync_profile_picture"`
-	PictureClaim                 types.String `tfsdk:"picture_claim"`
-	PromptSelectAccount          types.Bool   `tfsdk:"prompt_select_account"`
-	OmitPromptLogin              types.Bool   `tfsdk:"omit_prompt_login"`
-	ApplyRoleLibraryAccess       types.Bool   `tfsdk:"apply_role_library_access"`
-	RoleLibraryMappings          types.List   `tfsdk:"role_library_mappings"`
-	EmailClaim                   types.String `tfsdk:"email_claim"`
-	SyncEmailFromClaim           types.Bool   `tfsdk:"sync_email_from_claim"`
-	ButtonText                   types.String `tfsdk:"button_text"`
-	ButtonIconURL                types.String `tfsdk:"button_icon_url"`
-	ForcePasswordSetup           types.Bool   `tfsdk:"force_password_setup"`
-	RpInitiatedLogoutEnabled     types.Bool   `tfsdk:"rp_initiated_logout_enabled"`
-	RpInitiatedLogoutRedirectURI types.String `tfsdk:"rp_initiated_logout_redirect_uri"`
-	CreatedAt                    types.String `tfsdk:"created_at"`
-}
-
-// RoleLibraryMappingModel describes a role-to-library mapping entry.
-type RoleLibraryMappingModel struct {
-	Role       types.String `tfsdk:"role"`
-	LibraryIDs types.List   `tfsdk:"library_ids"`
-}
-
-// UserEmailEntryModel describes a user-email mapping entry.
-type UserEmailEntryModel struct {
-	UserID types.String `tfsdk:"user_id"`
-	Email  types.String `tfsdk:"email"`
-}
-
 // NewJellyfinSecurityPluginConfigurationResource creates a new JellyfinSecurity plugin configuration resource.
 func NewJellyfinSecurityPluginConfigurationResource() resource.Resource {
 	return &JellyfinSecurityPluginConfigurationResource{}

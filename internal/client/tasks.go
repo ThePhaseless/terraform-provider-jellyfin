@@ -13,14 +13,11 @@ import (
 
 // ScheduledTask represents a Jellyfin scheduled task.
 type ScheduledTask struct {
-	Name        string            `json:"Name"`
-	State       string            `json:"State"`
-	ID          string            `json:"Id"`
-	Description string            `json:"Description"`
-	Category    string            `json:"Category"`
-	IsHidden    bool              `json:"IsHidden"`
-	Key         string            `json:"Key"`
-	Triggers    []json.RawMessage `json:"Triggers"`
+	Name     string            `json:"Name"`
+	ID       string            `json:"Id"`
+	IsHidden bool              `json:"IsHidden"`
+	Key      string            `json:"Key"`
+	Triggers []json.RawMessage `json:"Triggers"`
 	// RawJSON is the task as served. Only GetScheduledTask sets it.
 	RawJSON string `json:"-"`
 }

@@ -30,29 +30,20 @@ type InstalledPlugin struct {
 	Name         string `json:"Name"`
 	Version      string `json:"Version"`
 	ID           string `json:"Id"`
-	Description  string `json:"Description"`
 	Status       string `json:"Status"`
 	CanUninstall bool   `json:"CanUninstall"`
-	HasImage     bool   `json:"HasImage"`
 }
 
 // PackageInfo represents information about an available package.
 type PackageInfo struct {
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Versions    []VersionInfo `json:"versions"`
+	Name     string        `json:"name"`
+	Versions []VersionInfo `json:"versions"`
 }
 
 // VersionInfo represents information about a specific version of a package.
 type VersionInfo struct {
-	Version        string `json:"version"`
-	VersionNumber  string `json:"VersionNumber"`
-	TargetAbi      string `json:"targetAbi"`
-	SourceURL      string `json:"sourceUrl"`
-	Checksum       string `json:"checksum"`
-	Timestamp      string `json:"timestamp"`
-	RepositoryName string `json:"repositoryName"`
-	RepositoryURL  string `json:"repositoryUrl"`
+	Version       string `json:"version"`
+	RepositoryURL string `json:"repositoryUrl"`
 }
 
 // GetPluginRepositories retrieves all configured plugin repositories.

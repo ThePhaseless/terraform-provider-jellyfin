@@ -22,19 +22,14 @@ type SystemInfo struct {
 
 // PublicSystemInfo represents public system information from /System/Info/Public.
 type PublicSystemInfo struct {
-	ID                     string `json:"Id"`
-	ServerName             string `json:"ServerName"`
 	Version                string `json:"Version"`
-	LocalAddress           string `json:"LocalAddress"`
 	StartupWizardCompleted bool   `json:"StartupWizardCompleted"`
 }
 
 // SystemConfiguration represents the server configuration.
 // RawJSON stores the complete JSON to preserve all fields during round-trips.
 type SystemConfiguration struct {
-	ServerName               string `json:"-"`
-	IsStartupWizardCompleted bool   `json:"-"`
-	RawJSON                  string `json:"-"`
+	RawJSON string `json:"-"`
 }
 
 // GetSystemInfo retrieves the full system information.
@@ -66,27 +61,7 @@ func (c *Client) GetSystemConfiguration(ctx context.Context) (*SystemConfigurati
 		return nil, fmt.Errorf("getting system configuration: %w", err)
 	}
 
-	var parsed map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-		return nil, fmt.Errorf("parsing system configuration: %w", err)
-	}
-
-	config := &SystemConfiguration{
-		RawJSON: raw,
-	}
-
-	if v, ok := parsed["ServerName"]; ok {
-		if err := json.Unmarshal(v, &config.ServerName); err != nil {
-			return nil, fmt.Errorf("parsing ServerName from system configuration: %w", err)
-		}
-	}
-	if v, ok := parsed["IsStartupWizardCompleted"]; ok {
-		if err := json.Unmarshal(v, &config.IsStartupWizardCompleted); err != nil {
-			return nil, fmt.Errorf("parsing IsStartupWizardCompleted from system configuration: %w", err)
-		}
-	}
-
-	return config, nil
+	return &SystemConfiguration{RawJSON: raw}, nil
 }
 
 // UpdateSystemConfiguration updates the server configuration.

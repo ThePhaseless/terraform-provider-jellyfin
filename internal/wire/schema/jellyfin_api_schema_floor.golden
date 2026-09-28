@@ -11,7 +11,6 @@ op GET /Plugins/{pluginId}/Configuration | params=pluginId:path:required=true | 
 op GET /Repositories | resp=[]#RepositoryInfo
 op GET /ScheduledTasks | params=isEnabled:query:required=false,isHidden:query:required=false | resp=[]#TaskInfo
 op GET /ScheduledTasks/{taskId} | params=taskId:path:required=true | resp=#TaskInfo
-op GET /Startup/Configuration | resp=#StartupConfigurationDto
 op GET /Startup/User | resp=#StartupUserDto
 op GET /System/Configuration | resp=#ServerConfiguration
 op GET /System/Configuration/{key} | params=key:path:required=true | resp=string:binary

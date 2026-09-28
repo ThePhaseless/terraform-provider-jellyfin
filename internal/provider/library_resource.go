@@ -154,14 +154,6 @@ type LibraryOptionsModel struct {
 	TypeOptions                              types.List   `tfsdk:"type_options"`
 }
 
-// PathInfoModel describes one PathInfo entry.
-type PathInfoModel struct {
-	Path        types.String `tfsdk:"path"`
-	NetworkPath types.String `tfsdk:"network_path"`
-	Username    types.String `tfsdk:"username"`
-	Password    types.String `tfsdk:"password"`
-}
-
 // TypeOptionsModel describes one TypeOptions entry.
 type TypeOptionsModel struct {
 	Type                     types.String `tfsdk:"type"`

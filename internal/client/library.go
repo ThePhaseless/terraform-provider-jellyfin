@@ -35,12 +35,6 @@ func (lo *LibraryOptions) MarshalJSON() ([]byte, error) {
 	return []byte(lo.RawJSON), nil
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling for LibraryOptions.
-func (lo *LibraryOptions) UnmarshalJSON(data []byte) error {
-	lo.RawJSON = string(data)
-	return nil
-}
-
 // GetVirtualFolders retrieves all virtual folders (libraries).
 func (c *Client) GetVirtualFolders(ctx context.Context) ([]VirtualFolder, error) {
 	var folders []VirtualFolder

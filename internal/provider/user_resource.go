@@ -147,13 +147,6 @@ type UserPolicyModel struct {
 	SyncPlayAccess                   types.String `tfsdk:"sync_play_access"`
 }
 
-// UserAccessScheduleModel describes one access schedule entry.
-type UserAccessScheduleModel struct {
-	DayOfWeek types.String  `tfsdk:"day_of_week"`
-	StartHour types.Float64 `tfsdk:"start_hour"`
-	EndHour   types.Float64 `tfsdk:"end_hour"`
-}
-
 func userPolicyAttributes() map[string]schema.Attribute {
 	optionalBool := func(desc string) schema.BoolAttribute {
 		return schema.BoolAttribute{

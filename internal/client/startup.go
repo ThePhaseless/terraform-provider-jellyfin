@@ -31,17 +31,6 @@ func (c *Client) CompleteStartupWizard(ctx context.Context) error {
 	return nil
 }
 
-// GetStartupConfiguration retrieves the startup configuration.
-func (c *Client) GetStartupConfiguration(ctx context.Context) (*StartupConfiguration, error) {
-	var config StartupConfiguration
-	if err := c.get(ctx, "/Startup/Configuration", func(reader io.Reader) error {
-		return json.NewDecoder(reader).Decode(&config)
-	}); err != nil {
-		return nil, fmt.Errorf("getting startup configuration: %w", err)
-	}
-	return &config, nil
-}
-
 // UpdateStartupConfiguration updates the startup configuration.
 func (c *Client) UpdateStartupConfiguration(ctx context.Context, config *StartupConfiguration) error {
 	jsonBody, err := json.Marshal(config)
