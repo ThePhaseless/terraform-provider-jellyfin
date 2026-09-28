@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -262,49 +263,26 @@ func (c delimitedCodec) Decode(_ context.Context, raw json.RawMessage, _ attr.Va
 // fails when the two do not match without a declared codec. A legacy key has
 // no property in the pinned golden, so only its attribute type counts.
 func defaultCodec(t attr.Type, p Prop, legacy bool) (Codec, error) {
-	scalar := func(want ...string) bool {
-		if legacy {
-			return true
-		}
-		if p.List || p.Ref != "" {
-			return false
-		}
-		for _, w := range want {
-			if p.Scalar == w {
-				return true
-			}
-		}
-		return false
-	}
-	list := func(want ...string) bool {
-		if legacy {
-			return true
-		}
-		if !p.List || p.Ref != "" {
-			return false
-		}
-		for _, w := range want {
-			if p.Scalar == w {
-				return true
-			}
-		}
-		return false
+	// fits reports whether the property is a list or not, as list says, of one
+	// of the scalars; a legacy key fits whatever the attribute's type.
+	fits := func(list bool, scalars ...string) bool {
+		return legacy || p.List == list && p.Ref == "" && slices.Contains(scalars, p.Scalar)
 	}
 	// The security plugin golden types every number "number", with no format
 	// telling integers apart, so an unformatted number takes an int64 too.
-	integer := p.Scalar == "integer" || (p.Scalar == "number" && p.Format == "")
+	integer := legacy || p.Scalar == "integer" || p.Scalar == "number" && p.Format == ""
 	switch {
-	case t.Equal(types.StringType) && scalar("string"):
+	case t.Equal(types.StringType) && fits(false, "string"):
 		return stringCodec{}, nil
-	case t.Equal(types.BoolType) && scalar("boolean"):
+	case t.Equal(boolType) && fits(false, "boolean"):
 		return boolCodec{}, nil
-	case t.Equal(types.Int64Type) && (legacy || (integer && scalar("integer", "number"))):
+	case t.Equal(types.Int64Type) && integer && fits(false, "integer", "number"):
 		return int64Codec{}, nil
-	case t.Equal(types.Float64Type) && scalar("number"):
+	case t.Equal(types.Float64Type) && fits(false, "number"):
 		return float64Codec{}, nil
-	case t.Equal(types.ListType{ElemType: types.StringType}) && list("string"):
+	case t.Equal(stringListType) && fits(true, "string"):
 		return stringListCodec{}, nil
-	case t.Equal(types.ListType{ElemType: types.Int64Type}) && (legacy || (integer && list("integer", "number"))):
+	case t.Equal(types.ListType{ElemType: types.Int64Type}) && integer && fits(true, "integer", "number"):
 		return int64ListCodec{}, nil
 	}
 	return nil, fmt.Errorf("attribute type %s and wire type %s have no default codec; declare one", t, sigOf(p, legacy))
