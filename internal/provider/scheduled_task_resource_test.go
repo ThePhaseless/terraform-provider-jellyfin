@@ -315,6 +315,8 @@ func TestAccScheduledTaskResourceKeyWithTaskIDUnknownAtPlan(t *testing.T) {
 }
 
 func TestAccScheduledTaskResourceRejectsSelectorsAtPlan(t *testing.T) {
+	const noSuchTaskID = "00000000000000000000000000000000"
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
@@ -333,6 +335,16 @@ func TestAccScheduledTaskResourceRejectsSelectorsAtPlan(t *testing.T) {
 				Config:      testAccScheduledTaskConfig(`key = "refreshlibrary"`),
 				PlanOnly:    true,
 				ExpectError: regexp.MustCompile(`No scheduled task has the key "refreshlibrary"(.|\n)*RefreshLibrary`),
+			},
+			{
+				Config:      testAccScheduledTaskConfig(`key = "RefreshLibrary"` + "\n  task_id = \"" + noSuchTaskID + `"`),
+				PlanOnly:    true,
+				ExpectError: regexp.MustCompile(`No\s+scheduled\s+task\s+has\s+the\s+ID\s+"` + noSuchTaskID + `",\s+and\s+the\s+key\s+"RefreshLibrary"\s+names\s+the\s+task\s+` + scanMediaLibraryID),
+			},
+			{
+				Config:      testAccScheduledTaskConfig(`key = "NoSuchTask"` + "\n  task_id = \"" + noSuchTaskID + `"`),
+				PlanOnly:    true,
+				ExpectError: regexp.MustCompile(`No\s+scheduled\s+task\s+has\s+the\s+key\s+"NoSuchTask"`),
 			},
 		},
 	})

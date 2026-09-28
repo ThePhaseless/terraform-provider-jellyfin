@@ -345,9 +345,9 @@ func (r *ScheduledTaskResource) ModifyPlan(ctx context.Context, req resource.Mod
 // from an imported state.
 //
 // Terraform plans each resource again in the refresh that precedes a destroy,
-// as a create when the refresh found its task gone, so a key alone that no
-// task has any more, such as that of a task a plugin or a Jellyfin upgrade
-// removed, also fails terraform destroy unless it runs with -refresh=false.
+// as a create when the refresh found its task gone, so a key that no task has
+// any more, such as that of a task a plugin or a Jellyfin upgrade removed,
+// also fails terraform destroy unless it runs with -refresh=false.
 func (r *ScheduledTaskResource) planTaskForKey(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) diag.Diagnostics {
 	var diags diag.Diagnostics
 	var key, taskID types.String
@@ -370,7 +370,13 @@ func (r *ScheduledTaskResource) planTaskForKey(ctx context.Context, req resource
 		task, err := r.client.GetScheduledTask(ctx, taskID.ValueString())
 		switch {
 		case client.IsNotFound(err):
-			// task_id fails at apply as it does without a key.
+			id, d := r.lookUpTask(ctx, key.ValueString(), false)
+			if d != nil {
+				return append(diags, diag.WithPath(path.Root("key"), d))
+			}
+			diags.AddAttributeError(path.Root("task_id"), "Conflicting scheduled task attributes", fmt.Sprintf(
+				"No scheduled task has the ID %q, and the key %q names the task %s. Set key or task_id alone, or both to the same task.",
+				taskID.ValueString(), key.ValueString(), id))
 		case err != nil:
 			diags.AddError("Failed to read scheduled task", err.Error())
 		case task.Key != key.ValueString():

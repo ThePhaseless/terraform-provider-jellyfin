@@ -695,17 +695,19 @@ func TestScheduledTaskPlanForKeyUnknownUntilApply(t *testing.T) {
 func TestScheduledTaskPlanWithKeyAndTaskID(t *testing.T) {
 	t.Parallel()
 
+	const conflicting, notFound = "Conflicting scheduled task attributes", "Scheduled task not found"
 	key := types.StringValue("RefreshLibrary")
 	tests := map[string]struct {
-		tasks       []client.ScheduledTask
-		key, taskID types.String
-		wantError   bool
+		tasks             []client.ScheduledTask
+		key, taskID       types.String
+		wantError, wantAt string
 	}{
 		"naming the same task":                 {key: key, taskID: types.StringValue(scanMediaLibraryID)},
 		"naming the same task in another case": {key: key, taskID: types.StringValue("7738148FFCD07979C7CEB148E06B3AED")},
-		"naming different tasks":               {key: key, taskID: types.StringValue(updatePluginsID), wantError: true},
-		"with a key in another case":           {key: types.StringValue("refreshlibrary"), taskID: types.StringValue(scanMediaLibraryID), wantError: true},
-		"with a task_id no task has":           {key: key, taskID: types.StringValue(cleanLogFilesID)},
+		"naming different tasks":               {key: key, taskID: types.StringValue(updatePluginsID), wantError: conflicting, wantAt: "key"},
+		"with a key in another case":           {key: types.StringValue("refreshlibrary"), taskID: types.StringValue(scanMediaLibraryID), wantError: conflicting, wantAt: "key"},
+		"with a task_id no task has":           {key: key, taskID: types.StringValue(cleanLogFilesID), wantError: conflicting, wantAt: "task_id"},
+		"with a task_id and a key no task has": {key: types.StringValue("NoSuchTask"), taskID: types.StringValue(cleanLogFilesID), wantError: notFound, wantAt: "key"},
 		"with a task_id unknown until apply":   {key: key, taskID: types.StringUnknown()},
 		"naming one of the tasks sharing a key": {
 			tasks: append(testTasks(), client.ScheduledTask{ID: "aaaa", Key: "Shared"}, client.ScheduledTask{ID: "bbbb", Key: "Shared"}),
@@ -726,12 +728,12 @@ func TestScheduledTaskPlanWithKeyAndTaskID(t *testing.T) {
 			plan := config
 			plan.ID = types.StringUnknown()
 			got, resp := planScheduledTask(t, srv.client(t), config, nil, plan)
-			if tc.wantError {
-				if gotPaths, want := errorPaths(t, resp.Diagnostics), []string{path.Root("key").String()}; !reflect.DeepEqual(gotPaths, want) {
+			if tc.wantError != "" {
+				if gotPaths, want := errorPaths(t, resp.Diagnostics), []string{path.Root(tc.wantAt).String()}; !reflect.DeepEqual(gotPaths, want) {
 					t.Fatalf("ModifyPlan() error paths = %v (%v), want %v", gotPaths, resp.Diagnostics, want)
 				}
-				if summary := resp.Diagnostics.Errors()[0].Summary(); summary != "Conflicting scheduled task attributes" {
-					t.Errorf("ModifyPlan() error = %q, want the conflicting attributes error", summary)
+				if summary := resp.Diagnostics.Errors()[0].Summary(); summary != tc.wantError {
+					t.Errorf("ModifyPlan() error = %q, want %q", summary, tc.wantError)
 				}
 				return
 			}
