@@ -5,14 +5,24 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"maps"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
+
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
 
 // TestUnitPluginIDPlan runs each plugin configuration resource's plugin_id
@@ -86,5 +96,71 @@ func TestUnitPluginIDPlan(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// Jellyfin replaces a plugin's configuration with the one posted and serves
+// every key back, those the configuration leaves out with their defaults; a
+// configuration that names some keys reads back as itself.
+func TestUnitPluginConfigurationReadsBackTheKeysItManages(t *testing.T) {
+	ctx := context.Background()
+	const defaults = `{"Server": "https://musicbrainz.org", "RateLimit": 1, "ReplaceArtistName": false}`
+	stored := defaults
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			_, _ = io.WriteString(w, stored)
+		case http.MethodPost:
+			var posted map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
+				t.Error(err)
+			}
+			var merged map[string]any
+			if err := json.Unmarshal([]byte(defaults), &merged); err != nil {
+				t.Fatal(err)
+			}
+			maps.Copy(merged, posted)
+			b, _ := json.Marshal(merged)
+			stored = string(b)
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	r := &PluginConfigurationResource{client: client.NewClient(srv.URL, "k")}
+	s := schemaOf(r)
+	null := tftypes.NewValue(s.Type().TerraformType(ctx), nil)
+	configured := `{"Server": "https://mb.example"}`
+
+	plan := tfsdk.Plan{Schema: s, Raw: null}
+	if d := plan.Set(ctx, &PluginConfigurationResourceModel{ID: types.StringUnknown(), PluginID: types.StringValue("mb"), Configuration: jsontypes.NewNormalizedValue(configured)}); d.HasError() {
+		t.Fatal(d)
+	}
+	created := resource.CreateResponse{State: tfsdk.State{Schema: s, Raw: null}}
+	r.Create(ctx, resource.CreateRequest{Plan: plan}, &created)
+	if created.Diagnostics.HasError() {
+		t.Fatal(created.Diagnostics)
+	}
+	read := resource.ReadResponse{State: created.State}
+	r.Read(ctx, resource.ReadRequest{State: created.State}, &read)
+	if read.Diagnostics.HasError() {
+		t.Fatal(read.Diagnostics)
+	}
+	var got PluginConfigurationResourceModel
+	if d := read.State.Get(ctx, &got); d.HasError() {
+		t.Fatal(d)
+	}
+	if equal, d := got.Configuration.StringSemanticEquals(ctx, jsontypes.NewNormalizedValue(configured)); d.HasError() || !equal {
+		t.Errorf("refreshed configuration_json = %s, want the configured %s", got.Configuration.ValueString(), configured)
+	}
+
+	// An import has no configuration to follow and reads every key.
+	imported := tfsdk.State{Schema: s, Raw: null}
+	if d := imported.SetAttribute(ctx, path.Root("plugin_id"), types.StringValue("mb")); d.HasError() {
+		t.Fatal(d)
+	}
+	read = resource.ReadResponse{State: imported}
+	r.Read(ctx, resource.ReadRequest{State: imported}, &read)
+	if d := read.State.Get(ctx, &got); d.HasError() || !strings.Contains(got.Configuration.ValueString(), "RateLimit") {
+		t.Errorf("imported configuration_json = %s (%v), want every served key", got.Configuration.ValueString(), d)
 	}
 }
