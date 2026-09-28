@@ -63,8 +63,8 @@ func (r *RestartResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"triggers": schema.MapAttribute{
-				Description:         "Map of arbitrary string values that, when changed, force a new restart. Tie restarts to upstream changes, e.g. `triggers = { plugin_version = jellyfin_plugin.x.version }`.",
-				MarkdownDescription: "Map of arbitrary string values that, when changed, force a new restart. Tie restarts to upstream changes, e.g. `triggers = { plugin_version = jellyfin_plugin.x.version }`.",
+				Description:         "Map of arbitrary string values that, when changed, force a new restart. Tie restarts to upstream changes, e.g. `triggers = { plugin_version = jellyfin_plugin.x.installed_version }`.",
+				MarkdownDescription: "Map of arbitrary string values that, when changed, force a new restart. Tie restarts to upstream changes, e.g. `triggers = { plugin_version = jellyfin_plugin.x.installed_version }`.",
 				ElementType:         types.StringType,
 				Optional:            true,
 				PlanModifiers: []planmodifier.Map{
@@ -149,9 +149,16 @@ func (r *RestartResource) Read(ctx context.Context, req resource.ReadRequest, re
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func (r *RestartResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
-	// `triggers` forces replacement, so Update is never reached.
-	resp.Diagnostics.AddError("Update not supported", "jellyfin_restart is replace-only: change a value in triggers to force a new restart.")
+// Update is reached only for a change to timeout, as triggers forces
+// replacement. timeout bounds only the wait after a restart, so the new value
+// takes effect without restarting the server again.
+func (r *RestartResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var data RestartResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *RestartResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {

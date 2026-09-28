@@ -14,6 +14,6 @@ resource "jellyfin_plugin" "example" {
 #   }
 resource "jellyfin_restart" "example" {
   triggers = {
-    plugin_version = jellyfin_plugin.example.version
+    plugin_version = jellyfin_plugin.example.installed_version
   }
 }
