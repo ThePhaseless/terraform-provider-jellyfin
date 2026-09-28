@@ -74,11 +74,15 @@ func ReadForImport(ctx context.Context, c *client.Client, resourceType, importID
 	if err != nil {
 		return s, types.Object{}, err
 	}
+	o, offers := r.(offersProviders)
+	if !offers && asksOfferedNames(b) {
+		return s, types.Object{}, fmt.Errorf("%s reads the providers Jellyfin offers each of its objects, which ReadForImport cannot ask for", resourceType)
+	}
 	doc, err := parseJSONObject(raw)
 	if err != nil {
 		return s, types.Object{}, fmt.Errorf("reading %s: %w", resourceType, err)
 	}
-	if o, ok := r.(offersProviders); ok {
+	if offers {
 		ctx = wire.WithAvailable(ctx, o.offered(c))
 	}
 	got, diags := b.Flatten(ctx, doc, prior)
@@ -86,6 +90,17 @@ func ReadForImport(ctx context.Context, c *client.Client, resourceType, importID
 		return s, types.Object{}, fmt.Errorf("reading %s: %v", resourceType, diags)
 	}
 	return s, got, nil
+}
+
+// asksOfferedNames reports whether reading b asks for the names the server
+// offers, as a Complement does.
+func asksOfferedNames(b *wire.Binding) bool {
+	for _, f := range b.Fields {
+		if f.Offered != "" || f.Elem != nil && asksOfferedNames(f.Elem) {
+			return true
+		}
+	}
+	return false
 }
 
 // SharedKeys maps, by resource type, the dotted path of each attribute whose

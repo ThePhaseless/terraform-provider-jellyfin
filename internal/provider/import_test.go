@@ -23,6 +23,15 @@ func TestUnitReadForImportRefusesResourcesWithoutABinding(t *testing.T) {
 	}
 }
 
+// A library's providers depend on its collection type, which ReadForImport
+// has no way to ask the server about.
+func TestUnitReadForImportRefusesResourcesThatAskForOfferedNames(t *testing.T) {
+	_, _, err := ReadForImport(context.Background(), nil, "jellyfin_library", "Movies", `{"LibraryOptions": {"SubtitleFetcherOrder": [], "DisabledSubtitleFetchers": []}}`)
+	if err == nil || !strings.Contains(err.Error(), "cannot ask for") {
+		t.Errorf("ReadForImport(jellyfin_library) error = %v, want one saying it cannot ask for the offered providers", err)
+	}
+}
+
 func TestUnitReadForImportRefusesUnknownResourceTypes(t *testing.T) {
 	_, _, err := ReadForImport(context.Background(), nil, "jellyfin_no_such_resource", "id", "{}")
 	if err == nil || !strings.Contains(err.Error(), "has no resource jellyfin_no_such_resource") {
