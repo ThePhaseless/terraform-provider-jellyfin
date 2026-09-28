@@ -275,17 +275,28 @@ func servedStrings(ctx context.Context, doc map[string]json.RawMessage, keyPath 
 	return out
 }
 
-// Jellyfin matches enabled and disabled names ignoring case.
+// Jellyfin matches enabled and disabled names ignoring case, but ranks by the
+// exact name.
 func containsFold(names []string, name string) bool {
 	return slices.ContainsFunc(names, func(n string) bool { return strings.EqualFold(n, name) })
 }
 
 // ordered returns names followed by the served names it leaves out, so the
-// names keep their priority over every name the order held before.
+// names keep their priority over every name the order held before. A served
+// name that matches one of names only ignoring case follows it, as it may be
+// the spelling Jellyfin ranks the provider by.
 func ordered(names, served []string) []string {
-	out := append([]string{}, names...)
+	out := []string{}
+	for _, n := range names {
+		out = append(out, n)
+		for _, s := range served {
+			if strings.EqualFold(s, n) && !slices.Contains(names, s) && !slices.Contains(out, s) {
+				out = append(out, s)
+			}
+		}
+	}
 	for _, s := range served {
-		if !containsFold(names, s) {
+		if !slices.Contains(out, s) {
 			out = append(out, s)
 		}
 	}
@@ -305,8 +316,8 @@ func complementOf(names, offered []string) (order, disabled []string) {
 }
 
 // enabledOf returns the names Jellyfin enables, in the order it asks them:
-// the ordered names it does not disable, then the offered names that neither
-// list holds, which it enables too and asks last.
+// the ordered names it does not disable, then the offered names it does not
+// disable that the order does not spell exactly, which it asks last.
 func enabledOf(order, disabled, offered []string) []string {
 	out := []string{}
 	for _, o := range order {
@@ -315,7 +326,7 @@ func enabledOf(order, disabled, offered []string) []string {
 		}
 	}
 	for _, o := range offered {
-		if !containsFold(disabled, o) && !containsFold(order, o) {
+		if !containsFold(disabled, o) && !slices.Contains(order, o) {
 			out = append(out, o)
 		}
 	}

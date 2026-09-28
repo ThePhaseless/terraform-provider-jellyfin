@@ -360,17 +360,36 @@ func TestUnitBindRejectsSharedKeysItCannotWrite(t *testing.T) {
 }
 
 func TestUnitComplementFunctions(t *testing.T) {
-	order, disabled := complementOf([]string{"b", "A"}, []string{"A", "B", "C"})
-	if got := fmt.Sprint(order, disabled); got != "[b A C] [C]" {
+	order, disabled := complementOf([]string{"B", "A"}, []string{"A", "B", "C"})
+	if got := fmt.Sprint(order, disabled); got != "[B A C] [C]" {
 		t.Errorf("complementOf = %s", got)
 	}
-	if got := fmt.Sprint(enabledOf(order, disabled, []string{"A", "B", "C"})); got != "[b A]" {
+	if got := fmt.Sprint(enabledOf(order, disabled, []string{"A", "B", "C"})); got != "[B A]" {
 		t.Errorf("enabledOf(complementOf) = %s, want the names back", got)
 	}
-	if got := fmt.Sprint(ordered([]string{"C"}, []string{"a", "c", "B"})); got != "[C a B]" {
-		t.Errorf("ordered = %s", got)
+	if _, disabled := complementOf([]string{"b"}, []string{"A", "B"}); fmt.Sprint(disabled) != "[A]" {
+		t.Errorf("complementOf disables %v, want every name but the one enabled ignoring case", disabled)
+	}
+	if got := fmt.Sprint(enabledOf([]string{"b", "A"}, nil, []string{"A", "B"})); got != "[b A B]" {
+		t.Errorf("enabledOf = %s, want B last, as an order that spells it otherwise does not rank it", got)
 	}
 	if got, _ := marshal(ordered(nil, nil)); string(got) != "[]" {
 		t.Errorf("an empty order encodes as %s", got)
+	}
+}
+
+func TestUnitOrderedRanksEachServedSpellingOfANameWithIt(t *testing.T) {
+	for _, c := range []struct {
+		names, served []string
+		want          string
+	}{
+		{[]string{"C"}, []string{"a", "C", "B"}, "[C a B]"},
+		{[]string{"C"}, []string{"a", "c", "B"}, "[C c a B]"},
+		{[]string{"themoviedb", "The Open Movie Database"}, []string{"TheMovieDb", "The Open Movie Database"}, "[themoviedb TheMovieDb The Open Movie Database]"},
+		{[]string{"A", "a"}, []string{"a", "A"}, "[A a]"},
+	} {
+		if got := fmt.Sprint(ordered(c.names, c.served)); got != c.want {
+			t.Errorf("ordered(%q, %q) = %s, want %s", c.names, c.served, got, c.want)
+		}
 	}
 }
