@@ -5,6 +5,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -19,6 +20,19 @@ import (
 // JSON documents, with the binding of its schema to their keys.
 type wireBound interface {
 	Wire() (*wire.Binding, error)
+}
+
+// configuredClient returns the client the provider hands a resource or data
+// source, a kind, in its Configure, or nil before the provider is configured.
+func configuredClient(providerData any, kind string, diags *diag.Diagnostics) *client.Client {
+	if providerData == nil {
+		return nil
+	}
+	c, ok := providerData.(*client.Client)
+	if !ok {
+		diags.AddError("Unexpected "+kind+" Configure Type", fmt.Sprintf("Expected *client.Client, got: %T.", providerData))
+	}
+	return c
 }
 
 func schemaOf(r resource.Resource) schema.Schema {

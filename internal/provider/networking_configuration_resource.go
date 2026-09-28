@@ -6,7 +6,6 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"regexp"
 	"sync"
 
@@ -130,20 +129,7 @@ var baseURLValidator = stringvalidator.RegexMatches(regexp.MustCompile(`^(/.*[^/
 	"must be empty, or start with / and not end with /, such as /jellyfin")
 
 func (r *NetworkingConfigurationResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
-	}
-
-	c, ok := req.ProviderData.(*client.Client)
-	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Resource Configure Type",
-			fmt.Sprintf("Expected *client.Client, got: %T.", req.ProviderData),
-		)
-		return
-	}
-
-	r.client = c
+	r.client = configuredClient(req.ProviderData, "Resource", &resp.Diagnostics)
 }
 
 func (r *NetworkingConfigurationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
