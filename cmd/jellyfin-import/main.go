@@ -19,8 +19,6 @@ import (
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/provider"
 )
 
-var sanitizeRe = regexp.MustCompile(`[^a-zA-Z0-9]+`)
-
 func main() {
 	// The environment fills in a flag only after parsing: as a flag default,
 	// the usage text that -h or a mistyped flag prints would show the secrets.
@@ -441,6 +439,8 @@ func (g *generator) writeFile(name, content string) error {
 	p := filepath.Join(g.outputDir, name)
 	return os.WriteFile(p, []byte(content+"\n"), 0o600)
 }
+
+var sanitizeRe = regexp.MustCompile(`[^a-zA-Z0-9]+`)
 
 // sanitizeName converts a human-readable name to a valid Terraform identifier.
 func sanitizeName(name string) string {
