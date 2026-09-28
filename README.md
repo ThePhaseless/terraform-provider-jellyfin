@@ -121,14 +121,17 @@ Any plugin can be configured using the `jellyfin_plugin_configuration` resource 
 resource "jellyfin_plugin_configuration" "sso" {
   plugin_id = jellyfin_plugin.sso_auth.id
 
+  # SSO-Auth keys its providers by name.
   configuration_json = jsonencode({
-    SamlConfigs = []
-    OidConfigs = [{
-      OidClientId = "jellyfin"
-      OidSecret   = var.oidc_secret
-      OidEndpoint = "https://auth.example.com"
-      Enabled     = true
-    }]
+    SamlConfigs = {}
+    OidConfigs = {
+      authelia = {
+        OidClientId = "jellyfin"
+        OidSecret   = var.oidc_secret
+        OidEndpoint = "https://auth.example.com"
+        Enabled     = true
+      }
+    }
   })
 }
 ```
