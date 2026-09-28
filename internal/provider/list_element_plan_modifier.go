@@ -114,6 +114,17 @@ func (m useStateForUnknownByKeyModifier) PlanModifyList(ctx context.Context, req
 	resp.PlanValue = list
 }
 
+func (m useStateForUnknownByKeyModifier) hasUnknownKey(attrs map[string]attr.Value) bool {
+	for _, group := range m.keyGroups {
+		for _, name := range group {
+			if v, ok := attrs[name]; ok && v.IsUnknown() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // fillUnset returns planned with each attribute that configured leaves unset
 // and planned leaves unknown taken from prior, and reports whether it took any.
 // A list of objects that configured sets is filled element by element.
@@ -237,17 +248,6 @@ func unclaimedMatch(attrs map[string]attr.Value, i int, prior []map[string]attr.
 		}
 	}
 	return -1
-}
-
-func (m useStateForUnknownByKeyModifier) hasUnknownKey(attrs map[string]attr.Value) bool {
-	for _, group := range m.keyGroups {
-		for _, name := range group {
-			if v, ok := attrs[name]; ok && v.IsUnknown() {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func hasKnownValues(attrs map[string]attr.Value, names []string) bool {
