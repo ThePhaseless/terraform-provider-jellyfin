@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -212,12 +213,14 @@ func (r *LibraryResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"paths": schema.ListAttribute{
-				Description:         "Paths of the library's media folders. Jellyfin looks them up on the server, so when it runs in a container they must be paths inside the container.",
-				MarkdownDescription: "Paths of the library's media folders. Jellyfin looks them up on the server, so when it runs in a container they must be paths inside the container.",
+				Description:         "Paths of the library's media folders. Jellyfin looks them up on the server, so when it runs in a container they must be paths inside the container. Changing the paths replaces the library; changing only their order does not.",
+				MarkdownDescription: "Paths of the library's media folders. Jellyfin looks them up on the server, so when it runs in a container they must be paths inside the container. Changing the paths replaces the library; changing only their order does not.",
 				Required:            true,
 				ElementType:         types.StringType,
 				PlanModifiers: []planmodifier.List{
-					listplanmodifier.RequiresReplace(),
+					listplanmodifier.RequiresReplaceIf(pathsRequireReplace,
+						"Changing the paths replaces the library; changing only their order does not.",
+						"Changing the paths replaces the library; changing only their order does not."),
 				},
 			},
 			"library_options": schema.SingleNestedAttribute{
@@ -272,6 +275,35 @@ func flattenCollectionType(collectionType string) types.String {
 // has.
 func collectionTypeRequiresReplace(_ context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
 	resp.RequiresReplace = !req.StateValue.Equal(types.StringValue("")) || !req.PlanValue.Equal(types.StringValue("mixed"))
+}
+
+// Jellyfin lists a library's locations sorted, so the paths read back in
+// that order whatever order they were created in. A read keeps the prior
+// order of the same paths, and only other paths replace the library.
+func pathsRequireReplace(ctx context.Context, req planmodifier.ListRequest, resp *listplanmodifier.RequiresReplaceIfFuncResponse) {
+	var planned, prior []string
+	if req.PlanValue.ElementsAs(ctx, &planned, false).HasError() || req.StateValue.ElementsAs(ctx, &prior, false).HasError() {
+		resp.RequiresReplace = true
+		return
+	}
+	resp.RequiresReplace = !samePaths(planned, prior)
+}
+
+// pathsInOrder returns the served locations in the order of want when both
+// hold the same paths.
+func pathsInOrder(ctx context.Context, want types.List, served []string) (types.List, diag.Diagnostics) {
+	var wanted []string
+	if !want.IsNull() && !want.IsUnknown() && !want.ElementsAs(ctx, &wanted, false).HasError() && samePaths(wanted, served) {
+		served = wanted
+	}
+	return types.ListValueFrom(ctx, types.StringType, served)
+}
+
+func samePaths(a, b []string) bool {
+	x, y := slices.Clone(a), slices.Clone(b)
+	slices.Sort(x)
+	slices.Sort(y)
+	return slices.Equal(x, y)
 }
 
 func libraryOptionsAttributes() map[string]schema.Attribute {
@@ -716,7 +748,7 @@ func (r *LibraryResource) Create(ctx context.Context, req resource.CreateRequest
 	data.ItemID = types.StringValue(updated.ItemID)
 	data.ID = types.StringValue(updated.Name)
 	data.CollectionType = flattenCollectionType(updated.CollectionType)
-	pathValues, diags := types.ListValueFrom(ctx, types.StringType, updated.Locations)
+	pathValues, diags := pathsInOrder(ctx, data.Paths, updated.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues
 	resp.Diagnostics.Append(b.FlattenAfterApply(ctx, updated.GetLibraryOptions().RawJSON, &data)...)
@@ -750,7 +782,7 @@ func (r *LibraryResource) Read(ctx context.Context, req resource.ReadRequest, re
 	data.CollectionType = flattenCollectionType(folder.CollectionType)
 	data.ItemID = types.StringValue(folder.ItemID)
 	data.ID = types.StringValue(folder.Name)
-	pathValues, diags := types.ListValueFrom(ctx, types.StringType, folder.Locations)
+	pathValues, diags := pathsInOrder(ctx, data.Paths, folder.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues
 	resp.Diagnostics.Append(b.FlattenInto(ctx, folder.GetLibraryOptions().RawJSON, &data)...)
@@ -830,7 +862,7 @@ func (r *LibraryResource) Update(ctx context.Context, req resource.UpdateRequest
 	data.ItemID = types.StringValue(updated.ItemID)
 	data.ID = types.StringValue(updated.Name)
 	data.CollectionType = flattenCollectionType(updated.CollectionType)
-	pathValues, diags := types.ListValueFrom(ctx, types.StringType, updated.Locations)
+	pathValues, diags := pathsInOrder(ctx, data.Paths, updated.Locations)
 	resp.Diagnostics.Append(diags...)
 	data.Paths = pathValues
 	resp.Diagnostics.Append(b.FlattenAfterApply(ctx, updated.GetLibraryOptions().RawJSON, &data)...)

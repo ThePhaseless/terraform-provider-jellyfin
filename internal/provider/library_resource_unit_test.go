@@ -606,6 +606,64 @@ func TestUnitCollectionTypeChangeRequiresReplaceExceptEmptyToMixed(t *testing.T)
 	}
 }
 
+func TestUnitLibraryPathsReplaceOnlyForOtherPaths(t *testing.T) {
+	schemaResp := resource.SchemaResponse{}
+	NewLibraryResource().Schema(context.Background(), resource.SchemaRequest{}, &schemaResp)
+	paths, ok := schemaResp.Schema.Attributes["paths"].(schema.ListAttribute)
+	if !ok {
+		t.Fatal("paths is not a list attribute")
+	}
+	existing := tftypes.NewValue(tftypes.Object{}, map[string]tftypes.Value{})
+
+	for _, test := range []struct {
+		state, plan []string
+		want        bool
+	}{
+		{state: []string{"/a", "/b"}, plan: []string{"/b", "/a"}, want: false},
+		{state: []string{"/a", "/b"}, plan: []string{"/a"}, want: true},
+		{state: []string{"/a"}, plan: []string{"/b"}, want: true},
+	} {
+		plan := testUnitStringList(t, test.plan...)
+		resp := planmodifier.ListResponse{PlanValue: plan}
+		for _, m := range paths.PlanModifiers {
+			m.PlanModifyList(context.Background(), planmodifier.ListRequest{
+				State:       tfsdk.State{Raw: existing},
+				Plan:        tfsdk.Plan{Raw: existing},
+				ConfigValue: plan,
+				PlanValue:   plan,
+				StateValue:  testUnitStringList(t, test.state...),
+			}, &resp)
+		}
+		if resp.RequiresReplace != test.want {
+			t.Errorf("%q -> %q: requires replace %t, want %t", test.state, test.plan, resp.RequiresReplace, test.want)
+		}
+	}
+}
+
+// Jellyfin lists a library's locations sorted, which must not read as a
+// change to paths listed in another order.
+func TestUnitLibraryPathsKeepTheirOrder(t *testing.T) {
+	ctx := context.Background()
+	for _, test := range []struct {
+		name        string
+		want        types.List
+		served      []string
+		wantOrdered []string
+	}{
+		{"same paths", testUnitStringList(t, "/mnt/tv", "/mnt/anime"), []string{"/mnt/anime", "/mnt/tv"}, []string{"/mnt/tv", "/mnt/anime"}},
+		{"other paths", testUnitStringList(t, "/mnt/tv"), []string{"/mnt/anime", "/mnt/tv"}, []string{"/mnt/anime", "/mnt/tv"}},
+		{"no prior paths", types.ListNull(types.StringType), []string{"/b", "/a"}, []string{"/b", "/a"}},
+	} {
+		got, d := pathsInOrder(ctx, test.want, test.served)
+		if d.HasError() {
+			t.Fatal(d)
+		}
+		if want := testUnitStringList(t, test.wantOrdered...); !got.Equal(want) {
+			t.Errorf("%s: paths = %s, want %s", test.name, got, want)
+		}
+	}
+}
+
 func TestUnitLibraryVersionErrorsFollowServerVersion(t *testing.T) {
 	ctx := context.Background()
 	similarItems := path.Root("library_options").AtName("type_options").AtListIndex(0).AtName("similar_item_providers")
