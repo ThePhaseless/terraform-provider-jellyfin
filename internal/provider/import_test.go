@@ -35,8 +35,8 @@ func TestUnitReadForImportStartsFromWhatImportStateSets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v := got.Attributes()["task_id"].String(); v != `"task-id"` {
-		t.Errorf("task_id = %s, want the import ID", v)
+	if v := got.Attributes()["id"].String(); v != `"task-id"` {
+		t.Errorf("id = %s, want the import ID", v)
 	}
 }
 

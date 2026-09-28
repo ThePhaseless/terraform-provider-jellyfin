@@ -1,5 +1,5 @@
 resource "jellyfin_scheduled_task" "example" {
-  task_id = "7738148ffcd07979c7ceb148e06b3aed"
+  key = "RefreshLibrary"
 
   triggers = [
     {

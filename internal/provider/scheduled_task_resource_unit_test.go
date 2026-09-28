@@ -6,7 +6,12 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -19,6 +24,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 
+	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
 
@@ -362,5 +368,518 @@ func TestScheduledTaskValidateConfigReportsEveryInvalidTrigger(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ValidateConfig() error paths = %v, want %v", got, want)
+	}
+}
+
+func validateScheduledTaskSelectors(t *testing.T, key, taskID types.String) diag.Diagnostics {
+	t.Helper()
+
+	ctx := context.Background()
+	s := scheduledTaskSchema(t)
+	var resp resource.ValidateConfigResponse
+	(&ScheduledTaskResource{}).ValidateConfig(ctx, resource.ValidateConfigRequest{
+		Config: tfsdk.Config{Schema: s, Raw: scheduledTaskValue(t, &ScheduledTaskResourceModel{
+			ID:     types.StringNull(),
+			Key:    key,
+			TaskID: taskID,
+		})},
+	}, &resp)
+	return resp.Diagnostics
+}
+
+func TestScheduledTaskValidateConfigWantsKeyOrTaskID(t *testing.T) {
+	t.Parallel()
+
+	key, taskID := types.StringValue("RefreshLibrary"), types.StringValue(scanMediaLibraryID)
+	tests := map[string]struct {
+		key, taskID types.String
+		wantError   string
+	}{
+		"key alone":                     {key: key, taskID: types.StringNull()},
+		"task_id alone":                 {key: types.StringNull(), taskID: taskID},
+		"both":                          {key: key, taskID: taskID},
+		"neither":                       {key: types.StringNull(), taskID: types.StringNull(), wantError: "Missing scheduled task attribute"},
+		"unknown key with task_id":      {key: types.StringUnknown(), taskID: taskID},
+		"key with unknown task_id":      {key: key, taskID: types.StringUnknown()},
+		"unknown key without task_id":   {key: types.StringUnknown(), taskID: types.StringNull()},
+		"unknown task_id without a key": {key: types.StringNull(), taskID: types.StringUnknown()},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			diags := validateScheduledTaskSelectors(t, tc.key, tc.taskID)
+			switch {
+			case tc.wantError == "" && diags.HasError():
+				t.Fatalf("ValidateConfig() = %v, want no error", diags)
+			case tc.wantError != "" && (len(diags.Errors()) != 1 || diags.Errors()[0].Summary() != tc.wantError):
+				t.Fatalf("ValidateConfig() = %v, want one error %q", diags, tc.wantError)
+			}
+		})
+	}
+}
+
+const (
+	scanMediaLibraryID = "7738148ffcd07979c7ceb148e06b3aed"
+	updatePluginsID    = "f9b057c054e9e6daee4a88ffd146a403"
+	refreshChannelsID  = "0c9ee3a88fc15547c6852205480da1fd"
+	cleanLogFilesID    = "1c8ede62c521bea0bf851344f5b8ca40"
+)
+
+func testTasks() []client.ScheduledTask {
+	return []client.ScheduledTask{
+		{ID: scanMediaLibraryID, Key: "RefreshLibrary"},
+		{ID: updatePluginsID, Key: "PluginUpdates"},
+		{ID: refreshChannelsID, Key: "RefreshInternetChannels", IsHidden: true},
+	}
+}
+
+func TestFindTask(t *testing.T) {
+	t.Parallel()
+
+	shared := append(testTasks(), client.ScheduledTask{ID: "aaaa", Key: "Shared"}, client.ScheduledTask{ID: "bbbb", Key: "Shared"})
+	tests := map[string]struct {
+		tasks      []client.ScheduledTask
+		ref        string
+		byID       bool
+		want       string
+		wantDetail string
+	}{
+		"key": {
+			ref: "PluginUpdates", want: updatePluginsID,
+		},
+		"key of a hidden task": {
+			ref: "RefreshInternetChannels", want: refreshChannelsID,
+		},
+		"key in another case": {
+			ref: "refreshlibrary",
+			wantDetail: `No scheduled task has the key "refreshlibrary". Keys match exactly, case included. The server's tasks have these keys: PluginUpdates, RefreshInternetChannels, RefreshLibrary.` +
+				` If a plugin or a Jellyfin upgrade removed the task, remove the resource from the configuration, or destroy it with -refresh=false.`,
+		},
+		"ID given as a key": {
+			ref: scanMediaLibraryID,
+			wantDetail: `No scheduled task has the key "` + scanMediaLibraryID + `". Keys match exactly, case included. The server's tasks have these keys: PluginUpdates, RefreshInternetChannels, RefreshLibrary.` +
+				` If a plugin or a Jellyfin upgrade removed the task, remove the resource from the configuration, or destroy it with -refresh=false.`,
+		},
+		"key several tasks have": {
+			tasks: shared, ref: "Shared",
+			wantDetail: `Several tasks have the key "Shared" (IDs aaaa, bbbb); set task_id to the ID of the one to manage.`,
+		},
+		"import by ID keeps its spelling": {
+			ref: "7738148FFCD07979C7CEB148E06B3AED", byID: true, want: "7738148FFCD07979C7CEB148E06B3AED",
+		},
+		"import by key": {
+			ref: "RefreshLibrary", byID: true, want: scanMediaLibraryID,
+		},
+		"import of neither": {
+			ref: "Nothing", byID: true,
+			wantDetail: `No scheduled task has the ID or key "Nothing". Keys match exactly, case included. The server's tasks have these keys: PluginUpdates, RefreshInternetChannels, RefreshLibrary.`,
+		},
+		"import by a key several tasks have": {
+			tasks: shared, ref: "Shared", byID: true,
+			wantDetail: `Several tasks have the key "Shared" (IDs aaaa, bbbb); import the one to manage by its ID.`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tasks := tc.tasks
+			if tasks == nil {
+				tasks = testTasks()
+			}
+			got, d := findTask(tasks, tc.ref, tc.byID)
+			if tc.wantDetail == "" {
+				if d != nil || got != tc.want {
+					t.Fatalf("findTask(%q) = %q, %v; want %q", tc.ref, got, d, tc.want)
+				}
+				return
+			}
+			if d == nil || d.Detail() != tc.wantDetail {
+				t.Fatalf("findTask(%q) = %q, %v; want the error %q", tc.ref, got, d, tc.wantDetail)
+			}
+		})
+	}
+}
+
+// fakeTaskServer serves tasks as Jellyfin does: the list, and each task by
+// its ID ignoring case.
+type fakeTaskServer struct {
+	tasks []client.ScheduledTask
+
+	mu       sync.Mutex
+	requests int
+}
+
+func (f *fakeTaskServer) client(t *testing.T) *client.Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.requests++
+		if r.Method != http.MethodGet {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path == "/ScheduledTasks" {
+			_ = json.NewEncoder(w).Encode(f.tasks)
+			return
+		}
+		id := strings.TrimPrefix(r.URL.Path, "/ScheduledTasks/")
+		i := slices.IndexFunc(f.tasks, func(task client.ScheduledTask) bool { return strings.EqualFold(task.ID, id) })
+		if i < 0 {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"Id": f.tasks[i].ID, "Key": f.tasks[i].Key, "Triggers": []any{}})
+	}))
+	t.Cleanup(srv.Close)
+	return client.NewClient(srv.URL, "k")
+}
+
+func (f *fakeTaskServer) requestCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.requests
+}
+
+// scheduledTaskValue is m as a Terraform value, with no triggers when m has
+// none, or the null object when m is nil.
+func scheduledTaskValue(t *testing.T, m *ScheduledTaskResourceModel) tftypes.Value {
+	t.Helper()
+
+	ctx := context.Background()
+	s := scheduledTaskSchema(t)
+	v := tfsdk.Plan{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nil)}
+	if m == nil {
+		return v.Raw
+	}
+	withTriggers := *m
+	if withTriggers.Triggers.IsNull() {
+		withTriggers.Triggers = triggerList(t)
+	}
+	if d := v.Set(ctx, &withTriggers); d.HasError() {
+		t.Fatalf("building %+v: %v", m, d)
+	}
+	return v.Raw
+}
+
+// planScheduledTask runs ModifyPlan on plan, what the framework plans from
+// config and state before it, where a nil state plans a create.
+func planScheduledTask(t *testing.T, c *client.Client, config ScheduledTaskResourceModel, state *ScheduledTaskResourceModel, plan ScheduledTaskResourceModel) (ScheduledTaskResourceModel, resource.ModifyPlanResponse) {
+	t.Helper()
+
+	ctx := context.Background()
+	s := scheduledTaskSchema(t)
+	resp := resource.ModifyPlanResponse{Plan: tfsdk.Plan{Schema: s, Raw: scheduledTaskValue(t, &plan)}}
+	(&ScheduledTaskResource{client: c}).ModifyPlan(ctx, resource.ModifyPlanRequest{
+		Config: tfsdk.Config{Schema: s, Raw: scheduledTaskValue(t, &config)},
+		State:  tfsdk.State{Schema: s, Raw: scheduledTaskValue(t, state)},
+		Plan:   resp.Plan,
+	}, &resp)
+	var got ScheduledTaskResourceModel
+	if !resp.Diagnostics.HasError() {
+		if d := resp.Plan.Get(ctx, &got); d.HasError() {
+			t.Fatal(d)
+		}
+	}
+	return got, resp
+}
+
+func keyConfig(key string) ScheduledTaskResourceModel {
+	return ScheduledTaskResourceModel{ID: types.StringNull(), Key: types.StringValue(key), TaskID: types.StringNull()}
+}
+
+func keyCreatePlan(key string) ScheduledTaskResourceModel {
+	return ScheduledTaskResourceModel{ID: types.StringUnknown(), Key: types.StringValue(key), TaskID: types.StringUnknown()}
+}
+
+func storedTask(taskID string, key types.String) *ScheduledTaskResourceModel {
+	return &ScheduledTaskResourceModel{ID: types.StringValue(taskID), Key: key, TaskID: types.StringValue(taskID)}
+}
+
+func TestScheduledTaskPlanResolvesKeyOnCreate(t *testing.T) {
+	t.Parallel()
+
+	srv := &fakeTaskServer{tasks: testTasks()}
+	got, resp := planScheduledTask(t, srv.client(t), keyConfig("RefreshLibrary"), nil, keyCreatePlan("RefreshLibrary"))
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("ModifyPlan() = %v", resp.Diagnostics)
+	}
+	if got.TaskID.ValueString() != scanMediaLibraryID {
+		t.Errorf("planned task_id = %v, want %s", got.TaskID, scanMediaLibraryID)
+	}
+}
+
+func TestScheduledTaskPlanRejectsKeyNoTaskHas(t *testing.T) {
+	t.Parallel()
+
+	srv := &fakeTaskServer{tasks: testTasks()}
+	_, resp := planScheduledTask(t, srv.client(t), keyConfig("NoSuchTask"), nil, keyCreatePlan("NoSuchTask"))
+	if got, want := errorPaths(t, resp.Diagnostics), []string{path.Root("key").String()}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ModifyPlan() error paths = %v (%v), want %v", got, resp.Diagnostics, want)
+	}
+}
+
+func TestScheduledTaskPlanKeepsTheStoredTaskItsKeySelects(t *testing.T) {
+	t.Parallel()
+
+	srv := &fakeTaskServer{tasks: testTasks()}
+	state := storedTask(scanMediaLibraryID, types.StringValue("RefreshLibrary"))
+	got, resp := planScheduledTask(t, srv.client(t), keyConfig("RefreshLibrary"), state, *state)
+	if resp.Diagnostics.HasError() || len(resp.RequiresReplace) != 0 {
+		t.Fatalf("ModifyPlan() = %v, replace %v; want neither", resp.Diagnostics, resp.RequiresReplace)
+	}
+	if got.TaskID.ValueString() != scanMediaLibraryID {
+		t.Errorf("planned task_id = %v, want %s", got.TaskID, scanMediaLibraryID)
+	}
+}
+
+// The refresh reads the key of the task task_id names, so the state holds a
+// key that other tasks may share once the configuration switches to it.
+func TestScheduledTaskPlanRejectsASharedKeyTheStateHolds(t *testing.T) {
+	t.Parallel()
+
+	srv := &fakeTaskServer{tasks: append(testTasks(), client.ScheduledTask{ID: "aaaa", Key: "Shared"}, client.ScheduledTask{ID: "bbbb", Key: "Shared"})}
+	state := storedTask("aaaa", types.StringValue("Shared"))
+	_, resp := planScheduledTask(t, srv.client(t), keyConfig("Shared"), state, *state)
+	if got, want := errorPaths(t, resp.Diagnostics), []string{path.Root("key").String()}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ModifyPlan() error paths = %v (%v), want %v", got, resp.Diagnostics, want)
+	}
+	if got := resp.Diagnostics.Errors()[0].Summary(); got != "Ambiguous scheduled task key" {
+		t.Errorf("ModifyPlan() error = %q, want the ambiguous key error", got)
+	}
+}
+
+func TestScheduledTaskPlanForKeyUnknownUntilApply(t *testing.T) {
+	t.Parallel()
+
+	stored := storedTask(scanMediaLibraryID, types.StringValue("RefreshLibrary"))
+	tests := map[string]struct {
+		state       *ScheduledTaskResourceModel
+		taskID      types.String
+		wantReplace bool
+	}{
+		"replaces a stored task":            {state: stored, taskID: types.StringNull(), wantReplace: true},
+		"plans a create":                    {taskID: types.StringNull()},
+		"leaves a configured task_id to it": {state: stored, taskID: types.StringValue(scanMediaLibraryID)},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := &fakeTaskServer{tasks: testTasks()}
+			config := ScheduledTaskResourceModel{ID: types.StringNull(), Key: types.StringUnknown(), TaskID: tc.taskID}
+			plan := keyCreatePlan("")
+			if tc.state != nil {
+				plan = *tc.state
+			}
+			plan.Key = types.StringUnknown()
+			_, resp := planScheduledTask(t, srv.client(t), config, tc.state, plan)
+			if resp.Diagnostics.HasError() {
+				t.Fatalf("ModifyPlan() = %v", resp.Diagnostics)
+			}
+			var want path.Paths
+			if tc.wantReplace {
+				want = path.Paths{path.Root("key")}
+			}
+			if !reflect.DeepEqual(resp.RequiresReplace, want) {
+				t.Errorf("RequiresReplace = %v, want %v", resp.RequiresReplace, want)
+			}
+			if n := srv.requestCount(); n != 0 {
+				t.Errorf("ModifyPlan() made %d requests, want none", n)
+			}
+		})
+	}
+}
+
+// terraform plan -generate-config-out writes both from an imported state.
+func TestScheduledTaskPlanWithKeyAndTaskID(t *testing.T) {
+	t.Parallel()
+
+	const conflicting, notFound = "Conflicting scheduled task attributes", "Scheduled task not found"
+	key := types.StringValue("RefreshLibrary")
+	tests := map[string]struct {
+		tasks             []client.ScheduledTask
+		key, taskID       types.String
+		wantError, wantAt string
+	}{
+		"naming the same task":                 {key: key, taskID: types.StringValue(scanMediaLibraryID)},
+		"naming the same task in another case": {key: key, taskID: types.StringValue("7738148FFCD07979C7CEB148E06B3AED")},
+		"naming different tasks":               {key: key, taskID: types.StringValue(updatePluginsID), wantError: conflicting, wantAt: "key"},
+		"with a key in another case":           {key: types.StringValue("refreshlibrary"), taskID: types.StringValue(scanMediaLibraryID), wantError: conflicting, wantAt: "key"},
+		"with a task_id no task has":           {key: key, taskID: types.StringValue(cleanLogFilesID), wantError: conflicting, wantAt: "task_id"},
+		"with a task_id and a key no task has": {key: types.StringValue("NoSuchTask"), taskID: types.StringValue(cleanLogFilesID), wantError: notFound, wantAt: "key"},
+		"with a task_id unknown until apply":   {key: key, taskID: types.StringUnknown()},
+		"naming one of the tasks sharing a key": {
+			tasks: append(testTasks(), client.ScheduledTask{ID: "aaaa", Key: "Shared"}, client.ScheduledTask{ID: "bbbb", Key: "Shared"}),
+			key:   types.StringValue("Shared"), taskID: types.StringValue("aaaa"),
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tasks := tc.tasks
+			if tasks == nil {
+				tasks = testTasks()
+			}
+			srv := &fakeTaskServer{tasks: tasks}
+			config := ScheduledTaskResourceModel{ID: types.StringNull(), Key: tc.key, TaskID: tc.taskID}
+			plan := config
+			plan.ID = types.StringUnknown()
+			got, resp := planScheduledTask(t, srv.client(t), config, nil, plan)
+			if tc.wantError != "" {
+				if gotPaths, want := errorPaths(t, resp.Diagnostics), []string{path.Root(tc.wantAt).String()}; !reflect.DeepEqual(gotPaths, want) {
+					t.Fatalf("ModifyPlan() error paths = %v (%v), want %v", gotPaths, resp.Diagnostics, want)
+				}
+				if summary := resp.Diagnostics.Errors()[0].Summary(); summary != tc.wantError {
+					t.Errorf("ModifyPlan() error = %q, want %q", summary, tc.wantError)
+				}
+				return
+			}
+			if resp.Diagnostics.HasError() || len(resp.RequiresReplace) != 0 {
+				t.Fatalf("ModifyPlan() = %v, replace %v; want neither", resp.Diagnostics, resp.RequiresReplace)
+			}
+			if !got.TaskID.Equal(tc.taskID) {
+				t.Errorf("planned task_id = %v, want the configured %v", got.TaskID, tc.taskID)
+			}
+		})
+	}
+}
+
+// replacesChangedPath reports whether Terraform replaces the resource for
+// resp, which it does only for a path in RequiresReplace whose value differs
+// between state and the plan.
+func replacesChangedPath(t *testing.T, state *ScheduledTaskResourceModel, resp resource.ModifyPlanResponse) bool {
+	t.Helper()
+
+	ctx := context.Background()
+	prior := tfsdk.State{Schema: scheduledTaskSchema(t), Raw: scheduledTaskValue(t, state)}
+	for _, p := range resp.RequiresReplace {
+		var before, after types.String
+		if d := prior.GetAttribute(ctx, p, &before); d.HasError() {
+			t.Fatal(d)
+		}
+		if d := resp.Plan.GetAttribute(ctx, p, &after); d.HasError() {
+			t.Fatal(d)
+		}
+		if !before.Equal(after) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestScheduledTaskPlanReplacesWhenKeySelectsAnotherTask(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		state *ScheduledTaskResourceModel
+		key   string
+		want  string
+	}{
+		"for a new key": {
+			state: storedTask(scanMediaLibraryID, types.StringValue("RefreshLibrary")),
+			key:   "PluginUpdates", want: updatePluginsID,
+		},
+		// Only a plan that skips the refresh sees the stale ID with the key
+		// its task still has.
+		"for the stored key of a task whose ID changed": {
+			state: storedTask(cleanLogFilesID, types.StringValue("RefreshLibrary")),
+			key:   "RefreshLibrary", want: scanMediaLibraryID,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := &fakeTaskServer{tasks: testTasks()}
+			plan := *tc.state
+			plan.Key = types.StringValue(tc.key)
+			got, resp := planScheduledTask(t, srv.client(t), keyConfig(tc.key), tc.state, plan)
+			if resp.Diagnostics.HasError() {
+				t.Fatalf("ModifyPlan() = %v", resp.Diagnostics)
+			}
+			if !replacesChangedPath(t, tc.state, resp) {
+				t.Errorf("RequiresReplace = %v, want a path the plan changes", resp.RequiresReplace)
+			}
+			if got.TaskID.ValueString() != tc.want {
+				t.Errorf("planned task_id = %v, want %s", got.TaskID, tc.want)
+			}
+		})
+	}
+}
+
+// A state saved before the key attribute existed has no key until a refresh
+// reads one, which -refresh=false skips.
+func TestScheduledTaskPlanKeepsStoredTaskIDWhenKeySelectsThatTask(t *testing.T) {
+	t.Parallel()
+
+	srv := &fakeTaskServer{tasks: testTasks()}
+	state := storedTask("7738148FFCD07979C7CEB148E06B3AED", types.StringNull())
+	plan := *state
+	plan.Key = types.StringValue("RefreshLibrary")
+	got, resp := planScheduledTask(t, srv.client(t), keyConfig("RefreshLibrary"), state, plan)
+	if resp.Diagnostics.HasError() || len(resp.RequiresReplace) != 0 {
+		t.Fatalf("ModifyPlan() = %v, replace %v; want neither", resp.Diagnostics, resp.RequiresReplace)
+	}
+	if !got.TaskID.Equal(state.TaskID) {
+		t.Errorf("planned task_id = %v, want the stored %v", got.TaskID, state.TaskID)
+	}
+}
+
+func TestScheduledTaskReadAfterImport(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		importID    string
+		wantTaskID  string
+		wantKey     string
+		wantSummary string
+	}{
+		"by key":                     {importID: "PluginUpdates", wantTaskID: updatePluginsID, wantKey: "PluginUpdates"},
+		"by ID":                      {importID: scanMediaLibraryID, wantTaskID: scanMediaLibraryID, wantKey: "RefreshLibrary"},
+		"by ID in another case":      {importID: "7738148FFCD07979C7CEB148E06B3AED", wantTaskID: "7738148FFCD07979C7CEB148E06B3AED", wantKey: "RefreshLibrary"},
+		"by neither an ID nor a key": {importID: "refreshlibrary", wantSummary: "Scheduled task not found"},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+
+			srv := &fakeTaskServer{tasks: testTasks()}
+			s := scheduledTaskSchema(t)
+			imported := resource.ImportStateResponse{State: tfsdk.State{Schema: s, Raw: scheduledTaskValue(t, nil)}}
+			(&ScheduledTaskResource{}).ImportState(ctx, resource.ImportStateRequest{ID: tc.importID}, &imported)
+			if imported.Diagnostics.HasError() {
+				t.Fatalf("ImportState() = %v", imported.Diagnostics)
+			}
+
+			resp := readAgainst(t, NewScheduledTaskResource(), srv.client(t), imported.State)
+			if tc.wantSummary != "" {
+				if len(resp.Diagnostics.Errors()) != 1 || resp.Diagnostics.Errors()[0].Summary() != tc.wantSummary {
+					t.Fatalf("Read() = %v, want one error %q", resp.Diagnostics, tc.wantSummary)
+				}
+				return
+			}
+			if resp.Diagnostics.HasError() {
+				t.Fatalf("Read() = %v", resp.Diagnostics)
+			}
+			var got ScheduledTaskResourceModel
+			if d := resp.State.Get(ctx, &got); d.HasError() {
+				t.Fatal(d)
+			}
+			if got.TaskID.ValueString() != tc.wantTaskID || got.ID.ValueString() != tc.wantTaskID || got.Key.ValueString() != tc.wantKey {
+				t.Errorf("read id %v, task_id %v, key %v; want id and task_id %s, key %s", got.ID, got.TaskID, got.Key, tc.wantTaskID, tc.wantKey)
+			}
+		})
 	}
 }
