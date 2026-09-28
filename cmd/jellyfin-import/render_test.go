@@ -4,7 +4,8 @@
 package main
 
 import (
-	"context"
+	"maps"
+	"slices"
 	"testing"
 )
 
@@ -19,7 +20,7 @@ func TestImportedAttributesForLiveTV(t *testing.T) {
   "RecordingPostProcessorArguments": "\"{path}\""
 }`
 
-	attrs, err := importedAttributes(context.Background(), nil, "jellyfin_livetv_configuration", "livetv", raw)
+	attrs, err := importedAttributes(t.Context(), nil, "jellyfin_livetv_configuration", "livetv", raw)
 	if err != nil {
 		t.Fatalf("importedAttributes() error: %v", err)
 	}
@@ -51,7 +52,7 @@ func TestImportedAttributesForLiveTV(t *testing.T) {
   ]`,
 	}
 	if len(attrs) != len(want) {
-		t.Errorf("importedAttributes() keys = %v, want %d keys", sortedKeys(attrs), len(want))
+		t.Errorf("importedAttributes() keys = %v, want %d keys", slices.Sorted(maps.Keys(attrs)), len(want))
 	}
 	for k, v := range want {
 		if attrs[k] != v {

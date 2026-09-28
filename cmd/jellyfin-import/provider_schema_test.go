@@ -22,17 +22,10 @@ import (
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/provider"
 )
 
-func joinPath(parent, name string) string {
-	if parent == "" {
-		return name
-	}
-	return parent + "." + name
-}
-
 func providerSchemas(t *testing.T) map[string]schema.Schema {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	schemas := make(map[string]schema.Schema)
 	for _, newResource := range provider.New("test")().Resources(ctx) {
 		r := newResource()
@@ -89,7 +82,7 @@ func attributeAt(attrs map[string]schema.Attribute, attrPath string) (schema.Att
 // Jellyfin offers through jellyfin_library's validators, so the importer skips
 // exactly the libraries the provider would reject.
 func TestLibraryCollectionTypesMatchProviderValidator(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, ok := providerSchemas(t)["jellyfin_library"]
 	if !ok {
 		t.Fatal("the provider has no jellyfin_library resource")
@@ -126,9 +119,9 @@ type configMatchesImportedState struct {
 }
 
 func (c configMatchesImportedState) CheckPlan(_ context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
-	config := make(map[string]map[string]interface{})
+	config := make(map[string]map[string]any)
 	for _, r := range req.Plan.Config.RootModule.Resources {
-		values := make(map[string]interface{}, len(r.Expressions))
+		values := make(map[string]any, len(r.Expressions))
 		for name, expr := range r.Expressions {
 			if expr != nil && expr.ExpressionData != nil {
 				values[name] = expr.ConstantValue
@@ -149,7 +142,7 @@ func (c configMatchesImportedState) CheckPlan(_ context.Context, req plancheck.C
 			errs = append(errs, fmt.Errorf("%s: the provider has no %s resource", rc.Address, rc.Type))
 			continue
 		}
-		state, _ := rc.Change.Before.(map[string]interface{})
+		state, _ := rc.Change.Before.(map[string]any)
 		errs = append(errs, compareConfigToState(rc.Type, rc.Address, "", s.Attributes, state, config[rc.Address])...)
 	}
 	if imported == 0 {
@@ -158,7 +151,7 @@ func (c configMatchesImportedState) CheckPlan(_ context.Context, req plancheck.C
 	resp.Error = errors.Join(errs...)
 }
 
-func compareConfigToState(resourceType, address, parent string, attrs map[string]schema.Attribute, state, config map[string]interface{}) []error {
+func compareConfigToState(resourceType, address, parent string, attrs map[string]schema.Attribute, state, config map[string]any) []error {
 	var errs []error
 	for name, a := range attrs {
 		p := joinPath(parent, name)
@@ -174,23 +167,23 @@ func compareConfigToState(resourceType, address, parent string, attrs map[string
 
 		switch a := a.(type) {
 		case schema.SingleNestedAttribute:
-			s, sok := stateValue.(map[string]interface{})
-			c, cok := configValue.(map[string]interface{})
+			s, sok := stateValue.(map[string]any)
+			c, cok := configValue.(map[string]any)
 			if !sok || !cok {
 				errs = append(errs, fmt.Errorf("%s: %s is %s in the configuration, want an object", address, p, show(configValue)))
 				continue
 			}
 			errs = append(errs, compareConfigToState(resourceType, address, p, a.Attributes, s, c)...)
 		case schema.ListNestedAttribute:
-			s, sok := stateValue.([]interface{})
-			c, cok := configValue.([]interface{})
+			s, sok := stateValue.([]any)
+			c, cok := configValue.([]any)
 			if !sok || !cok || len(s) != len(c) {
 				errs = append(errs, fmt.Errorf("%s: %s is %s in the configuration, want %s", address, p, show(configValue), show(stateValue)))
 				continue
 			}
 			for i := range s {
-				se, _ := s[i].(map[string]interface{})
-				ce, _ := c[i].(map[string]interface{})
+				se, _ := s[i].(map[string]any)
+				ce, _ := c[i].(map[string]any)
 				errs = append(errs, compareConfigToState(resourceType, address, p, a.NestedObject.Attributes, se, ce)...)
 			}
 		default:
@@ -202,7 +195,7 @@ func compareConfigToState(resourceType, address, parent string, attrs map[string
 	return errs
 }
 
-func show(v interface{}) string {
+func show(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Sprint(v)
@@ -212,7 +205,7 @@ func show(v interface{}) string {
 
 // normalizeNumbers turns json.Number values into float64, so a number reads
 // the same whether Terraform rendered it from the configuration or the state.
-func normalizeNumbers(v interface{}) interface{} {
+func normalizeNumbers(v any) any {
 	switch v := v.(type) {
 	case json.Number:
 		f, err := v.Float64()
@@ -220,14 +213,14 @@ func normalizeNumbers(v interface{}) interface{} {
 			return v.String()
 		}
 		return f
-	case []interface{}:
-		out := make([]interface{}, len(v))
+	case []any:
+		out := make([]any, len(v))
 		for i, e := range v {
 			out[i] = normalizeNumbers(e)
 		}
 		return out
-	case map[string]interface{}:
-		out := make(map[string]interface{}, len(v))
+	case map[string]any:
+		out := make(map[string]any, len(v))
 		for k, e := range v {
 			out[k] = normalizeNumbers(e)
 		}

@@ -5,7 +5,8 @@ package main
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -23,7 +24,7 @@ func hclObject(attrs map[string]string, depth int) string {
 // writeAttributes writes attrs sorted, aligning "=" like terraform fmt across
 // each run of single-line values.
 func writeAttributes(b *strings.Builder, attrs map[string]string, indent string) {
-	keys := sortedKeys(attrs)
+	keys := slices.Sorted(maps.Keys(attrs))
 	for start := 0; start < len(keys); {
 		end, width := start, 0
 		for ; end < len(keys) && !strings.Contains(attrs[keys[end]], "\n"); end++ {
@@ -79,18 +80,5 @@ func importBlock(resourceType, name, id string) string {
 }
 
 func resourceBlock(resourceType, name string, attrs map[string]string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "resource %s %s {\n", hclString(resourceType), hclString(name))
-	writeAttributes(&b, attrs, "  ")
-	b.WriteString("}\n")
-	return b.String()
-}
-
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+	return fmt.Sprintf("resource %s %s %s\n", hclString(resourceType), hclString(name), hclObject(attrs, 0))
 }

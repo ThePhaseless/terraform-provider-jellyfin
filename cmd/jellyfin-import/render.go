@@ -78,12 +78,9 @@ func renderAttributes(resourceType, parent string, attrs map[string]schema.Attri
 	values := obj.Attributes()
 	null := func(name string) bool { return values[name] == nil || values[name].IsNull() }
 	for name, a := range attrs {
-		p := name
-		if parent != "" {
-			p = parent + "." + name
-		}
+		p := joinPath(parent, name)
 		v := values[name]
-		if !rendered(resourceType, p, a, null) || v == nil || v.IsNull() || v.IsUnknown() {
+		if null(name) || v.IsUnknown() || !rendered(resourceType, p, a, null) {
 			continue
 		}
 		s, err := renderValue(resourceType, p, a, v, depth)
@@ -93,6 +90,13 @@ func renderAttributes(resourceType, parent string, attrs map[string]schema.Attri
 		out[name] = s
 	}
 	return out, nil
+}
+
+func joinPath(parent, name string) string {
+	if parent == "" {
+		return name
+	}
+	return parent + "." + name
 }
 
 func renderValue(resourceType, attrPath string, a schema.Attribute, v attr.Value, depth int) (string, error) {

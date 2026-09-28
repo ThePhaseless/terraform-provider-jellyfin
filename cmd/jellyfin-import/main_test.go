@@ -45,6 +45,13 @@ func TestSanitizeName(t *testing.T) {
 		{"---", "unnamed"},
 		{"a-b_c.d", "a_b_c_d"},
 		{"UPPER CASE", "upper_case"},
+		{"a", "a"},
+		{"1", "r_1"},
+		{"_leading", "leading"},
+		{"trailing_", "trailing"},
+		{"multi___underscores", "multi_underscores"},
+		{"café", "caf"},
+		{"hello.world", "hello_world"},
 	}
 
 	for _, tt := range tests {
@@ -87,19 +94,8 @@ func TestResourceBlock(t *testing.T) {
 	}
 }
 
-func TestSortedKeys(t *testing.T) {
-	m := map[string]string{"c": "3", "a": "1", "b": "2"}
-	keys := sortedKeys(m)
-	expected := []string{"a", "b", "c"}
-	for i, k := range keys {
-		if k != expected[i] {
-			t.Errorf("sortedKeys()[%d] = %q, want %q", i, k, expected[i])
-		}
-	}
-}
-
 // writeJSON encodes v as JSON into w, logging any error via t.
-func writeJSON(t *testing.T, w http.ResponseWriter, v interface{}) {
+func writeJSON(t *testing.T, w http.ResponseWriter, v any) {
 	t.Helper()
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		t.Errorf("failed to encode JSON response: %v", err)
@@ -112,11 +108,11 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/Users", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"Id":   "user-id-1",
 				"Name": "admin",
-				"Policy": map[string]interface{}{
+				"Policy": map[string]any{
 					"IsAdministrator":  true,
 					"IsDisabled":       false,
 					"EnableAllFolders": true,
@@ -125,7 +121,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 			{
 				"Id":   "user-id-2",
 				"Name": "viewer",
-				"Policy": map[string]interface{}{
+				"Policy": map[string]any{
 					"IsAdministrator":  false,
 					"IsDisabled":       false,
 					"EnableAllFolders": false,
@@ -135,7 +131,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"Name":           "Movies",
 				"CollectionType": "movies",
@@ -146,8 +142,8 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/Auth/Keys", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
-			"Items": []map[string]interface{}{
+		writeJSON(t, w, map[string]any{
+			"Items": []map[string]any{
 				{
 					"AccessToken": "test-token-123",
 					"AppName":     "MyApp",
@@ -157,7 +153,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/Repositories", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"Name":    "Jellyfin Stable",
 				"Url":     "https://repo.jellyfin.org/files/plugin/manifest.json",
@@ -167,7 +163,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"Name":    "MusicBrainz",
 				"Version": "14.0.0.0",
@@ -177,10 +173,10 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/Packages", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"name": "MusicBrainz",
-				"versions": []map[string]interface{}{
+				"versions": []map[string]any{
 					{
 						"version":        "14.0.0.0",
 						"repositoryUrl":  "https://repo.jellyfin.org/files/plugin/manifest.json",
@@ -192,13 +188,13 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/ScheduledTasks", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"Name":     "Scan Media Library",
 				"Id":       "task-id-1",
 				"Key":      "RefreshLibrary",
 				"IsHidden": false,
-				"Triggers": []map[string]interface{}{
+				"Triggers": []map[string]any{
 					{
 						"Type":          "IntervalTrigger",
 						"IntervalTicks": 432000000000,
@@ -210,23 +206,23 @@ func setupTestServer(t *testing.T) *httptest.Server {
 				"Id":       "task-id-2",
 				"Key":      "RefreshGuide",
 				"IsHidden": true,
-				"Triggers": []map[string]interface{}{},
+				"Triggers": []map[string]any{},
 			},
 		})
 	})
 
 	mux.HandleFunc("/System/Configuration", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
+		writeJSON(t, w, map[string]any{
 			"ServerName":                    "Test Server",
 			"IsStartupWizardCompleted":      true,
 			"EnableNormalizedItemByNameIds": true,
 			"CachePath":                     nil,
 			"SortRemoveWords":               []string{"the", "a"},
-			"MetadataOptions": []map[string]interface{}{
+			"MetadataOptions": []map[string]any{
 				{"ItemType": "Movie", "DisabledMetadataFetchers": []string{"OMDb"}, "ImageFetcherOrder": nil},
 				{"ItemType": "Person", "DisabledMetadataFetchers": []string{"TheMovieDb"}, "MetadataFetcherOrder": []string{}},
 			},
-			"TrickplayOptions": map[string]interface{}{
+			"TrickplayOptions": map[string]any{
 				"Interval":         10000,
 				"ProcessPriority":  "BelowNormal",
 				"WidthResolutions": []int{320},
@@ -235,19 +231,19 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/Libraries/AvailableOptions", func(w http.ResponseWriter, r *http.Request) {
-		typeOptions := []map[string]interface{}{}
+		typeOptions := []map[string]any{}
 		if r.URL.Query().Get("libraryContentType") == "movies" {
-			typeOptions = append(typeOptions, map[string]interface{}{
+			typeOptions = append(typeOptions, map[string]any{
 				"Type":             "Movie",
-				"MetadataFetchers": []map[string]interface{}{{"Name": "TheMovieDb"}, {"Name": "OMDb"}},
-				"ImageFetchers":    []map[string]interface{}{{"Name": "TheMovieDb"}},
+				"MetadataFetchers": []map[string]any{{"Name": "TheMovieDb"}, {"Name": "OMDb"}},
+				"ImageFetchers":    []map[string]any{{"Name": "TheMovieDb"}},
 			})
 		}
-		writeJSON(t, w, map[string]interface{}{"TypeOptions": typeOptions})
+		writeJSON(t, w, map[string]any{"TypeOptions": typeOptions})
 	})
 
 	mux.HandleFunc("/System/Configuration/encoding", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
+		writeJSON(t, w, map[string]any{
 			"EncodingThreadCount": -1,
 			"DownMixAudioBoost":   2.5,
 			"TonemappingPeak":     100,
@@ -255,27 +251,27 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/System/Configuration/network", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
+		writeJSON(t, w, map[string]any{
 			"BaseUrl":     "",
 			"EnableHttps": false,
 		})
 	})
 
 	mux.HandleFunc("/System/Configuration/branding", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
+		writeJSON(t, w, map[string]any{
 			"SplashscreenEnabled": false,
 			"LoginDisclaimer":     "Hi ${user}\n100%{x}",
 		})
 	})
 
 	mux.HandleFunc("/System/Configuration/livetv", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
+		writeJSON(t, w, map[string]any{
 			"EnableRecordingSubfolders": false,
 		})
 	})
 
 	mux.HandleFunc("/System/Configuration/metadata", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
+		writeJSON(t, w, map[string]any{
 			"UseFileCreationTimeForDateAdded": true,
 		})
 	})
@@ -287,13 +283,9 @@ func TestGenerateUsers(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	imports, resources, err := g.generateUsers()
+	imports, resources, err := g.generateUsers(t.Context())
 	if err != nil {
 		t.Fatalf("generateUsers() error: %v", err)
 	}
@@ -321,13 +313,9 @@ func TestGenerateLibraries(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	imports, resources, err := g.generateLibraries()
+	imports, resources, err := g.generateLibraries(t.Context())
 	if err != nil {
 		t.Fatalf("generateLibraries() error: %v", err)
 	}
@@ -349,7 +337,7 @@ func TestGenerateLibraries(t *testing.T) {
 
 func TestGenerateLibrariesWritesMixedForMissingCollectionType(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"Name":      "Mixed",
 				"Locations": []string{"/media/mixed"},
@@ -359,13 +347,9 @@ func TestGenerateLibrariesWritesMixedForMissingCollectionType(t *testing.T) {
 	}))
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	_, resources, err := g.generateLibraries()
+	_, resources, err := g.generateLibraries(t.Context())
 	if err != nil {
 		t.Fatalf("generateLibraries() error: %v", err)
 	}
@@ -378,13 +362,9 @@ func TestGenerateAPIKeys(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	imports, resources, err := g.generateAPIKeys()
+	imports, resources, err := g.generateAPIKeys(t.Context())
 	if err != nil {
 		t.Fatalf("generateAPIKeys() error: %v", err)
 	}
@@ -404,13 +384,9 @@ func TestGenerateScheduledTasks(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	imports, resources, err := g.generateScheduledTasks()
+	imports, resources, err := g.generateScheduledTasks(t.Context())
 	if err != nil {
 		t.Fatalf("generateScheduledTasks() error: %v", err)
 	}
@@ -536,11 +512,8 @@ func TestGenerateScheduledTasksRendersTriggers(t *testing.T) {
 			}))
 			defer server.Close()
 
-			g := &generator{
-				client:    client.NewClient(server.URL, "test-key"),
-				usedNames: make(map[string]bool),
-			}
-			_, resources, err := g.generateScheduledTasks()
+			g := &generator{client: client.NewClient(server.URL, "test-key")}
+			_, resources, err := g.generateScheduledTasks(t.Context())
 			if err != nil {
 				t.Fatalf("generateScheduledTasks() error: %v", err)
 			}
@@ -567,11 +540,8 @@ func TestGenerateScheduledTasksWritesTaskIDWhenNoKeySelectsTheTask(t *testing.T)
 	}))
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		usedNames: make(map[string]bool),
-	}
-	imports, resources, err := g.generateScheduledTasks()
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
+	imports, resources, err := g.generateScheduledTasks(t.Context())
 	if err != nil {
 		t.Fatalf("generateScheduledTasks() error: %v", err)
 	}
@@ -615,13 +585,9 @@ func TestGenerateSingletonConfigs(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	imports, resources, err := g.generateSingletonConfigs()
+	imports, resources, err := g.generateSingletonConfigs(t.Context())
 	if err != nil {
 		t.Fatalf("generateSingletonConfigs() error: %v", err)
 	}
@@ -699,13 +665,9 @@ func TestGeneratePlugins(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	imports, resources, err := g.generatePlugins()
+	imports, resources, err := g.generatePlugins(t.Context())
 	if err != nil {
 		t.Fatalf("generatePlugins() error: %v", err)
 	}
@@ -728,13 +690,9 @@ func TestGeneratePluginRepositories(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	imports, resources, err := g.generatePluginRepositories()
+	imports, resources, err := g.generatePluginRepositories(t.Context())
 	if err != nil {
 		t.Fatalf("generatePluginRepositories() error: %v", err)
 	}
@@ -756,11 +714,10 @@ func TestFullGenerate(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: outputDir,
-		usedNames: make(map[string]bool),
 		warnings:  &warnings,
 	}
 
-	if err := g.Generate(); err != nil {
+	if err := g.Generate(t.Context()); err != nil {
 		t.Fatalf("Generate() error: %v", err)
 	}
 	// The server has an API key, whose token is its import ID.
@@ -768,17 +725,7 @@ func TestFullGenerate(t *testing.T) {
 		t.Errorf("expected only the API key token warning for an empty output directory, got %q", got)
 	}
 
-	importsPath := filepath.Join(outputDir, "imports.tf")
-	if _, err := os.Stat(importsPath); os.IsNotExist(err) {
-		t.Error("imports.tf was not created")
-	}
-
-	resourcesPath := filepath.Join(outputDir, "resources.tf")
-	if _, err := os.Stat(resourcesPath); os.IsNotExist(err) {
-		t.Error("resources.tf was not created")
-	}
-
-	importsContent, err := os.ReadFile(importsPath)
+	importsContent, err := os.ReadFile(filepath.Join(outputDir, "imports.tf"))
 	if err != nil {
 		t.Fatalf("Failed to read imports.tf: %v", err)
 	}
@@ -805,7 +752,7 @@ func TestFullGenerate(t *testing.T) {
 		}
 	}
 
-	resourcesContent, err := os.ReadFile(resourcesPath)
+	resourcesContent, err := os.ReadFile(filepath.Join(outputDir, "resources.tf"))
 	if err != nil {
 		t.Fatalf("Failed to read resources.tf: %v", err)
 	}
@@ -857,11 +804,10 @@ func TestGenerateWarnsAboutOtherConfigurationInOutputDir(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: outputDir,
-		usedNames: make(map[string]bool),
 		warnings:  &warnings,
 	}
 
-	if err := g.Generate(); err != nil {
+	if err := g.Generate(t.Context()); err != nil {
 		t.Fatalf("Generate() error: %v", err)
 	}
 	if !strings.Contains(warnings.String(), "required_providers") {
@@ -879,45 +825,16 @@ func TestGenerateWithServerError(t *testing.T) {
 	g := &generator{
 		client:    client.NewClient(server.URL, "test-key"),
 		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
 	}
 
-	err := g.Generate()
+	err := g.Generate(t.Context())
 	if err == nil {
 		t.Error("expected error from Generate(), got nil")
 	}
 }
 
-func TestSanitizeNameEdgeCases(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"a", "a"},
-		{"1", "r_1"},
-		{"_leading", "leading"},
-		{"trailing_", "trailing"},
-		{"multi___underscores", "multi_underscores"},
-		{"café", "caf"},
-		{"hello.world", "hello_world"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			t.Parallel()
-
-			result := sanitizeName(tt.input)
-			if result != tt.expected {
-				t.Errorf("sanitizeName(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestUniqueName(t *testing.T) {
-	g := &generator{usedNames: make(map[string]bool)}
+	g := &generator{}
 
 	name1 := g.uniqueName("jellyfin_user", "admin")
 	if name1 != "admin" {
@@ -961,7 +878,7 @@ func TestUniqueNameSkipsSuffixedNamesAlreadyTaken(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			g := &generator{usedNames: make(map[string]bool)}
+			g := &generator{}
 			for i, base := range tc.bases {
 				if got := g.uniqueName("jellyfin_library", base); got != tc.want[i] {
 					t.Errorf("uniqueName(%q) call %d = %q, want %q", base, i+1, got, tc.want[i])
@@ -974,7 +891,7 @@ func TestUniqueNameSkipsSuffixedNamesAlreadyTaken(t *testing.T) {
 func TestGenerateLibrariesGivesEachLibraryItsOwnAddress(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{"Name": "Films!", "CollectionType": "movies", "Locations": []string{"/media/movies"}},
 			{"Name": "Films 1", "CollectionType": "movies", "Locations": []string{"/media/movies"}},
 			{"Name": "Films", "CollectionType": "movies", "Locations": []string{"/media/movies"}},
@@ -983,11 +900,8 @@ func TestGenerateLibrariesGivesEachLibraryItsOwnAddress(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		usedNames: make(map[string]bool),
-	}
-	imports, _, err := g.generateLibraries()
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
+	imports, _, err := g.generateLibraries(t.Context())
 	if err != nil {
 		t.Fatalf("generateLibraries() error: %v", err)
 	}
@@ -1006,7 +920,7 @@ func TestGenerateLibrariesGivesEachLibraryItsOwnAddress(t *testing.T) {
 func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{
 				"Name":    "TestPlugin",
 				"Version": "1.0.0",
@@ -1021,13 +935,9 @@ func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	imports, resources, err := g.generatePlugins()
+	imports, resources, err := g.generatePlugins(t.Context())
 	if err != nil {
 		t.Fatalf("generatePlugins() should not fail when /Packages is unavailable: %v", err)
 	}
@@ -1044,17 +954,17 @@ func TestGeneratePluginsWithoutPackagesEndpoint(t *testing.T) {
 func TestGeneratePluginsResolvesOnlyTheInstalledVersion(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{"Name": "Bundled", "Version": "12.1.0.0", "Id": "bundled-id"},
 			{"Name": "Listed", "Version": "2.0.0.0", "Id": "listed-id"},
 		})
 	})
 	mux.HandleFunc("/Packages", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
-			{"name": "Bundled", "versions": []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
+			{"name": "Bundled", "versions": []map[string]any{
 				{"version": "11.0.0.0", "repositoryUrl": "https://repo.example/bundled.json"},
 			}},
-			{"name": "Listed", "versions": []map[string]interface{}{
+			{"name": "Listed", "versions": []map[string]any{
 				{"version": "3.0.0.0", "repositoryUrl": "https://repo.example/newer.json"},
 				{"version": "2.0.0.0", "repositoryUrl": "https://repo.example/listed.json"},
 			}},
@@ -1063,13 +973,9 @@ func TestGeneratePluginsResolvesOnlyTheInstalledVersion(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
 
-	_, resources, err := g.generatePlugins()
+	_, resources, err := g.generatePlugins(t.Context())
 	if err != nil {
 		t.Fatalf("generatePlugins() error: %v", err)
 	}
@@ -1088,7 +994,7 @@ func TestGeneratePluginsResolvesOnlyTheInstalledVersion(t *testing.T) {
 func TestGenerateLibrariesSkipsCollectionTypesTheProviderRejects(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, []map[string]interface{}{
+		writeJSON(t, w, []map[string]any{
 			{"Name": "Lists", "CollectionType": "playlists", "Locations": []string{"/media/lists"}},
 			{"Name": "Films ${x}", "CollectionType": "movies", "Locations": []string{"/media/films"}},
 		})
@@ -1097,14 +1003,9 @@ func TestGenerateLibrariesSkipsCollectionTypesTheProviderRejects(t *testing.T) {
 	defer server.Close()
 
 	var warnings strings.Builder
-	g := &generator{
-		client:    client.NewClient(server.URL, "test-key"),
-		outputDir: t.TempDir(),
-		usedNames: make(map[string]bool),
-		warnings:  &warnings,
-	}
+	g := &generator{client: client.NewClient(server.URL, "test-key"), warnings: &warnings}
 
-	imports, resources, err := g.generateLibraries()
+	imports, resources, err := g.generateLibraries(t.Context())
 	if err != nil {
 		t.Fatalf("generateLibraries() error: %v", err)
 	}
@@ -1128,7 +1029,7 @@ func TestGenerateLibrariesSkipsCollectionTypesTheProviderRejects(t *testing.T) {
 func TestImportClientUsesAPIKeyWhenProvided(t *testing.T) {
 	t.Parallel()
 
-	c, err := importClient(context.Background(), "http://example.test", "api-key", "", "")
+	c, err := importClient(t.Context(), "http://example.test", "api-key", "", "")
 	if err != nil {
 		t.Fatalf("importClient() error = %v", err)
 	}
@@ -1155,7 +1056,7 @@ func TestImportClientAuthenticatesWithCredentials(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c, err := importClient(context.Background(), server.URL, "", "admin", "Admin123!")
+	c, err := importClient(t.Context(), server.URL, "", "admin", "Admin123!")
 	if err != nil {
 		t.Fatalf("importClient() error = %v", err)
 	}
@@ -1164,27 +1065,25 @@ func TestImportClientAuthenticatesWithCredentials(t *testing.T) {
 	}
 }
 
-func TestImportClientRequiresUsernameWhenAPIKeyMissing(t *testing.T) {
+func TestImportClientRequiresCredentialsWhenAPIKeyMissing(t *testing.T) {
 	t.Parallel()
 
-	_, err := importClient(context.Background(), "http://example.test", "", "", "Admin123!")
-	if err == nil {
-		t.Fatal("importClient() error = nil, want missing username error")
+	tests := map[string]struct {
+		username, password, wantErr string
+	}{
+		"username": {"", "Admin123!", "missing Jellyfin username"},
+		"password": {"admin", "", "missing Jellyfin password"},
 	}
-	if !strings.Contains(err.Error(), "missing Jellyfin username") {
-		t.Fatalf("importClient() error = %v, want missing username error", err)
-	}
-}
 
-func TestImportClientRequiresPasswordWhenAPIKeyMissing(t *testing.T) {
-	t.Parallel()
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	_, err := importClient(context.Background(), "http://example.test", "", "admin", "")
-	if err == nil {
-		t.Fatal("importClient() error = nil, want missing password error")
-	}
-	if !strings.Contains(err.Error(), "missing Jellyfin password") {
-		t.Fatalf("importClient() error = %v, want missing password error", err)
+			_, err := importClient(t.Context(), "http://example.test", "", tc.username, tc.password)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("importClient() error = %v, want %s error", err, tc.wantErr)
+			}
+		})
 	}
 }
 
@@ -1293,8 +1192,8 @@ func seedFixtures(t *testing.T, c *client.Client) {
 		// The provider logs in under the same device ID during the plan, and
 		// Jellyfin then revokes the session token c holds.
 		fresh := testAccImportClient(t)
-		for i := len(restore) - 1; i >= 0; i-- {
-			if err := restore[i](fresh); err != nil {
+		for _, undo := range slices.Backward(restore) {
+			if err := undo(fresh); err != nil {
 				t.Error(err)
 			}
 		}
@@ -1307,7 +1206,7 @@ func seedFixtures(t *testing.T, c *client.Client) {
 	restore = append(restore, func(c *client.Client) error {
 		return c.UpdateBrandingConfiguration(ctx, branding)
 	})
-	seeded, err := json.Marshal(map[string]interface{}{
+	seeded, err := json.Marshal(map[string]any{
 		"LoginDisclaimer":     tricky + "\nsecond line\twith a tab and \x01",
 		"CustomCss":           "body {\n  color: red;\n}\n/* ${x} %{y} */\n",
 		"SplashscreenEnabled": false,
@@ -1326,12 +1225,12 @@ func seedFixtures(t *testing.T, c *client.Client) {
 	restore = append(restore, func(c *client.Client) error {
 		return c.UpdateSystemConfiguration(ctx, system)
 	})
-	var systemDoc map[string]interface{}
+	var systemDoc map[string]any
 	if err := json.Unmarshal([]byte(system), &systemDoc); err != nil {
 		t.Fatalf("parsing system configuration: %v", err)
 	}
-	options, _ := systemDoc["MetadataOptions"].([]interface{})
-	systemDoc["MetadataOptions"] = append(options, map[string]interface{}{
+	options, _ := systemDoc["MetadataOptions"].([]any)
+	systemDoc["MetadataOptions"] = append(options, map[string]any{
 		"ItemType":                 "Person",
 		"DisabledMetadataSavers":   []string{},
 		"LocalMetadataReaderOrder": []string{},
@@ -1422,11 +1321,10 @@ func TestAccImportToolE2E(t *testing.T) {
 	g := &generator{
 		client:    c,
 		outputDir: outputDir,
-		usedNames: make(map[string]bool),
 		warnings:  &warnings,
 	}
 
-	if err := g.Generate(); err != nil {
+	if err := g.Generate(t.Context()); err != nil {
 		t.Fatalf("Generate() against live Jellyfin failed: %v", err)
 	}
 
@@ -1518,13 +1416,9 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 	c := testAccImportClient(t)
 
 	t.Run("Users", func(t *testing.T) {
-		g := &generator{
-			client:    c,
-			outputDir: t.TempDir(),
-			usedNames: make(map[string]bool),
-		}
+		g := &generator{client: c}
 
-		imports, resources, err := g.generateUsers()
+		imports, resources, err := g.generateUsers(t.Context())
 		if err != nil {
 			t.Fatalf("generateUsers() error: %v", err)
 		}
@@ -1546,13 +1440,9 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 	})
 
 	t.Run("ScheduledTasks", func(t *testing.T) {
-		g := &generator{
-			client:    c,
-			outputDir: t.TempDir(),
-			usedNames: make(map[string]bool),
-		}
+		g := &generator{client: c}
 
-		imports, resources, err := g.generateScheduledTasks()
+		imports, resources, err := g.generateScheduledTasks(t.Context())
 		if err != nil {
 			t.Fatalf("generateScheduledTasks() error: %v", err)
 		}
@@ -1567,13 +1457,9 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 	})
 
 	t.Run("SingletonConfigs", func(t *testing.T) {
-		g := &generator{
-			client:    c,
-			outputDir: t.TempDir(),
-			usedNames: make(map[string]bool),
-		}
+		g := &generator{client: c}
 
-		imports, resources, err := g.generateSingletonConfigs()
+		imports, resources, err := g.generateSingletonConfigs(t.Context())
 		if err != nil {
 			t.Fatalf("generateSingletonConfigs() error: %v", err)
 		}
@@ -1591,13 +1477,9 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 	})
 
 	t.Run("APIKeys", func(t *testing.T) {
-		g := &generator{
-			client:    c,
-			outputDir: t.TempDir(),
-			usedNames: make(map[string]bool),
-		}
+		g := &generator{client: c}
 
-		imports, resources, err := g.generateAPIKeys()
+		imports, resources, err := g.generateAPIKeys(t.Context())
 		if err != nil {
 			t.Fatalf("generateAPIKeys() error: %v", err)
 		}
@@ -1610,47 +1492,22 @@ func TestAccImportToolIndividualGenerators(t *testing.T) {
 		}
 	})
 
-	t.Run("Libraries", func(t *testing.T) {
-		g := &generator{
-			client:    c,
-			outputDir: t.TempDir(),
-			usedNames: make(map[string]bool),
-		}
-
-		// Libraries may or may not exist on a fresh instance - just verify no error.
-		_, _, err := g.generateLibraries()
-		if err != nil {
-			t.Fatalf("generateLibraries() error: %v", err)
-		}
-	})
-
-	t.Run("PluginRepositories", func(t *testing.T) {
-		g := &generator{
-			client:    c,
-			outputDir: t.TempDir(),
-			usedNames: make(map[string]bool),
-		}
-
-		// Plugin repos may or may not exist - just verify no error.
-		_, _, err := g.generatePluginRepositories()
-		if err != nil {
-			t.Fatalf("generatePluginRepositories() error: %v", err)
-		}
-	})
-
-	t.Run("Plugins", func(t *testing.T) {
-		g := &generator{
-			client:    c,
-			outputDir: t.TempDir(),
-			usedNames: make(map[string]bool),
-		}
-
-		// Plugins may or may not exist - just verify no error.
-		_, _, err := g.generatePlugins()
-		if err != nil {
-			t.Fatalf("generatePlugins() error: %v", err)
-		}
-	})
+	// Libraries, plugin repositories and plugins may or may not exist on a
+	// fresh instance, so these only have to generate without an error.
+	for _, tc := range []struct {
+		name     string
+		generate func(*generator, context.Context) ([]string, []string, error)
+	}{
+		{"Libraries", (*generator).generateLibraries},
+		{"PluginRepositories", (*generator).generatePluginRepositories},
+		{"Plugins", (*generator).generatePlugins},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := tc.generate(&generator{client: c}, t.Context()); err != nil {
+				t.Fatalf("generate%s() error: %v", tc.name, err)
+			}
+		})
+	}
 }
 
 // Jellyfin lists each version of a plugin it holds, and a plugin it deletes at
@@ -1670,8 +1527,8 @@ func TestGeneratePluginsImportsEachPluginOnce(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	g := &generator{client: client.NewClient(server.URL, "k"), outputDir: t.TempDir(), usedNames: map[string]bool{}}
-	imports, resources, err := g.generatePlugins()
+	g := &generator{client: client.NewClient(server.URL, "k")}
+	imports, resources, err := g.generatePlugins(t.Context())
 	if err != nil {
 		t.Fatalf("generatePlugins() error: %v", err)
 	}
@@ -1698,8 +1555,8 @@ func TestGeneratePluginRepositoriesSkipsSharedNames(t *testing.T) {
 	defer server.Close()
 
 	var warnings strings.Builder
-	g := &generator{client: client.NewClient(server.URL, "k"), outputDir: t.TempDir(), usedNames: map[string]bool{}, warnings: &warnings}
-	imports, _, err := g.generatePluginRepositories()
+	g := &generator{client: client.NewClient(server.URL, "k"), warnings: &warnings}
+	imports, _, err := g.generatePluginRepositories(t.Context())
 	if err != nil {
 		t.Fatalf("generatePluginRepositories() error: %v", err)
 	}

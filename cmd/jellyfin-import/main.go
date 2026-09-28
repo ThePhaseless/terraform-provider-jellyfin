@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
@@ -43,7 +44,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	c, err := importClient(context.Background(), *endpoint, *apiKey, *username, *password)
+	ctx := context.Background()
+	c, err := importClient(ctx, *endpoint, *apiKey, *username, *password)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error configuring Jellyfin client: %v\n", err)
 		os.Exit(1)
@@ -54,14 +56,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	g := &generator{
-		client:    c,
-		ctx:       context.Background(),
-		outputDir: *outputDir,
-		usedNames: make(map[string]bool),
-	}
-
-	if err := g.Generate(); err != nil {
+	g := &generator{client: c, outputDir: *outputDir}
+	if err := g.Generate(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -107,17 +103,9 @@ func importClient(ctx context.Context, endpoint, apiKey, username, password stri
 
 type generator struct {
 	client    *client.Client
-	ctx       context.Context
 	outputDir string
 	usedNames map[string]bool // resource addresses already handed out
 	warnings  io.Writer
-}
-
-func (g *generator) context() context.Context {
-	if g.ctx != nil {
-		return g.ctx
-	}
-	return context.Background()
 }
 
 func (g *generator) warnf(format string, args ...any) {
@@ -131,6 +119,9 @@ func (g *generator) warnf(format string, args ...any) {
 // uniqueName returns a Terraform resource name that no earlier call returned
 // for resourceType, appending the lowest numeric suffix that is still free.
 func (g *generator) uniqueName(resourceType, baseName string) string {
+	if g.usedNames == nil {
+		g.usedNames = make(map[string]bool)
+	}
 	name := baseName
 	for i := 1; g.usedNames[resourceType+"."+name]; i++ {
 		name = fmt.Sprintf("%s_%d", baseName, i)
@@ -140,64 +131,38 @@ func (g *generator) uniqueName(resourceType, baseName string) string {
 }
 
 // Generate generates all Terraform files.
-func (g *generator) Generate() error {
-	var imports []string
-	var resources []string
-
-	userImports, userResources, err := g.generateUsers()
-	if err != nil {
-		return fmt.Errorf("generating users: %w", err)
+func (g *generator) Generate(ctx context.Context) error {
+	sections := []struct {
+		name          string
+		generate      func(context.Context) ([]string, []string, error)
+		importsTokens bool
+	}{
+		{"users", g.generateUsers, false},
+		{"libraries", g.generateLibraries, false},
+		{"API keys", g.generateAPIKeys, true},
+		{"plugin repositories", g.generatePluginRepositories, false},
+		{"plugins", g.generatePlugins, false},
+		{"scheduled tasks", g.generateScheduledTasks, false},
+		{"configurations", g.generateSingletonConfigs, false},
 	}
-	imports = append(imports, userImports...)
-	resources = append(resources, userResources...)
 
-	libImports, libResources, err := g.generateLibraries()
-	if err != nil {
-		return fmt.Errorf("generating libraries: %w", err)
+	var imports, resources []string
+	tokensImported := false
+	for _, s := range sections {
+		sectionImports, sectionResources, err := s.generate(ctx)
+		if err != nil {
+			return fmt.Errorf("generating %s: %w", s.name, err)
+		}
+		tokensImported = tokensImported || s.importsTokens && len(sectionImports) > 0
+		imports = append(imports, sectionImports...)
+		resources = append(resources, sectionResources...)
 	}
-	imports = append(imports, libImports...)
-	resources = append(resources, libResources...)
-
-	keyImports, keyResources, err := g.generateAPIKeys()
-	if err != nil {
-		return fmt.Errorf("generating API keys: %w", err)
-	}
-	imports = append(imports, keyImports...)
-	resources = append(resources, keyResources...)
-
-	repoImports, repoResources, err := g.generatePluginRepositories()
-	if err != nil {
-		return fmt.Errorf("generating plugin repositories: %w", err)
-	}
-	imports = append(imports, repoImports...)
-	resources = append(resources, repoResources...)
-
-	pluginImports, pluginResources, err := g.generatePlugins()
-	if err != nil {
-		return fmt.Errorf("generating plugins: %w", err)
-	}
-	imports = append(imports, pluginImports...)
-	resources = append(resources, pluginResources...)
-
-	taskImports, taskResources, err := g.generateScheduledTasks()
-	if err != nil {
-		return fmt.Errorf("generating scheduled tasks: %w", err)
-	}
-	imports = append(imports, taskImports...)
-	resources = append(resources, taskResources...)
-
-	singletonImports, singletonResources, err := g.generateSingletonConfigs()
-	if err != nil {
-		return fmt.Errorf("generating configurations: %w", err)
-	}
-	imports = append(imports, singletonImports...)
-	resources = append(resources, singletonResources...)
 
 	if len(imports) > 0 {
 		if err := g.writeFile("imports.tf", strings.Join(imports, "\n")); err != nil {
 			return fmt.Errorf("writing imports.tf: %w", err)
 		}
-		if len(keyImports) > 0 {
+		if tokensImported {
 			g.warnf("imports.tf holds the access token of each API key as its import ID; keep it out of version control, and remove those import blocks once terraform apply has imported the keys")
 		}
 	}
@@ -242,8 +207,8 @@ func (g *generator) warnIfOtherConfiguration() {
 	}
 }
 
-func (g *generator) generateUsers() ([]string, []string, error) {
-	users, err := g.client.GetUsers(g.context())
+func (g *generator) generateUsers(ctx context.Context) ([]string, []string, error) {
+	users, err := g.client.GetUsers(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -255,9 +220,9 @@ func (g *generator) generateUsers() ([]string, []string, error) {
 
 		attrs := map[string]string{
 			"name":               hclString(user.Name),
-			"is_administrator":   fmt.Sprintf("%t", user.Policy.IsAdministrator),
-			"is_disabled":        fmt.Sprintf("%t", user.Policy.IsDisabled),
-			"enable_all_folders": fmt.Sprintf("%t", user.Policy.EnableAllFolders),
+			"is_administrator":   strconv.FormatBool(user.Policy.IsAdministrator),
+			"is_disabled":        strconv.FormatBool(user.Policy.IsDisabled),
+			"enable_all_folders": strconv.FormatBool(user.Policy.EnableAllFolders),
 		}
 		resources = append(resources, resourceBlock("jellyfin_user", name, attrs))
 	}
@@ -265,8 +230,8 @@ func (g *generator) generateUsers() ([]string, []string, error) {
 	return imports, resources, nil
 }
 
-func (g *generator) generateLibraries() ([]string, []string, error) {
-	folders, err := g.client.GetVirtualFolders(g.context())
+func (g *generator) generateLibraries(ctx context.Context) ([]string, []string, error) {
+	folders, err := g.client.GetVirtualFolders(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -298,8 +263,8 @@ func (g *generator) generateLibraries() ([]string, []string, error) {
 	return imports, resources, nil
 }
 
-func (g *generator) generateAPIKeys() ([]string, []string, error) {
-	keys, err := g.client.GetAPIKeys(g.context())
+func (g *generator) generateAPIKeys(ctx context.Context) ([]string, []string, error) {
+	keys, err := g.client.GetAPIKeys(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -318,8 +283,8 @@ func (g *generator) generateAPIKeys() ([]string, []string, error) {
 	return imports, resources, nil
 }
 
-func (g *generator) generatePluginRepositories() ([]string, []string, error) {
-	repos, err := g.client.GetPluginRepositories(g.context())
+func (g *generator) generatePluginRepositories(ctx context.Context) ([]string, []string, error) {
+	repos, err := g.client.GetPluginRepositories(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -341,7 +306,7 @@ func (g *generator) generatePluginRepositories() ([]string, []string, error) {
 		attrs := map[string]string{
 			"name":    hclString(repo.Name),
 			"url":     hclString(repo.URL),
-			"enabled": fmt.Sprintf("%t", repo.Enabled),
+			"enabled": strconv.FormatBool(repo.Enabled),
 		}
 		resources = append(resources, resourceBlock("jellyfin_plugin_repository", name, attrs))
 	}
@@ -349,14 +314,14 @@ func (g *generator) generatePluginRepositories() ([]string, []string, error) {
 	return imports, resources, nil
 }
 
-func (g *generator) generatePlugins() ([]string, []string, error) {
-	listed, err := g.client.GetInstalledPlugins(g.context())
+func (g *generator) generatePlugins(ctx context.Context) ([]string, []string, error) {
+	listed, err := g.client.GetInstalledPlugins(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 	plugins := provider.ImportablePlugins(listed)
 
-	repoURLs := g.resolvePluginRepoURLs(plugins)
+	repoURLs := g.resolvePluginRepoURLs(ctx, plugins)
 
 	var imports, resources []string
 	for _, plugin := range plugins {
@@ -382,9 +347,9 @@ func (g *generator) generatePlugins() ([]string, []string, error) {
 // jellyfin_plugin's Read does, so that repository_url matches the imported
 // state: only the first package with the plugin's name counts, and only its
 // entry for the installed version. Any other URL would plan a replacement.
-func (g *generator) resolvePluginRepoURLs(plugins []client.InstalledPlugin) map[string]string {
+func (g *generator) resolvePluginRepoURLs(ctx context.Context, plugins []client.InstalledPlugin) map[string]string {
 	result := make(map[string]string)
-	packages, err := g.client.GetAvailablePackages(g.context())
+	packages, err := g.client.GetAvailablePackages(ctx)
 	if err != nil {
 		return result
 	}
@@ -396,8 +361,8 @@ func (g *generator) resolvePluginRepoURLs(plugins []client.InstalledPlugin) map[
 	return result
 }
 
-func (g *generator) generateScheduledTasks() ([]string, []string, error) {
-	tasks, err := g.client.GetScheduledTasks(g.context())
+func (g *generator) generateScheduledTasks(ctx context.Context) ([]string, []string, error) {
+	tasks, err := g.client.GetScheduledTasks(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -427,7 +392,7 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 		// Every trigger attribute the server returns is written out, because
 		// the resource removes unset trigger attributes from the server on
 		// apply.
-		attrs, err := importedAttributes(g.context(), g.client, "jellyfin_scheduled_task", ref, string(raw))
+		attrs, err := importedAttributes(ctx, g.client, "jellyfin_scheduled_task", ref, string(raw))
 		if err != nil {
 			return nil, nil, fmt.Errorf("formatting task %s: %w", task.ID, err)
 		}
@@ -441,8 +406,7 @@ func (g *generator) generateScheduledTasks() ([]string, []string, error) {
 	return imports, resources, nil
 }
 
-func (g *generator) generateSingletonConfigs() ([]string, []string, error) {
-	ctx := g.context()
+func (g *generator) generateSingletonConfigs(ctx context.Context) ([]string, []string, error) {
 	singletons := []struct {
 		name string
 		read func(context.Context) (string, error)
