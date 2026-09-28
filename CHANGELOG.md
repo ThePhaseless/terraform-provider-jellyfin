@@ -20,7 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When Jellyfin does not keep a value the plan set, apply now reports "Value not kept by Jellyfin" at that attribute instead of Terraform's generic "inconsistent result after apply". On `jellyfin_library` this replaces the combined "Similar item settings not supported" error.
 - `jellyfin-import` renders every configuration and scheduled task from the provider's own read, so its output cannot drift from what the provider reads.
 - `jellyfin_library`: `type_options[].metadata_fetchers`, `image_fetchers` and `similar_item_providers` are now priority-ordered. Changing one also writes Jellyfin's matching order key, as the web UI does: the listed names first, then the rest of the server's order. A list left unchanged keeps its order, so existing configurations plan no change.
-- `jellyfin_library` and `jellyfin_system_configuration` reads also call `GET /Libraries/AvailableOptions` to learn which providers the server offers.
+- `jellyfin_library` and `jellyfin_system_configuration` reads also call `GET /Libraries/AvailableOptions` to learn which providers the server offers. If that call fails, the read keeps the combined lists' prior values and warns instead of failing, and a combined list the apply did not write keeps its planned value, so a provider that a plugin installed in the same apply adds shows up at the next refresh instead of failing the apply.
+- `jellyfin_networking_configuration`: `base_url` must be empty, or start with `/` and not end with one, as Jellyfin stores it; any other value read back changed and failed the apply.
+- `jellyfin_security_plugin_configuration`: `webhook_url` and `webhook_headers` are sensitive. The lists the plugin stores as one joined string (`scopes`, `acr_values`, `allowed_groups`, `admin_groups`, `additional_allowed_cidrs`, `library_ids`) reject empty values and values holding their separator, which read back split.
+- `jellyfin_user`: `policy.enabled_folders`, `blocked_media_folders`, `enabled_channels` and `blocked_channels` take IDs only as Jellyfin lists them, 32 lowercase hex digits; other spellings read back changed and failed the apply.
+- The provider refuses an `endpoint`, `api_key`, `username` or `password` unknown at plan time, or defers when Terraform allows it, instead of falling back to the `JELLYFIN_*` environment variables, which could name another server.
+- `jellyfin-import` imports each plugin once, as its Read reads it, skips plugin repositories that share a name, warns that `imports.tf` holds API key tokens, and no longer prints `JELLYFIN_API_KEY` or `JELLYFIN_PASSWORD` in its usage text.
 
 ### Deprecated
 
@@ -32,6 +37,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `jellyfin_system_configuration`, `jellyfin_livetv_configuration`, `jellyfin_scheduled_task`: an attribute left unset inside a list element (for example a tuner host's `source` or a trigger's `day_of_week`) that Jellyfin serves back as an empty string or list now stays null instead of failing the apply.
 - `jellyfin_system_configuration`: inserting or reordering `metadata_options` entries wrote another item type's fetcher, saver or reader lists into an entry that left them unset. Each entry now keeps its own values.
+- `jellyfin_system_configuration`: a create that set some `trickplay_options` reset the others to Jellyfin's defaults; they now keep the server's values. Applying it while a `jellyfin_plugin_repository` changes no longer reverts the repository list.
+- `jellyfin_security_plugin_configuration`: removing or reordering `oidc_providers` planned, and wrote, another provider's `client_secret` and settings into an entry, and appending one failed the apply; `user_emails` paired entries the same way. Each entry now keeps the values of the prior entry with its `id`. `enrollment_deadline` can be cleared by setting it to `""`.
+- `jellyfin_user`: `policy.access_schedules` paired schedules by index in the same way, and demoting and disabling an administrator in one apply always failed with "Administrators cannot be disabled".
+- `jellyfin_livetv_configuration`: the first apply rebuilt an existing tuner or listing provider from the configured settings alone, dropping its type, name and the rest; an entry with the `id` of an existing one now keeps its settings.
+- `jellyfin_library`: paths listed in another order than Jellyfin's sorted one failed the create and replaced the library on every plan; the configured order is kept, and a change of order alone updates in place.
+- `jellyfin_plugin_configuration`: a configuration that named some of the plugin's keys planned a change after every refresh and failed every update. Only the keys it names are compared with the server's; an import still reads every key.
+- `jellyfin_plugin_repository`: repositories created, changed or destroyed in one apply dropped each other's changes, and renaming one failed with an inconsistent result.
+- `jellyfin_api_key`: keys created in one apply could both take the same token.
+- `jellyfin_plugin`: an install of a version no repository offers now fails at once and says so, instead of waiting two minutes for the plugin.
+- `jellyfin_restart`: changing only `timeout` no longer fails with "Update not supported".
 
 ## [0.3.8] - 2026-09-27
 
