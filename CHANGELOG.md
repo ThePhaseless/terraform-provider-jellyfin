@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Docs: the `jellyfin_library` and `jellyfin_plugin_repository` import examples imported into an address their example configuration does not declare, so running them as written failed.
 - `jellyfin_system_configuration`, `jellyfin_livetv_configuration`, `jellyfin_scheduled_task`: an attribute left unset inside a list element (for example a tuner host's `source` or a trigger's `day_of_week`) that Jellyfin serves back as an empty string or list now stays null instead of failing the apply.
 - `jellyfin_system_configuration`: inserting or reordering `metadata_options` entries wrote another item type's fetcher, saver or reader lists into an entry that left them unset. Each entry now keeps its own values.
 - `jellyfin_system_configuration`: a create that set some `trickplay_options` reset the others to Jellyfin's defaults; they now keep the server's values. Applying it while a `jellyfin_plugin_repository` changes no longer reverts the repository list.
