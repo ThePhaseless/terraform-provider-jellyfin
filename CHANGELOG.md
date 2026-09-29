@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-29
+
 ### Added
 
 - `jellyfin_scheduled_task`: optional `key`, the readable task key Jellyfin lists (for example `PluginUpdates` or `RefreshLibrary`), instead of the hashed `task_id`, which is now optional and computed. `key` and `task_id` may both be set if they name the same task, so configuration written by `terraform plan -generate-config-out` plans cleanly. A key no task has, or one several tasks share, fails at plan time. Import accepts a key or an ID, and `jellyfin-import` writes `key`.
@@ -204,7 +206,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial Terraform provider implementation for managing Jellyfin users, libraries, plugins, API keys, scheduled tasks, and server configuration.
 
-[Unreleased]: https://github.com/ThePhaseless/terraform-provider-jellyfin/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/ThePhaseless/terraform-provider-jellyfin/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/ThePhaseless/terraform-provider-jellyfin/compare/v0.3.8...v0.4.0
 [0.2.3]: https://github.com/ThePhaseless/terraform-provider-jellyfin/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/ThePhaseless/terraform-provider-jellyfin/compare/v0.2.1...v0.2.2
 [0.2.0]: https://github.com/ThePhaseless/terraform-provider-jellyfin/compare/v0.1.1...v0.2.0
