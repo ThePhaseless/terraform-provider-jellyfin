@@ -44,14 +44,24 @@ type Object struct {
 	// Rebuilt objects are written from the attributes alone, so a key the
 	// server has that Keys lacks is dropped unless Unmanaged lists it.
 	// Other objects are written over the served object and keep such keys.
-	Rebuilt   bool
-	Keys      map[string]Kind
+	Rebuilt bool
+	Keys    map[string]Kind
+	// Attrs names, for each key an attribute writes, that attribute and the
+	// key path it maps to, as a Key option would spell it.
+	Attrs     map[string]KeyOwner
 	Unmanaged []string
+}
+
+// KeyOwner is the attribute that writes a key, and its key path.
+type KeyOwner struct {
+	Attr    string
+	KeyPath string
 }
 
 // Objects lists every object b writes, in the order Bind reached them.
 func (b *Binding) Objects() []Object {
 	kinds := map[string]map[string]Kind{}
+	owners := map[string]map[string]KeyOwner{}
 	var walk func(x *Binding, inst string)
 	walk = func(x *Binding, inst string) {
 		for _, f := range x.Fields {
@@ -63,6 +73,10 @@ func (b *Binding) Objects() []Object {
 				kinds[container] = map[string]Kind{}
 			}
 			kinds[container][f.key()] = f.kind()
+			if owners[container] == nil {
+				owners[container] = map[string]KeyOwner{}
+			}
+			owners[container][f.key()] = KeyOwner{Attr: f.Path, KeyPath: strings.Join(f.KeyPath, ".")}
 			switch {
 			case f.Elem != nil && f.isList():
 				walk(f.Elem, joinKeyPath(inst, strings.Join(f.KeyPath, "."))+"[]")
@@ -85,10 +99,15 @@ func (b *Binding) Objects() []Object {
 				keys[key] = ""
 			}
 		}
+		attrs := owners[inst.keyPath]
+		if attrs == nil {
+			attrs = map[string]KeyOwner{}
+		}
 		out = append(out, Object{
 			KeyPath:   inst.keyPath,
 			Rebuilt:   inst.rebuilt,
 			Keys:      keys,
+			Attrs:     attrs,
 			Unmanaged: slices.Sorted(maps.Keys(inst.unmanaged)),
 		})
 	}

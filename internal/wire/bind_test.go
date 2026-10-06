@@ -123,8 +123,22 @@ func TestUnitKeyOf(t *testing.T) {
 
 func TestUnitBindListsTheObjectsItWrites(t *testing.T) {
 	got := map[string]Object{}
+	owners := map[string]KeyOwner{}
 	for _, o := range testBinding(t).Objects() {
+		for key, owner := range o.Attrs {
+			owners[o.KeyPath+"/"+key] = owner
+		}
+		o.Attrs = nil
 		got[o.KeyPath] = o
+	}
+	for at, want := range map[string]KeyOwner{
+		"/Enabled":               {Attr: "disabled", KeyPath: "Enabled"},
+		"Sub/Other":              {Attr: "hoisted", KeyPath: "Sub.Other"},
+		"Types[].Images[]/Limit": {Attr: "types.images.limit", KeyPath: "Limit"},
+	} {
+		if owners[at] != want {
+			t.Errorf("owner of %s = %+v, want %+v", at, owners[at], want)
+		}
 	}
 	want := map[string]Object{
 		"": {Keys: map[string]Kind{

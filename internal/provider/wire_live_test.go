@@ -138,6 +138,10 @@ func compareWireObject(o wire.Object, served map[string]wire.Kind) []string {
 		got, ok := served[key]
 		switch {
 		case !ok:
+			if fix := keyFix(o, key, served); fix != "" {
+				problems = append(problems, fmt.Sprintf("key %s is not a property the server has; %s", key, fix))
+				continue
+			}
 			problems = append(problems, fmt.Sprintf("key %s is not a property the server has (it has %s)", key, strings.Join(slices.Sorted(maps.Keys(served)), ", ")))
 		case !kindsMatch(want, got):
 			problems = append(problems, fmt.Sprintf("key %s is written as %s, but the server has %s", key, want, got))
@@ -156,6 +160,32 @@ func compareWireObject(o wire.Object, served map[string]wire.Kind) []string {
 		}
 	}
 	return problems
+}
+
+// keyFix says how to bind key, which the server lacks, when the server has
+// it spelled otherwise only in letter case or underscores: the Key option to
+// use, or that the option to drop when the server now spells the key as
+// KeyOf does.
+func keyFix(o wire.Object, key string, served map[string]wire.Kind) string {
+	owner, ok := o.Attrs[key]
+	if !ok {
+		return ""
+	}
+	var spelt string
+	for s := range served {
+		if strings.EqualFold(strings.ReplaceAll(s, "_", ""), strings.ReplaceAll(key, "_", "")) {
+			spelt = s
+		}
+	}
+	if spelt == "" {
+		return ""
+	}
+	prefix, _ := strings.CutSuffix(owner.KeyPath, key)
+	name := owner.Attr[strings.LastIndex(owner.Attr, ".")+1:]
+	if prefix == "" && spelt == wire.KeyOf(name) {
+		return fmt.Sprintf("the server spells it %s, as the name maps to by default: drop the wire.Key option of %s from its Bind call", spelt, owner.Attr)
+	}
+	return fmt.Sprintf("the server spells it %s: add wire.Key(%q, %q) to its Bind call", spelt, owner.Attr, prefix+spelt)
 }
 
 // kindsMatch lets the plugin's untyped "number" stand for an integer, and an
@@ -318,4 +348,36 @@ func linesNotIn(lines, other []string) []string {
 		}
 	}
 	return out
+}
+
+func TestUnitCompareWireObjectSuggestsTheServedSpelling(t *testing.T) {
+	served := map[string]wire.Kind{"EnableIPv6": "boolean", "BaseUrl": "string", "Other": "string"}
+	for name, c := range map[string]struct {
+		key   string
+		owner wire.KeyOwner
+		want  string
+	}{
+		"a missing override": {
+			key: "EnableIpv6", owner: wire.KeyOwner{Attr: "enable_ipv6", KeyPath: "EnableIpv6"},
+			want: `key EnableIpv6 is not a property the server has; the server spells it EnableIPv6: add wire.Key("enable_ipv6", "EnableIPv6") to its Bind call`,
+		},
+		"a key path override": {
+			key: "EnableIpv6", owner: wire.KeyOwner{Attr: "network.ipv6", KeyPath: "Policy.EnableIpv6"},
+			want: `key EnableIpv6 is not a property the server has; the server spells it EnableIPv6: add wire.Key("network.ipv6", "Policy.EnableIPv6") to its Bind call`,
+		},
+		"a stale override": {
+			key: "BaseURL", owner: wire.KeyOwner{Attr: "base_url", KeyPath: "BaseURL"},
+			want: `key BaseURL is not a property the server has; the server spells it BaseUrl, as the name maps to by default: drop the wire.Key option of base_url from its Bind call`,
+		},
+		"no near spelling": {
+			key: "Missing", owner: wire.KeyOwner{Attr: "missing", KeyPath: "Missing"},
+			want: `key Missing is not a property the server has (it has BaseUrl, EnableIPv6, Other)`,
+		},
+	} {
+		o := wire.Object{Keys: map[string]wire.Kind{c.key: ""}, Attrs: map[string]wire.KeyOwner{c.key: c.owner}}
+		got := compareWireObject(o, served)
+		if len(got) != 1 || got[0] != c.want {
+			t.Errorf("%s:\n got %q\nwant %q", name, got, c.want)
+		}
+	}
 }
