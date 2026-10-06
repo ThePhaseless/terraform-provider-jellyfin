@@ -127,6 +127,9 @@ type LibraryOptionsModel struct {
 	EnablePhotoSubtitle                      types.Bool   `tfsdk:"enable_photo_subtitle"`
 	ExtractChaptersDuringLibraryScan         types.Bool   `tfsdk:"extract_chapters_during_library_scan"`
 	EnableChapterImageExtraction             types.Bool   `tfsdk:"enable_chapter_image_extraction"`
+	EnableTrickplayImageExtraction           types.Bool   `tfsdk:"enable_trickplay_image_extraction"`
+	ExtractTrickplayImagesDuringLibraryScan  types.Bool   `tfsdk:"extract_trickplay_images_during_library_scan"`
+	SaveTrickplayWithMedia                   types.Bool   `tfsdk:"save_trickplay_with_media"`
 	ChapterImageIntervalSeconds              types.Int64  `tfsdk:"chapter_image_interval_seconds"`
 	ExtractMediaInformationDuringLibraryScan types.Bool   `tfsdk:"extract_media_information_during_library_scan"`
 	DownloadImagesInAdvance                  types.Bool   `tfsdk:"download_images_in_advance"`
@@ -135,6 +138,7 @@ type LibraryOptionsModel struct {
 	PathInfos                                types.List   `tfsdk:"path_infos"`
 	PreferredMetadataLanguage                types.String `tfsdk:"preferred_metadata_language"`
 	MetadataCountryCode                      types.String `tfsdk:"metadata_country_code"`
+	MetadataSavers                           types.List   `tfsdk:"metadata_savers"`
 	DisabledMetadataSavers                   types.List   `tfsdk:"disabled_metadata_savers"`
 	LocalMetadataReaderOrder                 types.List   `tfsdk:"local_metadata_reader_order"`
 	DisabledMetadataFetchers                 types.List   `tfsdk:"disabled_metadata_fetchers"`
@@ -299,6 +303,9 @@ func libraryOptionsAttributes() map[string]schema.Attribute {
 		"extract_chapters_during_library_scan":          optionalBool("Whether chapter images are extracted during the library scan."),
 		"enable_chapter_image_extraction":               optionalBool("Whether chapter image extraction is enabled."),
 		"chapter_image_interval_seconds":                unsupportedLibraryOption.intAttribute("Chapter image interval in seconds."),
+		"enable_trickplay_image_extraction":             optionalBool("Whether trickplay images, the previews shown while seeking, are extracted."),
+		"extract_trickplay_images_during_library_scan":  optionalBool("Whether trickplay images are extracted during the library scan, instead of only by the trickplay scheduled task."),
+		"save_trickplay_with_media":                     optionalBool("Whether trickplay images are saved in the media folders, next to the media, instead of in Jellyfin's data folder."),
 		"extract_media_information_during_library_scan": unsupportedLibraryOption.boolAttribute("Whether media information is extracted during library scan."),
 		"download_images_in_advance":                    unsupportedLibraryOption.boolAttribute("Whether images are downloaded in advance."),
 		"cache_images_in_library":                       unsupportedLibraryOption.boolAttribute("Whether images are cached in the library."),
@@ -317,7 +324,8 @@ func libraryOptionsAttributes() map[string]schema.Attribute {
 		},
 		"preferred_metadata_language":      optionalString("Preferred metadata language."),
 		"metadata_country_code":            optionalString("Metadata country code."),
-		"disabled_metadata_savers":         unsupportedLibraryOption.stringListAttribute("Disabled metadata savers."),
+		"metadata_savers":                  optionalStringList("Enabled metadata savers, such as `Nfo`, which save metadata into the media folders."),
+		"disabled_metadata_savers":         unsupportedLibraryOption.stringListAttribute("Disabled metadata savers; Jellyfin only has the enabled ones, which `metadata_savers` sets."),
 		"local_metadata_reader_order":      optionalStringList("Local metadata reader order."),
 		"disabled_metadata_fetchers":       unsupportedLibraryOption.stringListAttribute("Disabled metadata fetchers for the whole library; Jellyfin only has them per item type, where `metadata_fetchers` in `type_options` enables the fetchers it lists."),
 		"metadata_fetcher_order":           unsupportedLibraryOption.stringListAttribute("Metadata fetcher order for the whole library; Jellyfin only has it per item type, which `metadata_fetchers` in `type_options` sets."),

@@ -34,6 +34,13 @@ resource "jellyfin_library" "movies" {
     # ones to enable, in priority order; the others are disabled.
     subtitle_fetchers = []
 
+    # Trickplay images are the previews shown while seeking.
+    enable_trickplay_image_extraction            = true
+    extract_trickplay_images_during_library_scan = false
+    save_trickplay_with_media                    = false
+    # Metadata savers write metadata files, such as NFO, next to the media.
+    metadata_savers = ["Nfo"]
+
     type_options = [
       {
         type = "Movie"
@@ -81,7 +88,7 @@ Optional:
 - `disabled` (Boolean) Whether the library is disabled, the inverse of Jellyfin's `Enabled` option.
 - `disabled_image_fetchers` (List of String, Deprecated) Disabled image fetchers for the whole library; Jellyfin only has them per item type, where `image_fetchers` in `type_options` enables the fetchers it lists. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `disabled_metadata_fetchers` (List of String, Deprecated) Disabled metadata fetchers for the whole library; Jellyfin only has them per item type, where `metadata_fetchers` in `type_options` enables the fetchers it lists. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
-- `disabled_metadata_savers` (List of String, Deprecated) Disabled metadata savers. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `disabled_metadata_savers` (List of String, Deprecated) Disabled metadata savers; Jellyfin only has the enabled ones, which `metadata_savers` sets. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `disabled_subtitle_fetchers` (List of String, Deprecated) Disabled subtitle fetchers. Deprecated: list the enabled subtitle fetchers in priority order in `subtitle_fetchers` instead, which disables the rest. It will be removed in a future release.
 - `download_images_in_advance` (Boolean, Deprecated) Whether images are downloaded in advance. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `enable_automatic_series_grouping` (Boolean) Whether automatic series grouping is enabled.
@@ -91,18 +98,22 @@ Optional:
 - `enable_photo_subtitle` (Boolean, Deprecated) Whether photo subtitles are enabled. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `enable_photos` (Boolean) Whether photos are enabled.
 - `enable_realtime_monitor` (Boolean) Whether realtime monitoring is enabled.
+- `enable_trickplay_image_extraction` (Boolean) Whether trickplay images, the previews shown while seeking, are extracted.
 - `extract_chapters_during_library_scan` (Boolean) Whether chapter images are extracted during the library scan.
 - `extract_media_information_during_library_scan` (Boolean, Deprecated) Whether media information is extracted during library scan. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `extract_trickplay_images_during_library_scan` (Boolean) Whether trickplay images are extracted during the library scan, instead of only by the trickplay scheduled task.
 - `image_fetcher_order` (List of String, Deprecated) Image fetcher order for the whole library; Jellyfin only has it per item type, which `image_fetchers` in `type_options` sets. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `import_missing_episodes` (Boolean, Deprecated) Whether missing episodes are imported. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `local_metadata_reader_order` (List of String) Local metadata reader order.
 - `metadata_country_code` (String) Metadata country code.
 - `metadata_fetcher_order` (List of String, Deprecated) Metadata fetcher order for the whole library; Jellyfin only has it per item type, which `metadata_fetchers` in `type_options` sets. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `metadata_refresh_mode` (String, Deprecated) Metadata refresh mode. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `metadata_savers` (List of String) Enabled metadata savers, such as `Nfo`, which save metadata into the media folders.
 - `path_infos` (Attributes List) Path information entries. (see [below for nested schema](#nestedatt--library_options--path_infos))
 - `preferred_metadata_language` (String) Preferred metadata language.
 - `save_local_metadata` (Boolean) Whether local metadata is saved.
 - `save_local_thumbnail_sets` (Boolean, Deprecated) Whether local thumbnail sets are saved. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
+- `save_trickplay_with_media` (Boolean) Whether trickplay images are saved in the media folders, next to the media, instead of in Jellyfin's data folder.
 - `season_zero_display_name` (String) Season zero display name.
 - `subtitle_fetcher_order` (List of String, Deprecated) Subtitle fetcher order. Deprecated: list the enabled subtitle fetchers in priority order in `subtitle_fetchers` instead, which disables the rest. It will be removed in a future release.
 - `subtitle_fetchers` (List of String) Enabled subtitle fetchers, in priority order: Jellyfin asks the first one first and disables every other subtitle fetcher it offers. Subtitle fetchers come from plugins, such as Open Subtitles, and each name must match one the server offers exactly. Jellyfin enables a subtitle fetcher installed later, which then shows up as a change to this list. Conflicts with `disabled_subtitle_fetchers` and `subtitle_fetcher_order`, which it replaces.

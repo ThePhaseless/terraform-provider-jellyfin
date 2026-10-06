@@ -54,7 +54,7 @@ jellyfin_encoding_configuration vaapi_device -> EncodingOptions.VaapiDevice stri
 jellyfin_encoding_configuration vpp_tonemapping_brightness -> EncodingOptions.VppTonemappingBrightness number:double
 jellyfin_encoding_configuration vpp_tonemapping_contrast -> EncodingOptions.VppTonemappingContrast number:double
 jellyfin_library (document) VirtualFolderInfo keeps PrimaryImageItemId, RefreshProgress, RefreshStatus
-jellyfin_library LibraryOptions LibraryOptions keeps AllowEmbeddedSubtitles, AutomaticRefreshIntervalDays, AutomaticallyAddToCollection, CustomTagDelimiters, DelimiterWhitelist, DisabledLocalMetadataReaders, DisabledLyricFetchers, DisabledMediaSegmentProviders, EnableEmbeddedEpisodeInfos, EnableEmbeddedExtrasTitles, EnableEmbeddedTitles, EnableInternetProviders, EnableLUFSScan, EnableTrickplayImageExtraction, ExtractTrickplayImagesDuringLibraryScan, LyricFetcherOrder, MediaSegmentProviderOrder, MetadataSavers, PreferNonstandardArtistsTag, RequirePerfectSubtitleMatch, SaveLyricsWithMedia, SaveSubtitlesWithMedia, SaveTrickplayWithMedia, SkipSubtitlesIfAudioTrackMatches, SkipSubtitlesIfEmbeddedSubtitlesPresent, SubtitleDownloadLanguages, UseCustomTagDelimiters
+jellyfin_library LibraryOptions LibraryOptions keeps AllowEmbeddedSubtitles, AutomaticRefreshIntervalDays, AutomaticallyAddToCollection, CustomTagDelimiters, DelimiterWhitelist, DisabledLocalMetadataReaders, DisabledLyricFetchers, DisabledMediaSegmentProviders, EnableEmbeddedEpisodeInfos, EnableEmbeddedExtrasTitles, EnableEmbeddedTitles, EnableInternetProviders, EnableLUFSScan, LyricFetcherOrder, MediaSegmentProviderOrder, PreferNonstandardArtistsTag, RequirePerfectSubtitleMatch, SaveLyricsWithMedia, SaveSubtitlesWithMedia, SkipSubtitlesIfAudioTrackMatches, SkipSubtitlesIfEmbeddedSubtitlesPresent, SubtitleDownloadLanguages, UseCustomTagDelimiters
 jellyfin_library collection_type -> VirtualFolderInfo.CollectionType #CollectionTypeOptions
 jellyfin_library id -> identity
 jellyfin_library item_id -> VirtualFolderInfo.ItemId string read-only
@@ -74,14 +74,17 @@ jellyfin_library library_options.enable_media_conversion -> never sent
 jellyfin_library library_options.enable_photo_subtitle -> never sent
 jellyfin_library library_options.enable_photos -> LibraryOptions.EnablePhotos boolean
 jellyfin_library library_options.enable_realtime_monitor -> LibraryOptions.EnableRealtimeMonitor boolean
+jellyfin_library library_options.enable_trickplay_image_extraction -> LibraryOptions.EnableTrickplayImageExtraction boolean
 jellyfin_library library_options.extract_chapters_during_library_scan -> LibraryOptions.ExtractChapterImagesDuringLibraryScan boolean
 jellyfin_library library_options.extract_media_information_during_library_scan -> never sent
+jellyfin_library library_options.extract_trickplay_images_during_library_scan -> LibraryOptions.ExtractTrickplayImagesDuringLibraryScan boolean
 jellyfin_library library_options.image_fetcher_order -> never sent
 jellyfin_library library_options.import_missing_episodes -> never sent
 jellyfin_library library_options.local_metadata_reader_order -> LibraryOptions.LocalMetadataReaderOrder []string
 jellyfin_library library_options.metadata_country_code -> LibraryOptions.MetadataCountryCode string
 jellyfin_library library_options.metadata_fetcher_order -> never sent
 jellyfin_library library_options.metadata_refresh_mode -> never sent
+jellyfin_library library_options.metadata_savers -> LibraryOptions.MetadataSavers []string
 jellyfin_library library_options.path_infos -> LibraryOptions.PathInfos []#MediaPathInfo
 jellyfin_library library_options.path_infos.network_path -> MediaPathInfo.NetworkPath legacy until=10.10
 jellyfin_library library_options.path_infos.password -> never sent
@@ -90,6 +93,7 @@ jellyfin_library library_options.path_infos.username -> never sent
 jellyfin_library library_options.preferred_metadata_language -> LibraryOptions.PreferredMetadataLanguage string
 jellyfin_library library_options.save_local_metadata -> LibraryOptions.SaveLocalMetadata boolean
 jellyfin_library library_options.save_local_thumbnail_sets -> never sent
+jellyfin_library library_options.save_trickplay_with_media -> LibraryOptions.SaveTrickplayWithMedia boolean
 jellyfin_library library_options.season_zero_display_name -> LibraryOptions.SeasonZeroDisplayName string
 jellyfin_library library_options.subtitle_fetcher_order -> LibraryOptions.SubtitleFetcherOrder []string
 jellyfin_library library_options.subtitle_fetchers -> LibraryOptions.SubtitleFetcherOrder+DisabledSubtitleFetchers complement-of=SubtitleFetchers

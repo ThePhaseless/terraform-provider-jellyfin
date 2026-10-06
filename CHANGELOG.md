@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `jellyfin_library`: `library_options.enable_trickplay_image_extraction`, `extract_trickplay_images_during_library_scan` and `save_trickplay_with_media`, Jellyfin's trickplay settings for the library, and `metadata_savers`, the enabled metadata savers such as `Nfo`. An empty `metadata_savers` enables none ([#140](https://github.com/ThePhaseless/terraform-provider-jellyfin/issues/140)).
+
 ## [0.4.1] - 2026-10-06
 
 ### Changed

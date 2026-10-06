@@ -352,6 +352,47 @@ resource "terraform_data" "network_path" {
 	})
 }
 
+func TestAccLibraryResourceTrickplayAndMetadataSavers(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckNoLibraryNamed(t, "TestTrickplay"),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccLibraryConfig("TestTrickplay", `
+    enable_trickplay_image_extraction            = true
+    extract_trickplay_images_during_library_scan = true
+    save_trickplay_with_media                    = true
+    metadata_savers                              = ["Nfo"]`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.enable_trickplay_image_extraction", "true"),
+					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.metadata_savers.#", "1"),
+					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.metadata_savers.0", "Nfo"),
+					testAccCheckLibraryOption(t, "TestTrickplay", "EnableTrickplayImageExtraction", "true"),
+					testAccCheckLibraryOption(t, "TestTrickplay", "ExtractTrickplayImagesDuringLibraryScan", "true"),
+					testAccCheckLibraryOption(t, "TestTrickplay", "SaveTrickplayWithMedia", "true"),
+					testAccCheckLibraryOption(t, "TestTrickplay", "MetadataSavers", `["Nfo"]`),
+				),
+			},
+			// An empty list disables every saver, unlike null.
+			{
+				Config: testAccLibraryConfig("TestTrickplay", `
+    enable_trickplay_image_extraction            = false
+    extract_trickplay_images_during_library_scan = false
+    save_trickplay_with_media                    = false
+    metadata_savers                              = []`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.metadata_savers.#", "0"),
+					testAccCheckLibraryOption(t, "TestTrickplay", "EnableTrickplayImageExtraction", "false"),
+					testAccCheckLibraryOption(t, "TestTrickplay", "ExtractTrickplayImagesDuringLibraryScan", "false"),
+					testAccCheckLibraryOption(t, "TestTrickplay", "SaveTrickplayWithMedia", "false"),
+					testAccCheckLibraryOption(t, "TestTrickplay", "MetadataSavers", `[]`),
+				),
+			},
+		},
+	})
+}
+
 // A fresh server offers no subtitle fetchers, as they all come from plugins,
 // so subtitle_fetchers can only enable none of them here.
 func TestAccLibraryResourceProviderLists(t *testing.T) {

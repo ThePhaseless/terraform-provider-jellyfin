@@ -19,6 +19,13 @@ resource "jellyfin_library" "movies" {
     # ones to enable, in priority order; the others are disabled.
     subtitle_fetchers = []
 
+    # Trickplay images are the previews shown while seeking.
+    enable_trickplay_image_extraction            = true
+    extract_trickplay_images_during_library_scan = false
+    save_trickplay_with_media                    = false
+    # Metadata savers write metadata files, such as NFO, next to the media.
+    metadata_savers = ["Nfo"]
+
     type_options = [
       {
         type = "Movie"

@@ -39,6 +39,10 @@ func TestUnitLibraryOptionsRoundTrip(t *testing.T) {
 		"EnableRealtimeMonitor": true,
 		"ExtractChapterImagesDuringLibraryScan": true,
 		"EnableChapterImageExtraction": false,
+		"EnableTrickplayImageExtraction": true,
+		"ExtractTrickplayImagesDuringLibraryScan": true,
+		"SaveTrickplayWithMedia": false,
+		"MetadataSavers": ["Nfo"],
 		"PathInfos": [
 			{"Path": "/media", "NetworkPath": "\\\\server\\media"}
 		],
@@ -70,6 +74,23 @@ func TestUnitLibraryOptionsRoundTrip(t *testing.T) {
 	}
 
 	checkSameJSON(t, writeWire(t, b, &data), fixture)
+}
+
+// Jellyfin falls back to the server-wide metadata options for a library whose
+// MetadataSavers is null, and saves with none when it is empty.
+func TestUnitMetadataSaversKeepEmptyApartFromNull(t *testing.T) {
+	b := mustWire(t, libraryOptionsWire)
+
+	null := testUnitLibraryRead(t, b, `{"MetadataSavers": null}`)
+	if v := null.LibraryOptions.MetadataSavers; !v.IsNull() {
+		t.Errorf("metadata_savers = %v for null, want null", v)
+	}
+
+	empty := testUnitLibraryRead(t, b, `{"MetadataSavers": []}`)
+	if v := empty.LibraryOptions.MetadataSavers; v.IsNull() || v.IsUnknown() || len(v.Elements()) != 0 {
+		t.Errorf("metadata_savers = %v for [], want an empty list", v)
+	}
+	checkSameJSON(t, writeWire(t, b, &empty)["MetadataSavers"], `[]`)
 }
 
 func TestUnitTypeOptionsWriteKeepsUnsetServerValues(t *testing.T) {
