@@ -13,6 +13,9 @@
   // refuses to run. gomodTidyAll also tidies every module that reaches the
   // updated one through a local replace, in the same branch.
   "postUpdateOptions": ["gomodTidyAll"],
+  // Raise security fixes from the OSV database, for indirect modules too, as
+  // Dependabot's security updates do.
+  "osvVulnerabilityAlerts": true,
   // github-releases would yield the three-segment tag; Jellyfin resolves an
   // install against manifest.json, which carries four-segment assembly
   // versions. Read the manifest directly so the stored value is installable.
@@ -54,6 +57,16 @@
       "description": "Majors are breaking by definition.",
       "matchUpdateTypes": ["major"],
       "automerge": false
+    },
+    {
+      // Renovate leaves `// indirect` Go modules alone by default, so a fix in
+      // one, such as grpc's, arrived only through Dependabot. One grouped PR
+      // keeps them current, and the minor/patch rule above automerges it.
+      "description": "Keep indirect Go modules current, in one PR.",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["indirect"],
+      "enabled": true,
+      "groupName": "indirect Go modules"
     },
     {
       // A fork of hashicorp/copywrite, patched and pinned. Following its
