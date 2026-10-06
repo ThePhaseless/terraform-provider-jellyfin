@@ -10,7 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 )
 
-// Option declares what Bind cannot derive from the schema and the goldens.
+// Option declares what Bind cannot derive from the schema.
 // Attribute paths are dotted attribute names from the resource root, without
 // list indexes, such as "library_options.type_options.image_options".
 type Option func(*options)
@@ -29,13 +29,11 @@ type attrOption struct {
 	modeSet     bool
 	reason      string
 	key         string
-	until       string
 	codec       Codec
 	mergeKey    string
 	carryKey    string
 	carryBy     string
 	readMissing attr.Value
-	versionMsg  func(VersionGap) (summary, detail string)
 	shares      []string
 	offered     string
 	scope       string
@@ -49,7 +47,7 @@ func (o *options) attr(path string) *attrOption {
 	return o.attrs[path]
 }
 
-func (o *options) setMode(path string, m Mode, reason string) *attrOption {
+func (o *options) setMode(path string, m Mode, reason string) {
 	a := o.attr(path)
 	if a.modeSet && a.mode != m {
 		o.errs = append(o.errs, fmt.Sprintf("%s is declared both %s and %s", path, a.mode, m))
@@ -59,7 +57,6 @@ func (o *options) setMode(path string, m Mode, reason string) *attrOption {
 		o.errs = append(o.errs, fmt.Sprintf("%s is declared %s without a reason", path, m))
 	}
 	a.reason = reason
-	return a
 }
 
 func (o *options) setKey(path, key string) {
@@ -86,9 +83,10 @@ func (o *options) setCodec(path string, c Codec) {
 	a.codec = c
 }
 
-// Key maps the attribute to a key path other than the one its name resolves
-// to, such as "Policy.IsAdministrator" for an attribute that sits at the
-// resource root but lives in the user's policy.
+// Key maps the attribute to a key path other than KeyOf its name, such as
+// "Policy.IsAdministrator" for an attribute that sits at the resource root but
+// lives in the user's policy, or "EnableIPv6" for a key Jellyfin spells with
+// an acronym.
 func Key(attrPath, keyPath string) Option {
 	return func(o *options) { o.setKey(attrPath, keyPath) }
 }
@@ -106,8 +104,7 @@ func Delimited(attrPath, sep string) Option {
 	return func(o *options) { o.setCodec(attrPath, delimitedCodec{sep: sep}) }
 }
 
-// WithCodec replaces the codec the attribute's type and key would get. A
-// codec that implements fmt.Stringer is named by it in the bindings golden.
+// WithCodec replaces the codec the attribute's type would get.
 func WithCodec(attrPath string, c Codec) Option {
 	return func(o *options) { o.setCodec(attrPath, c) }
 }
@@ -135,17 +132,6 @@ func Elsewhere(attrPath, reason string) Option {
 	return func(o *options) { o.setMode(attrPath, ModeElsewhere, reason) }
 }
 
-// Legacy maps an attribute to a key that only Jellyfin releases before until
-// have, so no golden can check it. VersionErrors rejects a configured value on
-// until and later.
-func Legacy(attrPath, key, until, reason string) Option {
-	return func(o *options) {
-		a := o.setMode(attrPath, ModeLegacy, reason)
-		o.setKey(attrPath, key)
-		a.until = until
-	}
-}
-
 // MergeByKey writes each element of a nested list over the served element
 // whose keyAttr value matches it, ignoring case, instead of rebuilding it, so
 // the element keeps what the attributes leave unset.
@@ -167,13 +153,6 @@ func CarryServed(listPath, jsonKey, byAttr string) Option {
 // or of the wrong type.
 func ReadMissingAs(attrPath string, v attr.Value) Option {
 	return func(o *options) { o.attr(attrPath).readMissing = v }
-}
-
-// VersionMessage words the error VersionErrors reports for a configured value
-// of the attribute, which some Jellyfin version lacks, in place of the generic
-// wording.
-func VersionMessage(attrPath string, message func(VersionGap) (summary, detail string)) Option {
-	return func(o *options) { o.attr(attrPath).versionMsg = message }
 }
 
 // Orders makes the list attribute at attrPath write, besides its own key, the
@@ -205,18 +184,19 @@ func Complement(attrPath, orderAttr, disabledAttr, offered, scopeAttr string) Op
 	}
 }
 
-// Unmanaged lets a rebuilt element of object leave out key, which no
-// attribute claims; rebuilding it otherwise drops the key, so each one must
-// be declared.
-func Unmanaged(object, key, reason string) Option {
+// Unmanaged lets the rebuilt object at keyPath, as Object.KeyPath spells it,
+// leave out key, which no attribute claims. Rebuilding it otherwise drops the
+// key, which TestAccWireKeysMatchTheServer reports for every key the server
+// has, so each one left out on purpose must be declared.
+func Unmanaged(keyPath, key, reason string) Option {
 	return func(o *options) {
 		if strings.TrimSpace(reason) == "" {
-			o.errs = append(o.errs, fmt.Sprintf("Unmanaged(%s, %s) needs a reason", object, key))
+			o.errs = append(o.errs, fmt.Sprintf("Unmanaged(%s, %s) needs a reason", keyPath, key))
 		}
-		if o.unmanaged[object] == nil {
-			o.unmanaged[object] = map[string]string{}
+		if o.unmanaged[keyPath] == nil {
+			o.unmanaged[keyPath] = map[string]string{}
 		}
-		o.unmanaged[object][key] = reason
+		o.unmanaged[keyPath][key] = reason
 	}
 }
 

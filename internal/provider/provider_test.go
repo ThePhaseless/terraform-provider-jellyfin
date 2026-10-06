@@ -16,7 +16,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/release"
 )
 
 var testAccProtoV6ProviderFactories = map[string]func() (tfprotov6.ProviderServer, error){
@@ -90,16 +89,6 @@ func testAccRegisterRepository(t *testing.T, name, repoURL string) {
 			t.Errorf("failed to restore plugin repositories: %v", err)
 		}
 	})
-}
-
-func testAccJellyfin12OrLater(t *testing.T) bool {
-	t.Helper()
-
-	info, err := client.NewClient(os.Getenv("JELLYFIN_ENDPOINT"), "").GetPublicSystemInfo(t.Context())
-	if err != nil {
-		t.Fatalf("reading the Jellyfin version: %v", err)
-	}
-	return release.Compare(info.Version, "12") >= 0
 }
 
 // testAccAttr is a top-level attribute of a configuration resource: a string,

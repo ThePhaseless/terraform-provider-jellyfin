@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - 'internal/provider/supported_jellyfin_version.env'
-      - 'internal/provider/supported_security_plugin_version.env'
+      - 'internal/provider/supported_*_plugin_version.env'
 
 permissions:
   contents: write
@@ -38,7 +38,7 @@ jobs:
               print "";
               print "### Changed";
               print "";
-              print "- Declared support for Jellyfin " jv " and JellyfinSecurity plugin " sv " (versions tested in CI).";
+              print "- Supports only Jellyfin " jv ", with JellyfinSecurity plugin " sv " (versions tested in CI). Use an earlier provider release for an earlier Jellyfin.";
               next
             }
             { print }

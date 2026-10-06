@@ -87,7 +87,7 @@ func (b *Binding) flattenModel(ctx context.Context, raw string, model any) (prio
 // Flatten reads doc into an object of the binding's type. An attribute whose
 // key is missing, null or of the wrong type reads as null, unless
 // ReadMissingAs gives another value, and one the binding does not read keeps
-// its value in prior. A key missing under its golden spelling is looked up
+// its value in prior. A key missing under the binding's spelling is looked up
 // ignoring case and underscores, so a server that spells it otherwise still
 // reads.
 func (b *Binding) Flatten(ctx context.Context, doc map[string]json.RawMessage, prior types.Object) (types.Object, diag.Diagnostics) {
@@ -233,7 +233,7 @@ func lookupPath(ctx context.Context, doc map[string]json.RawMessage, keyPath []s
 	return nil, false
 }
 
-// lookupKey finds key as the golden spells it, else the one served key that
+// lookupKey finds key as the binding spells it, else the one served key that
 // matches it ignoring case and underscores.
 func lookupKey(ctx context.Context, m map[string]json.RawMessage, key string, at path.Path) (json.RawMessage, bool) {
 	if raw, ok := m[key]; ok {
@@ -250,7 +250,7 @@ func lookupKey(ctx context.Context, m map[string]json.RawMessage, key string, at
 	case 0:
 		return nil, false
 	case 1:
-		tflog.Debug(ctx, "Reading a Jellyfin key spelled otherwise than the golden", map[string]any{"attribute": at.String(), "key": key, "served": hits[0]})
+		tflog.Debug(ctx, "Reading a Jellyfin key spelled otherwise than the binding", map[string]any{"attribute": at.String(), "key": key, "served": hits[0]})
 		return m[hits[0]], true
 	default:
 		tflog.Debug(ctx, "Several served keys match a Jellyfin key; reading none", map[string]any{"attribute": at.String(), "key": key, "served": hits})

@@ -22,9 +22,6 @@ import (
 )
 
 func TestAccLibraryResource(t *testing.T) {
-	testAccPreCheck(t)
-	similarItemsSupported := testAccJellyfin12OrLater(t)
-
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
@@ -88,16 +85,8 @@ resource "jellyfin_library" "test" {
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.type_options.1.image_options.#", "0"),
 				),
 			},
-			// Similar item providers exist on Jellyfin 12 and later only; on an
-			// older server they are rejected at plan time.
 			{
-				SkipFunc:    func() (bool, error) { return similarItemsSupported, nil },
-				Config:      testAccLibrarySimilarItemsConfig,
-				ExpectError: testAccLibrarySimilarItemsRejected,
-			},
-			{
-				SkipFunc: func() (bool, error) { return !similarItemsSupported, nil },
-				Config:   testAccLibrarySimilarItemsConfig,
+				Config: testAccLibrarySimilarItemsConfig,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.type_options.#", "1"),
 					resource.TestCheckResourceAttr("jellyfin_library.test", "library_options.type_options.0.similar_item_providers.0", "Local Genre/Tag"),
@@ -136,15 +125,10 @@ resource "jellyfin_library" "test" {
 						"ImageFetchers":        {"TheMovieDb"},
 						"ImageFetcherOrder":    {"TheMovieDb"},
 					}),
-					func(s *terraform.State) error {
-						if !similarItemsSupported {
-							return nil
-						}
-						return testAccCheckLibraryTypeOptions(t, "TestMovies", "Movie", map[string][]string{
-							"SimilarItemProviders":     {"Local Genre/Tag"},
-							"SimilarItemProviderOrder": {"Local Genre/Tag", "TheMovieDb"},
-						})(s)
-					},
+					testAccCheckLibraryTypeOptions(t, "TestMovies", "Movie", map[string][]string{
+						"SimilarItemProviders":     {"Local Genre/Tag"},
+						"SimilarItemProviderOrder": {"Local Genre/Tag", "TheMovieDb"},
+					}),
 				),
 			},
 			{
@@ -288,9 +272,6 @@ func TestAccLibraryResourceDocumentedExample(t *testing.T) {
 }
 
 func TestAccLibraryResourceMappedAndUnsupportedOptions(t *testing.T) {
-	testAccPreCheck(t)
-	similarItemsSupported := testAccJellyfin12OrLater(t)
-
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
@@ -301,7 +282,7 @@ func TestAccLibraryResourceMappedAndUnsupportedOptions(t *testing.T) {
 				Config:      testAccLibraryConfig("TestOptions", `import_missing_episodes = true`),
 				ExpectError: regexp.MustCompile(`Unsupported\s+library\s+option`),
 			},
-			// Jellyfin 10.10 removed network paths.
+			// Jellyfin removed network paths.
 			{
 				Config:      testAccLibraryConfig("TestOptions", `path_infos = [{ path = "/media/movies", network_path = "smb://nas/movies" }]`),
 				ExpectError: testAccLibraryNetworkPathRejected,
@@ -315,11 +296,6 @@ resource "terraform_data" "network_path" {
 }
 ` + testAccLibraryConfig("TestOptions", `path_infos = [{ path = "/media/movies", network_path = terraform_data.network_path.output }]`),
 				ExpectError: testAccLibraryNetworkPathRejected,
-			},
-			{
-				SkipFunc:    func() (bool, error) { return similarItemsSupported, nil },
-				Config:      testAccLibraryConfig("TestOptions", `type_options = [{ type = "Movie", similar_item_providers = ["Local Genre/Tag"] }]`),
-				ExpectError: testAccLibrarySimilarItemsRejected,
 			},
 			// disabled and extract_chapters_... map to Enabled and
 			// ExtractChapterImagesDuringLibraryScan; unset network path plans null.
@@ -588,11 +564,7 @@ var testAccLibrarySimilarItemsConfig = testAccLibraryConfig("TestMovies", `
 
 var testAccLibraryUnofferedSubtitleFetcher = regexp.MustCompile(`library_options.subtitle_fetchers\s+lists\s+"Open\s+Subtitles",\s+which\s+is\s+not\s+one\s+of\s+the\s+SubtitleFetchers\s+the\s+Jellyfin\s+server\s+offers:\s+none`)
 
-var testAccLibraryNetworkPathRejected = regexp.MustCompile(`Jellyfin\s+10\.10\s+removed\s+network\s+paths[\s\S]*Remove\s+library_options\.path_infos\[0\]\.network_path`)
-
-// testAccLibrarySimilarItemsRejected matches the plan-time error only, not the
-// one reported after apply when the server drops the settings.
-var testAccLibrarySimilarItemsRejected = regexp.MustCompile(`similar\s+item\s+providers\s+need\s+Jellyfin\s+12\s+or\s+later\.\s+Remove\s+library_options\.type_options\[0\]\.similar_item_providers`)
+var testAccLibraryNetworkPathRejected = regexp.MustCompile(`Network\s+paths\s+not\s+supported[\s\S]*Jellyfin\s+removed\s+network\s+paths`)
 
 // testAccCheckLibraryTypeOptions checks string lists of the server's type
 // options entry, where values the configuration leaves unset live.

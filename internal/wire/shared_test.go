@@ -18,27 +18,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
-const sharedPinned = `schema Lib.Name: string
-schema Lib.Order: []string
-schema Lib.Disabled: []string
-schema Lib.Types: []#TypeOpt
-schema Lib.Opts: []#Opt
-schema TypeOpt.Type: string
-schema TypeOpt.Fetchers: []string
-schema TypeOpt.FetcherOrder: []string
-schema Opt.ItemType: string
-schema Opt.FetcherOrder: []string
-schema Opt.DisabledFetchers: []string
-`
-
-func sharedCatalog() *catalog {
-	return &catalog{
-		pinned:      parseAPIGolden(sharedPinned),
-		floor:       parseAPIGolden(strings.Replace(sharedPinned, "schema Opt.FetcherOrder: []string\n", "", 1)),
-		unversioned: map[string]bool{}, floorVer: "1.9", sinceVer: "2.0",
-	}
-}
-
 func optList() schema.ListAttribute {
 	return schema.ListAttribute{ElementType: types.StringType, Optional: true, Computed: true}
 }
@@ -74,7 +53,7 @@ func sharedOptions() []Option {
 
 func sharedBinding(t *testing.T) *Binding {
 	t.Helper()
-	b, err := sharedCatalog().bind(schema.Schema{Attributes: sharedAttrs()}, "Lib", sharedOptions()...)
+	b, err := Bind(schema.Schema{Attributes: sharedAttrs()}, "Lib", sharedOptions()...)
 	if err != nil {
 		t.Fatalf("bind: %v", err)
 	}
@@ -104,27 +83,6 @@ func strs(values ...string) types.List {
 		elems[i] = types.StringValue(v)
 	}
 	return types.ListValueMust(types.StringType, elems)
-}
-
-func TestUnitSharedKeysDescribe(t *testing.T) {
-	want := strings.Join([]string{
-		"disabled -> Lib.Disabled []string",
-		"enabled -> Lib.Order+Disabled complement-of=Fetchers",
-		"name -> Lib.Name string",
-		"opts -> Lib.Opts []#Opt",
-		"opts.disabled_fetchers -> Opt.DisabledFetchers []string",
-		"opts.fetcher_order -> Opt.FetcherOrder []string since=2.0",
-		"opts.fetchers -> Opt.FetcherOrder+DisabledFetchers complement-of=Fetchers/item_type since=2.0",
-		"opts.item_type -> Opt.ItemType string",
-		"order -> Lib.Order []string",
-		"types -> Lib.Types []#TypeOpt merge-by=type",
-		"types.fetcher_order -> TypeOpt.FetcherOrder []string",
-		"types.fetchers -> TypeOpt.Fetchers []string orders=FetcherOrder spelt-as=Fetchers/type",
-		"types.type -> TypeOpt.Type string",
-	}, "\n")
-	if got := strings.Join(sharedBinding(t).Describe(), "\n"); got != want {
-		t.Errorf("Describe:\n%s\nwant:\n%s", got, want)
-	}
 }
 
 func TestUnitOrdersWritesTheOrderKeyUnlessItsAttributeWritesIt(t *testing.T) {
@@ -373,22 +331,6 @@ func TestUnitComplementRejectsWhatItCannotWrite(t *testing.T) {
 	}
 }
 
-func TestUnitComplementVersionErrorNamesTheKeyItTakesItsVersionFrom(t *testing.T) {
-	b := sharedBinding(t)
-	model, d := b.Flatten(WithAvailable(t.Context(), offering(map[string][]string{"Movie": {"A"}}, new([]string))),
-		doc(t, `{"Opts": [{"ItemType": "Movie", "FetcherOrder": ["A"], "DisabledFetchers": []}]}`), types.ObjectNull(b.AttrTypes))
-	if d.HasError() {
-		t.Fatal(d)
-	}
-	m := with(t, model, "opts[0].fetcher_order", types.ListNull(types.StringType))
-	m = with(t, m, "opts[0].disabled_fetchers", types.ListNull(types.StringType))
-	diags := b.VersionErrors(t.Context(), configOf(t, sharedAttrs(), m), func() (string, error) { return "1.9", nil })
-	want := "opts[0].fetchers | Unsupported Jellyfin server version | opts[0].fetchers requires Jellyfin 2.0 or later: the server runs Jellyfin 1.9, which has no FetcherOrder field, so it would discard the value. Remove opts[0].fetchers from the configuration or upgrade the server."
-	if got := strings.Join(versionErrorLines(diags), "\n"); got != want {
-		t.Errorf("VersionErrors:\n%s\nwant:\n%s", got, want)
-	}
-}
-
 func TestUnitBindRejectsSharedKeysItCannotWrite(t *testing.T) {
 	neither := []Option{MergeByKey("types", "type"), NeverSent("enabled", "unbound"), NeverSent("opts.fetchers", "unbound")}
 	for name, c := range map[string]struct {
@@ -435,7 +377,7 @@ func TestUnitBindRejectsSharedKeysItCannotWrite(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := sharedCatalog().bind(schema.Schema{Attributes: sharedAttrs()}, "Lib", c.opts...)
+			_, err := Bind(schema.Schema{Attributes: sharedAttrs()}, "Lib", c.opts...)
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Errorf("error %v\nwant it to contain %q", err, c.want)
 			}

@@ -83,9 +83,8 @@ jobs:
           echo '```'
 
           # A bump that arrives with its resource update is the fix, not the
-          # drift; internal/wire/schema/security_plugin_config_schema.golden
-          # and the unit test reading it check the update against what the
-          # plugin serves.
+          # drift; TestAccSecurityPluginWireKeysMatchThePlugin checks the
+          # update against what the plugin serves.
           RESOURCE=internal/provider/jellyfin_security_plugin_configuration_resource.go
           if git diff --quiet "origin/${{ github.base_ref }}...HEAD" -- "$RESOURCE"; then
             echo "::error::JellyfinSecurity plugin schema changed between ${{ steps.versions.outputs.old }} and ${{ steps.versions.outputs.new }}"

@@ -55,6 +55,9 @@ signs:
       - "--detach-sign"
       - "${artifact}"
 release:
+  # JELLYFIN_VERSION and RELEASE_NOTES come from scripts/release_info.sh.
+  name_template: '{{ .Tag }} (Jellyfin {{ .Env.JELLYFIN_VERSION }})'
+  header: '{{ .Env.RELEASE_NOTES }}'
   extra_files:
     - glob: 'terraform-registry-manifest.json'
       name_template: '{{ .ProjectName }}_{{ .Version }}_manifest.json'

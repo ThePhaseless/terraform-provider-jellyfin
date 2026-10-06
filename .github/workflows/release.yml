@@ -44,6 +44,10 @@ jobs:
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.PASSPHRASE }}
+      # The release title names the Jellyfin version this release supports,
+      # and its notes list the supported plugin builds and the changelog.
+      - name: Supported versions
+        run: scripts/release_info.sh "$(git describe --tags --exact-match)" >> "$GITHUB_ENV"
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:

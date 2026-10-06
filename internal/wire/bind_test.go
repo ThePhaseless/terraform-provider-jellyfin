@@ -6,6 +6,7 @@ package wire
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -15,46 +16,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
-
-const testPinned = `schema Doc.Name: string
-schema Doc.Count: integer:int32
-schema Doc.Ratio: number:double
-schema Doc.Enabled: boolean
-schema Doc.Tags: []string
-schema Doc.Sizes: []integer:int32
-schema Doc.Joined: string
-schema Doc.Limit: integer:int32
-schema Doc.Fresh: string
-schema Doc.Stamp: string
-schema Doc.Hosts: []#Host
-schema Doc.Opts: #Opts
-schema Doc.Sub: #Sub
-schema Doc.Types: []#TypeOpt
-schema Doc.Kept: string
-schema Host.Url: string
-schema Host.Kind: string
-schema Host.Extra: integer:int32
-schema Host.Created: string
-schema Opts.Level: integer:int32
-schema Opts.Mode: string
-schema Sub.Flag: boolean
-schema Sub.Other: boolean
-schema Sub.Kept: string
-schema Sub.Limit: integer:int32
-schema TypeOpt.Type: string
-schema TypeOpt.Fetchers: []string
-schema TypeOpt.Images: []#Image
-schema Image.Type: string
-schema Image.Limit: integer:int32
-`
-
-// testFloor lacks Doc.Fresh, and has Doc.Renamed, which the pinned golden
-// dropped.
-var testFloor = strings.Replace(testPinned, "schema Doc.Fresh: string\n", "schema Doc.Renamed: string\n", 1)
-
-func testCatalog() *catalog {
-	return &catalog{pinned: parseAPIGolden(testPinned), floor: parseAPIGolden(testFloor), unversioned: map[string]bool{}, floorVer: "1.9", sinceVer: "2.0"}
-}
 
 func optString() schema.StringAttribute {
 	return schema.StringAttribute{Optional: true, Computed: true}
@@ -75,7 +36,6 @@ func testAttrs() map[string]schema.Attribute {
 		"stamp":    optString(),
 		"gone":     schema.StringAttribute{Optional: true},
 		"secret":   schema.StringAttribute{Optional: true, Sensitive: true},
-		"legacy":   optString(),
 		"hoisted":  schema.BoolAttribute{Optional: true, Computed: true},
 		"hosts": schema.ListNestedAttribute{Optional: true, Computed: true, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
 			"url":     optString(),
@@ -119,7 +79,7 @@ func (stampCodec) Decode(ctx context.Context, raw json.RawMessage, prior attr.Va
 }
 
 func testOptions() []Option {
-	return append(optionsWithoutUnmanaged(), Unmanaged("Host", "Extra", "the server numbers hosts"))
+	return append(optionsWithoutUnmanaged(), Unmanaged("Hosts[]", "Extra", "the server numbers hosts"))
 }
 
 func optionsWithoutUnmanaged() []Option {
@@ -130,7 +90,6 @@ func optionsWithoutUnmanaged() []Option {
 		WithCodec("stamp", stampCodec{}),
 		NeverSent("gone", "Jellyfin has no such setting"),
 		Elsewhere("secret", "written by another request"),
-		Legacy("legacy", "OldPath", "2.0", "Jellyfin 2.0 removed it."),
 		Key("hoisted", "Sub.Other"),
 		Document("Sub"),
 		CarryServed("hosts", "Created", "url"),
@@ -142,53 +101,53 @@ func optionsWithoutUnmanaged() []Option {
 
 func testBinding(t *testing.T) *Binding {
 	t.Helper()
-	b, err := testCatalog().bind(schema.Schema{Attributes: testAttrs()}, "Doc", testOptions()...)
+	b, err := Bind(schema.Schema{Attributes: testAttrs()}, "Doc", testOptions()...)
 	if err != nil {
 		t.Fatalf("bind: %v", err)
 	}
 	return b
 }
 
-func TestUnitBindDescribesWhatItDerivesAndWhatIsDeclared(t *testing.T) {
-	want := []string{
-		"count -> Doc.Count integer:int32 read-missing-as=0",
-		"disabled -> Doc.Enabled boolean codec=inverted",
-		"fresh -> Doc.Fresh string since=2.0",
-		"gone -> never sent",
-		"hoisted -> Doc.Sub.Other boolean",
-		"hosts -> Doc.Hosts []#Host carries=Created/url",
-		"hosts.created -> Host.Created string read-only",
-		"hosts.kind -> Host.Kind string",
-		"hosts.url -> Host.Url string",
-		"id -> identity",
-		"joined -> Doc.Joined string codec=delimited(\",\")",
-		"legacy -> Doc.OldPath legacy until=2.0",
-		"limit -> Doc.Limit integer:int32 null-clears",
-		"name -> Doc.Name string",
-		"opts -> Doc.Opts #Opts",
-		"opts.level -> Opts.Level integer:int32",
-		"opts.mode -> Opts.Mode string",
-		"ratio -> Doc.Ratio number:double",
-		"secret -> elsewhere",
-		"sizes -> Doc.Sizes []integer:int32",
-		"stamp -> Doc.Stamp string codec=custom",
-		"sub -> Doc.Sub #Sub document",
-		"sub.flag -> Sub.Flag boolean",
-		"sub.limit -> Sub.Limit integer:int32 null-clears",
-		"tags -> Doc.Tags []string",
-		"types -> Doc.Types []#TypeOpt merge-by=type",
-		"types.fetchers -> TypeOpt.Fetchers []string",
-		"types.images -> TypeOpt.Images []#Image merge-by=type",
-		"types.images.limit -> Image.Limit integer:int32",
-		"types.images.type -> Image.Type string",
-		"types.type -> TypeOpt.Type string",
-		"(document) Doc keeps Kept",
-		"Sub Sub keeps Kept",
-		"Hosts[] Host omits Extra",
+func TestUnitKeyOf(t *testing.T) {
+	for name, want := range map[string]string{
+		"name":                                 "Name",
+		"extract_trickplay_images_during_scan": "ExtractTrickplayImagesDuringScan",
+		"h264_crf":                             "H264Crf",
+		"enable_ipv6":                          "EnableIpv6",
+	} {
+		if got := KeyOf(name); got != want {
+			t.Errorf("KeyOf(%q) = %q, want %q", name, got, want)
+		}
 	}
-	got := testBinding(t).Describe()
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Errorf("Describe:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+}
+
+func TestUnitBindListsTheObjectsItWrites(t *testing.T) {
+	got := map[string]Object{}
+	for _, o := range testBinding(t).Objects() {
+		got[o.KeyPath] = o
+	}
+	want := map[string]Object{
+		"": {Keys: map[string]Kind{
+			"Count": "integer", "Enabled": "boolean", "Fresh": "string", "Hosts": "[]object", "Joined": "string",
+			"Limit": "integer", "Name": "string", "Opts": "object", "Ratio": "number", "Sizes": "[]integer",
+			"Stamp": "", "Sub": "object", "Tags": "[]string", "Types": "[]object",
+		}},
+		"Hosts[]":          {Rebuilt: true, Keys: map[string]Kind{"Created": "string", "Kind": "string", "Url": "string"}, Unmanaged: []string{"Extra"}},
+		"Opts":             {Rebuilt: true, Keys: map[string]Kind{"Level": "integer", "Mode": "string"}},
+		"Sub":              {Keys: map[string]Kind{"Flag": "boolean", "Limit": "integer", "Other": "boolean"}},
+		"Types[]":          {Keys: map[string]Kind{"Fetchers": "[]string", "Images": "[]object", "Type": "string"}},
+		"Types[].Images[]": {Keys: map[string]Kind{"Limit": "integer", "Type": "string"}},
+	}
+	for kp, w := range want {
+		w.KeyPath = kp
+		if g, ok := got[kp]; !ok {
+			t.Errorf("Objects lacks %q", kp)
+		} else if !reflect.DeepEqual(g, w) {
+			t.Errorf("Objects[%q] = %+v, want %+v", kp, g, w)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("Objects lists %d objects, want %d: %v", len(got), len(want), got)
 	}
 }
 
@@ -211,21 +170,9 @@ func TestUnitBindRejects(t *testing.T) {
 		opts  []Option
 		want  string
 	}{
-		"a typo in a name": {
-			attrs: withAttr("namex", optString()),
-			want:  `namex: no property of Doc matches "namex" (nearest Name)`,
-		},
-		"a key Jellyfin renamed": {
-			attrs: withAttr("renamed", optString()),
-			want:  "the floor golden (Jellyfin 1.9) has Doc.Renamed, so Jellyfin removed or renamed it",
-		},
-		"a key that does not exist": {
-			opts: []Option{Key("name", "Nope")},
-			want: `name: Doc has no property "Nope"`,
-		},
 		"a redundant key": {
 			opts: []Option{Key("name", "Name")},
-			want: `name: Key("Name") is what the name resolves to anyway`,
+			want: `name: Key("Name") is what the name maps to anyway`,
 		},
 		"an option for no attribute": {
 			opts: []Option{NeverSent("nothing", "because")},
@@ -236,20 +183,16 @@ func TestUnitBindRejects(t *testing.T) {
 			want: "joined and tags both map to Doc.Joined",
 		},
 		"a type without a codec": {
-			attrs: withAttr("name", schema.Int64Attribute{Optional: true}),
-			want:  "name -> Doc.Name: attribute type basetypes.Int64Type and wire type string have no default codec",
+			attrs: withAttr("name", schema.ListAttribute{ElementType: types.BoolType, Optional: true}),
+			want:  "name -> Doc.Name: attribute type types.ListType[basetypes.BoolType] has no default codec",
 		},
 		"inverting a string": {
 			opts: []Option{Inverted("name", "Name")},
-			want: "Inverted needs a bool attribute and a boolean key",
+			want: "Inverted needs a bool attribute",
 		},
-		"delimiting a list key": {
-			opts: []Option{Delimited("tags", ",")},
-			want: "Delimited needs a list of strings and a string key",
-		},
-		"a legacy key the pin has": {
-			opts: []Option{Legacy("name", "Name", "2.0", "because")},
-			want: "the pinned golden has Doc.Name, so map it with Key instead of Legacy",
+		"delimiting a string": {
+			opts: []Option{Delimited("name", ",")},
+			want: "Delimited needs a list of strings",
 		},
 		"a mode without a reason": {
 			opts: []Option{NeverSent("name", "")},
@@ -263,26 +206,14 @@ func TestUnitBindRejects(t *testing.T) {
 			opts: []Option{Key("gone", "Name")},
 			want: "gone is never sent, so it takes no key",
 		},
-		"a rebuilt element dropping a key": {
-			base: optionsWithoutUnmanaged(),
-			want: `rebuilding each Hosts[] drops Host.Extra, which no attribute claims; bind it or declare Unmanaged("Host", "Extra", reason)`,
-		},
 		"an unmanaged key without a reason": {
 			base: optionsWithoutUnmanaged(),
-			opts: []Option{Unmanaged("Host", "Extra", " ")},
-			want: "Unmanaged(Host, Extra) needs a reason",
-		},
-		"a version message for an attribute every version has": {
-			opts: []Option{VersionMessage("name", func(VersionGap) (string, string) { return "", "" })},
-			want: "name: VersionMessage names an attribute VersionErrors never reports",
-		},
-		"a version message for a keyless attribute": {
-			opts: []Option{VersionMessage("gone", func(VersionGap) (string, string) { return "", "" })},
-			want: "gone is never sent, so it takes no key, codec, list, read or version option",
+			opts: []Option{Unmanaged("Hosts[]", "Extra", " ")},
+			want: "Unmanaged(Hosts[], Extra) needs a reason",
 		},
 		"unmanaged on a merged object": {
-			opts: []Option{Unmanaged("TypeOpt", "Fetchers", "because")},
-			want: `Unmanaged("TypeOpt", "Fetchers"): no attribute rebuilds TypeOpt`,
+			opts: []Option{Unmanaged("Types[]", "Fetchers", "because")},
+			want: `Unmanaged("Types[]", ...): no attribute rebuilds Types[]`,
 		},
 		"a carried key the attribute writes": {
 			attrs: withAttr("hosts", schema.ListNestedAttribute{Optional: true, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
@@ -319,10 +250,6 @@ func TestUnitBindRejects(t *testing.T) {
 			opts: []Option{Inverted("types", "Types")},
 			want: "types is a nested attribute, whose own attributes take their codecs",
 		},
-		"a nested attribute on a scalar key": {
-			attrs: withAttr("name", schema.SingleNestedAttribute{Optional: true, Attributes: map[string]schema.Attribute{"x": optString()}}),
-			want:  "name is an object, but Doc.Name is string",
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			attrs := c.attrs
@@ -333,24 +260,11 @@ func TestUnitBindRejects(t *testing.T) {
 			if opts == nil {
 				opts = testOptions()
 			}
-			_, err := testCatalog().bind(schema.Schema{Attributes: attrs}, "Doc", append(opts, c.opts...)...)
+			_, err := Bind(schema.Schema{Attributes: attrs}, "Doc", append(opts, c.opts...)...)
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Errorf("error %v\nwant it to contain %q", err, c.want)
 			}
 		})
-	}
-}
-
-func TestUnitBindRejectsAnObjectMissingFromTheFloor(t *testing.T) {
-	c := testCatalog()
-	delete(c.floor, "Opts")
-	_, err := c.bind(schema.Schema{Attributes: testAttrs()}, "Doc", testOptions()...)
-	if err == nil || !strings.Contains(err.Error(), "the floor golden has no schema Opts") {
-		t.Errorf("error %v, want the floor golden to be named", err)
-	}
-	c.unversioned["Opts"] = true
-	if _, err := c.bind(schema.Schema{Attributes: testAttrs()}, "Doc", testOptions()...); err != nil {
-		t.Errorf("an unversioned object still needs the floor: %v", err)
 	}
 }
 

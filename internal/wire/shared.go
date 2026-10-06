@@ -77,9 +77,6 @@ func (bb *binder) share(b *Binding, f *Field, opt *attrOption) {
 		}
 		bb.shared[s] = f.Path
 		f.Shares = append(f.Shares, s)
-		if f.Mode == ModeComplement && f.Since == "" {
-			f.Since = s.Since
-		}
 	}
 	switch {
 	case f.Mode == ModeComplement && strings.TrimSpace(opt.offered) == "":

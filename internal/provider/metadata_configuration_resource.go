@@ -20,7 +20,6 @@ import (
 var (
 	_ resource.Resource                = &MetadataConfigurationResource{}
 	_ resource.ResourceWithImportState = &MetadataConfigurationResource{}
-	_ resource.ResourceWithModifyPlan  = &MetadataConfigurationResource{}
 	_ wireBound                        = &MetadataConfigurationResource{}
 )
 
@@ -91,14 +90,6 @@ func (r *MetadataConfigurationResource) Delete(_ context.Context, _ resource.Del
 
 func (r *MetadataConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	r.singleton().setID(ctx, &resp.State, &resp.Diagnostics)
-}
-
-// ModifyPlan gates each configured field on the Jellyfin version it needs, so
-// a field a later pin adds is checked without a change here.
-func (r *MetadataConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if !req.Plan.Raw.IsNull() {
-		checkServerHasFields(ctx, r.client, metadataWire, req.Config, &resp.Diagnostics)
-	}
 }
 
 func (r *MetadataConfigurationResource) singleton() singleton[MetadataConfigurationResourceModel] {

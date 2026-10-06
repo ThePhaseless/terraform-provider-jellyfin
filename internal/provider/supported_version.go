@@ -6,6 +6,7 @@ package provider
 import (
 	_ "embed"
 	"fmt"
+	"strings"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/release"
 )
@@ -40,5 +41,31 @@ func versionNewerWarning(what, installed, supported string) (detail string, ok b
 			"The provider may behave unexpectedly. Check for a newer provider release, and report issues at "+
 			"https://github.com/ThePhaseless/terraform-provider-jellyfin/issues.",
 		what, installed, supported,
+	), true
+}
+
+// jellyfinVersionWarning returns a warning's summary and detail, and ok true,
+// when the server's Jellyfin release differs from the one this provider
+// supports, older or newer. Only the segments supported names count, so a
+// server on 12.2.1 runs the supported 12.2.
+func jellyfinVersionWarning(installed, supported string) (summary, detail string, ok bool) {
+	segments := strings.Split(strings.TrimSpace(installed), ".")
+	if n := len(strings.Split(supported, ".")); len(segments) > n {
+		segments = segments[:n]
+	}
+	switch release.Compare(strings.Join(segments, "."), supported) {
+	case 1:
+		summary = "Jellyfin version newer than supported"
+	case -1:
+		summary = "Jellyfin version older than supported"
+	default:
+		return "", "", false
+	}
+	return summary, fmt.Sprintf(
+		"The Jellyfin server reports version %s, but this provider release supports only Jellyfin %s. "+
+			"Settings the two releases do not share may be ignored or rejected by the server. "+
+			"Use the provider release that supports your Jellyfin version, and report issues at "+
+			"https://github.com/ThePhaseless/terraform-provider-jellyfin/issues.",
+		installed, supported,
 	), true
 }

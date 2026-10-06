@@ -124,7 +124,7 @@ Optional:
 
 Optional:
 
-- `network_path` (String, Deprecated) Network path. Jellyfin 10.10 removed network paths, so setting it is an error on Jellyfin 10.10 and later.
+- `network_path` (String, Deprecated) Network path. Jellyfin removed network paths, so setting it is an error. The attribute will be removed in a future release.
 - `password` (String, Sensitive, Deprecated) Password. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
 - `path` (String) Local path.
 - `username` (String, Deprecated) Username. Jellyfin has no such library option, so setting it is an error. The attribute will be removed in a future release.
@@ -140,8 +140,8 @@ Optional:
 - `image_options` (Attributes List) Image options for this type. Each entry is applied over the server's entry with the same image `type`. (see [below for nested schema](#nestedatt--library_options--type_options--image_options))
 - `metadata_fetcher_order` (List of String, Deprecated) Metadata fetcher order for this type. Deprecated: list the enabled metadata fetchers in priority order in `metadata_fetchers` instead, which then sets the order. Set, it still overrides that order; removed, the order it set stays until `metadata_fetchers` changes. It will be removed in a future release.
 - `metadata_fetchers` (List of String) Enabled metadata fetchers for this type, in priority order: Jellyfin asks the first one first. Unless `metadata_fetcher_order` is set, changing the list also sets Jellyfin's metadata fetcher order: these names, then the other names the server's order held. The list does not read that order back, so while it stays as it is, Jellyfin keeps the order it has, including one set by `metadata_fetcher_order` or outside Terraform.
-- `similar_item_provider_order` (List of String, Deprecated) Similar item provider order for this type. Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error. Deprecated: list the enabled similar item providers in priority order in `similar_item_providers` instead, which then sets the order. Set, it still overrides that order; removed, the order it set stays until `similar_item_providers` changes. It will be removed in a future release.
-- `similar_item_providers` (List of String) Enabled similar item providers for this type, in priority order; Jellyfin always uses its local ones, such as Local Genre/Tag, which the list only ranks. Unless `similar_item_provider_order` is set, changing the list also sets Jellyfin's similar item provider order: these names, then the other names the server's order held. The list does not read that order back, so while it stays as it is, Jellyfin keeps the order it has, including one set by `similar_item_provider_order` or outside Terraform. Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error.
+- `similar_item_provider_order` (List of String, Deprecated) Similar item provider order for this type. Deprecated: list the enabled similar item providers in priority order in `similar_item_providers` instead, which then sets the order. Set, it still overrides that order; removed, the order it set stays until `similar_item_providers` changes. It will be removed in a future release.
+- `similar_item_providers` (List of String) Enabled similar item providers for this type, in priority order; Jellyfin always uses its local ones, such as Local Genre/Tag, which the list only ranks. Unless `similar_item_provider_order` is set, changing the list also sets Jellyfin's similar item provider order: these names, then the other names the server's order held. The list does not read that order back, so while it stays as it is, Jellyfin keeps the order it has, including one set by `similar_item_provider_order` or outside Terraform.
 - `type` (String) Item type.
 
 <a id="nestedatt--library_options--type_options--image_options"></a>

@@ -20,7 +20,6 @@ import (
 var (
 	_ resource.Resource                = &BrandingConfigurationResource{}
 	_ resource.ResourceWithImportState = &BrandingConfigurationResource{}
-	_ resource.ResourceWithModifyPlan  = &BrandingConfigurationResource{}
 	_ wireBound                        = &BrandingConfigurationResource{}
 )
 
@@ -108,14 +107,6 @@ func (r *BrandingConfigurationResource) Delete(_ context.Context, _ resource.Del
 
 func (r *BrandingConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	r.singleton().setID(ctx, &resp.State, &resp.Diagnostics)
-}
-
-// ModifyPlan gates each configured field on the Jellyfin version it needs, so
-// a field a later pin adds is checked without a change here.
-func (r *BrandingConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if !req.Plan.Raw.IsNull() {
-		checkServerHasFields(ctx, r.client, brandingWire, req.Config, &resp.Diagnostics)
-	}
 }
 
 func (r *BrandingConfigurationResource) singleton() singleton[BrandingConfigurationResourceModel] {

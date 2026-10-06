@@ -26,7 +26,9 @@ A [Terraform](https://www.terraform.io) provider for managing [Jellyfin](https:/
 
 - [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.0
 - [Go](https://golang.org/doc/install) at or above the `go` line in `go.mod` to build the provider, and in `tools/go.mod` to run `make generate`
-- A running Jellyfin server instance
+- A running Jellyfin server of the release the provider release supports
+
+Each provider release supports one Jellyfin release, the latest when it was made, which its release title names (for example `v0.5.0 (Jellyfin 12.2)`); its release notes list the plugin builds it supports. Against another Jellyfin version the provider warns, and settings the two releases do not share may be ignored or rejected, so pick the provider release that matches your server.
 
 ## Quick Start
 
@@ -170,6 +172,8 @@ TF_ACC=1 go test -v ./internal/provider/
 ```
 
 In order to run the full suite of Acceptance tests, run `make testacc`.
+
+`TestAccWireKeysMatchTheServer` checks every JSON key the provider writes against the OpenAPI document of that server; it is what catches a misspelt key, such as an acronym that needs a `wire.Key` override. `TestAccSecurityPluginWireKeysMatchThePlugin` does the same for JellyfinSecurity and runs with `JELLYFIN_RESTART_ACC=1`, as it installs the plugin and restarts the server.
 
 *Note:* Acceptance tests create real resources on a Jellyfin server. They run against the local Jellyfin in Docker that `docker-compose.yml` starts and `scripts/setup_jellyfin.sh` prepares, as shown above.
 

@@ -5,7 +5,6 @@ package provider
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -23,7 +22,6 @@ import (
 var (
 	_ resource.Resource                = &EncodingConfigurationResource{}
 	_ resource.ResourceWithImportState = &EncodingConfigurationResource{}
-	_ resource.ResourceWithModifyPlan  = &EncodingConfigurationResource{}
 	_ wireBound                        = &EncodingConfigurationResource{}
 )
 
@@ -93,24 +91,17 @@ type EncodingConfigurationResourceModel struct {
 
 var encodingWire = sync.OnceValues(func() (*wire.Binding, error) {
 	return wire.Bind(schemaOf(&EncodingConfigurationResource{}), "EncodingOptions",
-		wire.Identity("id"),
-		wire.VersionMessage("hls_audio_seek_strategy", encodingVersionMessage),
-		wire.VersionMessage("subtitle_extraction_timeout_minutes", encodingVersionMessage))
+		wire.Identity("id"))
 })
 
 func (r *EncodingConfigurationResource) Wire() (*wire.Binding, error) { return encodingWire() }
-
-func encodingVersionMessage(g wire.VersionGap) (string, string) {
-	return "Unsupported Jellyfin server version",
-		fmt.Sprintf("%s requires Jellyfin %s or later: the server's encoding configuration has no %s field, so it would discard the value. Remove %s from the configuration or upgrade the server.", g.Path, g.Since, g.Key, g.Path)
-}
 
 func (r *EncodingConfigurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_encoding_configuration"
 }
 
 func (r *EncodingConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	hlsAudioSeekStrategy := optionalString("Method used to seek the audio stream when transcoding HLS segments. One of `TrimCopiedAudio`, `TranscodeAudio`. Requires Jellyfin 12.0 or later.")
+	hlsAudioSeekStrategy := optionalString("Method used to seek the audio stream when transcoding HLS segments. One of `TrimCopiedAudio`, `TranscodeAudio`.")
 	hlsAudioSeekStrategy.Validators = []validator.String{stringvalidator.OneOf("TrimCopiedAudio", "TranscodeAudio")}
 
 	resp.Schema = schema.Schema{
@@ -170,7 +161,7 @@ func (r *EncodingConfigurationResource) Schema(_ context.Context, _ resource.Sch
 			"allow_hevc_encoding":                     optionalBool("Whether HEVC encoding is allowed."),
 			"allow_av1_encoding":                      optionalBool("Whether AV1 encoding is allowed."),
 			"enable_subtitle_extraction":              optionalBool("Whether subtitle extraction is enabled."),
-			"subtitle_extraction_timeout_minutes":     optionalInt("Subtitle extraction timeout in minutes. Requires Jellyfin 12.0 or later."),
+			"subtitle_extraction_timeout_minutes":     optionalInt("Subtitle extraction timeout in minutes."),
 			"hardware_decoding_codecs":                optionalStringList("Hardware decoding codecs."),
 			"allow_on_demand_metadata_based_keyframe_extraction_for_extensions": optionalStringList("Extensions allowing on-demand metadata-based keyframe extraction."),
 			"hls_audio_seek_strategy": hlsAudioSeekStrategy,
@@ -200,14 +191,6 @@ func (r *EncodingConfigurationResource) Delete(_ context.Context, _ resource.Del
 
 func (r *EncodingConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	r.singleton().setID(ctx, &resp.State, &resp.Diagnostics)
-}
-
-// ModifyPlan rejects configured fields the server's Jellyfin version lacks,
-// such as the 12.0 ones on 10.11, which the server would accept and drop.
-func (r *EncodingConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if !req.Plan.Raw.IsNull() {
-		checkServerHasFields(ctx, r.client, encodingWire, req.Config, &resp.Diagnostics)
-	}
 }
 
 func (r *EncodingConfigurationResource) singleton() singleton[EncodingConfigurationResourceModel] {

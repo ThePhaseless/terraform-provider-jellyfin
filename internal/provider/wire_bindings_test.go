@@ -6,10 +6,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"reflect"
-	"slices"
-	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -17,8 +14,6 @@ import (
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/wire"
 )
-
-const wireBindingsGolden = "testdata/wire_bindings.golden"
 
 // typedClientResources talk to Jellyfin through internal/client's structs,
 // whose json tags are their only spelling of each key.
@@ -30,10 +25,12 @@ var typedClientResources = map[string]string{
 	"jellyfin_restart":              "only posts a restart",
 }
 
+// TestUnitWireBindings binds every resource that reads and writes Jellyfin
+// JSON, so a binding Bind rejects fails here rather than at plan time.
+// TestAccWireKeysMatchTheServer checks the keys against a server.
 func TestUnitWireBindings(t *testing.T) {
 	ctx := t.Context()
 	seen := map[string]bool{}
-	var lines []string
 	for _, newResource := range New("test")().Resources(ctx) {
 		r := newResource()
 		name := resourceTypeName(ctx, r)
@@ -60,50 +57,12 @@ func TestUnitWireBindings(t *testing.T) {
 		if !(types.ObjectType{AttrTypes: b.AttrTypes}).Equal(schemaOf(r).Type()) {
 			t.Errorf("%s: the binding's attribute types differ from the resource schema", name)
 		}
-		for _, line := range b.Describe() {
-			lines = append(lines, name+" "+line)
-		}
 	}
 	for name := range typedClientResources {
 		if !seen[name] {
 			t.Errorf("%s is listed but the provider has no such resource", name)
 		}
 	}
-	slices.Sort(lines)
-	checkWireBindingsGolden(t, lines)
-}
-
-func checkWireBindingsGolden(t *testing.T, lines []string) {
-	t.Helper()
-	got := strings.Join(lines, "\n") + "\n"
-	if os.Getenv("SCHEMA_GUARD_UPDATE") == "1" {
-		if err := os.WriteFile(wireBindingsGolden, []byte(got), 0o600); err != nil {
-			t.Fatalf("writing %s: %v", wireBindingsGolden, err)
-		}
-		return
-	}
-	want, err := os.ReadFile(wireBindingsGolden)
-	if err != nil {
-		t.Fatalf("reading %s: %v; run the test with SCHEMA_GUARD_UPDATE=1 to create it", wireBindingsGolden, err)
-	}
-	if string(want) == got {
-		return
-	}
-	wantLines := strings.Split(strings.TrimSpace(string(want)), "\n")
-	var msg strings.Builder
-	for _, l := range linesNotIn(lines, wantLines) {
-		msg.WriteString("  + " + l + "\n")
-	}
-	for _, l := range linesNotIn(wantLines, lines) {
-		msg.WriteString("  - " + l + "\n")
-	}
-	t.Fatalf(`the bindings differ from %s:
-
-%s
-Each line is an attribute and the Jellyfin key it reads and writes, or an
-object's keys that no attribute claims. A change here changes what the
-provider sends: review it, then run the test with SCHEMA_GUARD_UPDATE=1 to
-record it.`, wireBindingsGolden, msg.String())
 }
 
 func mustWire(t *testing.T, bind func() (*wire.Binding, error)) *wire.Binding {

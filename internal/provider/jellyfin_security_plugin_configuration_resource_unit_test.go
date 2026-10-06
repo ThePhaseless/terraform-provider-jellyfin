@@ -11,7 +11,6 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -237,51 +236,6 @@ func TestUnitFillEmptyPayloadLists(t *testing.T) {
 	}
 }
 
-func TestUnitJellyfinSecurityWriteKeepsTheServedShape(t *testing.T) {
-	ctx := t.Context()
-	b := mustWire(t, securityPluginWire)
-
-	raw, err := os.ReadFile(securityPluginPayloadGolden)
-	if err != nil {
-		t.Fatalf("reading %s: %v", securityPluginPayloadGolden, err)
-	}
-	golden := strings.Split(strings.TrimSpace(string(raw)), "\n")
-
-	payload, err := securityPluginPayloadFromShape(golden)
-	if err != nil {
-		t.Fatalf("building payload from golden: %v", err)
-	}
-	data := readWire[JellyfinSecurityPluginConfigurationResourceModel](t, b, payload)
-
-	// Apply overlays the served configuration, as here, so a top-level key
-	// stays in the payload whether or not an attribute claims it; the
-	// bindings golden lists the unclaimed ones. What this checks is that each
-	// rebuilt OIDC provider, role mapping and user email keeps every served
-	// key, and that every value goes out as the JSON type the plugin serves.
-	written, err := parseJSONObject(payload)
-	if err != nil {
-		t.Fatalf("parsing payload: %v", err)
-	}
-	if d := b.OverlayModel(ctx, written, &data); d.HasError() {
-		t.Fatalf("overlay: %v", d.Errors())
-	}
-	payloadWritten, err := json.Marshal(written)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := reduceSecurityPluginPayload(string(payloadWritten))
-	if err != nil {
-		t.Fatalf("reduce: %v", err)
-	}
-
-	for _, line := range linesNotIn(golden, got) {
-		t.Errorf("served %q is not written back by the resource", line)
-	}
-	for _, line := range linesNotIn(got, golden) {
-		t.Errorf("resource writes %q, which the plugin does not serve", line)
-	}
-}
-
 // reduceSecurityPluginPayload flattens a plugin configuration payload into
 // sorted "path: type" lines; elements of an array of objects share "Key[]".
 func reduceSecurityPluginPayload(raw string) ([]string, error) {
@@ -337,7 +291,7 @@ const payloadListPlaceholder = "1"
 
 // fillEmptyPayloadLists puts payloadListPlaceholder in every empty list and
 // returns their paths. An empty list carries no element type, so without this
-// a list's line in the golden would depend on whether the plugin's default for
+// a list's line in the shape would depend on whether the plugin's default for
 // it happens to be empty. A list that already holds entries types itself.
 func fillEmptyPayloadLists(raw string) (string, []string, error) {
 	dec := json.NewDecoder(strings.NewReader(raw))

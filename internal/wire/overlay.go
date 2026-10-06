@@ -31,7 +31,7 @@ func (b *Binding) OverlayModel(ctx context.Context, doc map[string]json.RawMessa
 // Overlay writes each known attribute of obj into doc, the document as the
 // server serves it, so the keys no attribute claims keep their served values.
 // A null attribute is left out unless it NullClears. Keys come from the
-// goldens only. A served key spelled otherwise than the golden stays: the
+// binding only. A served key spelled otherwise than the binding stays: the
 // metadata, encoding, network and Live TV endpoints read keys case-sensitively,
 // so the served spelling may be the only one the server reads, and dropping it
 // would reset that setting to its default.

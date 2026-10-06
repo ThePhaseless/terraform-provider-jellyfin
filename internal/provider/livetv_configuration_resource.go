@@ -21,7 +21,6 @@ import (
 var (
 	_ resource.Resource                = &LiveTVConfigurationResource{}
 	_ resource.ResourceWithImportState = &LiveTVConfigurationResource{}
-	_ resource.ResourceWithModifyPlan  = &LiveTVConfigurationResource{}
 	_ wireBound                        = &LiveTVConfigurationResource{}
 )
 
@@ -58,6 +57,8 @@ type LiveTVConfigurationResourceModel struct {
 var livetvWire = sync.OnceValues(func() (*wire.Binding, error) {
 	return wire.Bind(schemaOf(&LiveTVConfigurationResource{}), "LiveTvOptions",
 		wire.Identity("id"),
+		wire.Key("save_recording_nfo", "SaveRecordingNFO"),
+		wire.Key("tuner_hosts.allow_hw_transcoding", "AllowHWTranscoding"),
 		// Planning fills an entry's unset settings from the prior entry it
 		// matches, which a first apply has none of; the write then keeps
 		// those of the served entry with the same id.
@@ -215,14 +216,6 @@ func (r *LiveTVConfigurationResource) Delete(_ context.Context, _ resource.Delet
 
 func (r *LiveTVConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	r.singleton().setID(ctx, &resp.State, &resp.Diagnostics)
-}
-
-// ModifyPlan gates each configured field on the Jellyfin version it needs, so
-// a field a later pin adds is checked without a change here.
-func (r *LiveTVConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if !req.Plan.Raw.IsNull() {
-		checkServerHasFields(ctx, r.client, livetvWire, req.Config, &resp.Diagnostics)
-	}
 }
 
 func (r *LiveTVConfigurationResource) singleton() singleton[LiveTVConfigurationResourceModel] {

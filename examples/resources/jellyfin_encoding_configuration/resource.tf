@@ -47,7 +47,6 @@ resource "jellyfin_encoding_configuration" "example" {
   hardware_decoding_codecs                                          = []
   allow_on_demand_metadata_based_keyframe_extraction_for_extensions = []
 
-  # Requires Jellyfin 12.0 or later; remove both on older servers.
   subtitle_extraction_timeout_minutes = 30
   hls_audio_seek_strategy             = "TrimCopiedAudio"
 }

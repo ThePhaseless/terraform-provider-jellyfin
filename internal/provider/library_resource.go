@@ -69,16 +69,13 @@ var libraryWire = sync.OnceValues(func() (*wire.Binding, error) {
 		wire.Key("paths", "Locations"),
 		wire.Key("library_options.extract_chapters_during_library_scan", "ExtractChapterImagesDuringLibraryScan"),
 		wire.Inverted("library_options.disabled", "Enabled"),
-		wire.Legacy("library_options.path_infos.network_path", "NetworkPath", "10.10", networkPathRemovedMessage),
+		wire.NeverSent("library_options.path_infos.network_path", networkPathRemovedMessage),
 		wire.MergeByKey("library_options.type_options", "type"),
 		wire.MergeByKey("library_options.type_options.image_options", "type"),
 		wire.Orders("library_options.type_options.metadata_fetchers", "metadata_fetcher_order", "MetadataFetchers", "type"),
 		wire.Orders("library_options.type_options.image_fetchers", "image_fetcher_order", "ImageFetchers", "type"),
 		wire.Orders("library_options.type_options.similar_item_providers", "similar_item_provider_order", "SimilarItemProviders", "type"),
 		wire.Complement("library_options.subtitle_fetchers", "subtitle_fetcher_order", "disabled_subtitle_fetchers", "SubtitleFetchers", ""),
-		wire.VersionMessage("library_options.type_options.similar_item_providers", similarItemsVersionMessage),
-		wire.VersionMessage("library_options.type_options.similar_item_provider_order", similarItemsVersionMessage),
-		wire.VersionMessage("library_options.path_infos.network_path", networkPathVersionMessage),
 	}
 	for _, p := range []string{
 		"library_options.enable_emby_photos", "library_options.enable_photo_subtitle",
@@ -108,16 +105,6 @@ var libraryOptionsWire = sync.OnceValues(func() (*wire.Binding, error) {
 	}
 	return b.Document("LibraryOptions")
 })
-
-func similarItemsVersionMessage(g wire.VersionGap) (string, string) {
-	return "Similar item settings not supported",
-		fmt.Sprintf("The server runs Jellyfin %s, and similar item providers need Jellyfin 12 or later. Remove %s for this server.", g.ServerVersion, g.Path)
-}
-
-func networkPathVersionMessage(g wire.VersionGap) (string, string) {
-	return "Network paths not supported",
-		fmt.Sprintf("The server runs Jellyfin %s, and Jellyfin %s removed network paths, so the server would drop the value. Remove %s from the configuration.", g.ServerVersion, g.Until, g.Path)
-}
 
 // LibraryOptionsModel describes the typed library options.
 type LibraryOptionsModel struct {
@@ -367,6 +354,10 @@ func pathInfoAttributes() map[string]schema.Attribute {
 			Optional:            true,
 			Computed:            true,
 			DeprecationMessage:  networkPathRemovedMessage,
+			Validators: []validator.String{unsetValidator{
+				summary: "Network paths not supported",
+				reason:  "Jellyfin removed network paths, so the server would drop this value",
+			}},
 			PlanModifiers: []planmodifier.String{
 				priorValueEvenIfNull{},
 			},
@@ -376,7 +367,7 @@ func pathInfoAttributes() map[string]schema.Attribute {
 	}
 }
 
-const networkPathRemovedMessage = "Jellyfin 10.10 removed network paths, so setting it is an error on Jellyfin 10.10 and later."
+const networkPathRemovedMessage = "Jellyfin removed network paths, so setting it is an error. The attribute will be removed in a future release."
 
 type priorValueEvenIfNull struct{}
 
@@ -428,12 +419,10 @@ func typeOptionsAttributes() map[string]schema.Attribute {
 			},
 		},
 		"image_fetcher_order":         deprecatedOrder("Image fetcher order for this type.", orderDeprecation("image_fetchers", "image fetchers")),
-		"similar_item_providers":      optionalStringList("Enabled similar item providers for this type, in priority order; Jellyfin always uses its local ones, such as Local Genre/Tag, which the list only ranks. " + ordersNote("similar item provider", "similar_item_provider_order") + " " + similarItemsNote),
-		"similar_item_provider_order": deprecatedOrder("Similar item provider order for this type. "+similarItemsNote, orderDeprecation("similar_item_providers", "similar item providers")),
+		"similar_item_providers":      optionalStringList("Enabled similar item providers for this type, in priority order; Jellyfin always uses its local ones, such as Local Genre/Tag, which the list only ranks. " + ordersNote("similar item provider", "similar_item_provider_order")),
+		"similar_item_provider_order": deprecatedOrder("Similar item provider order for this type.", orderDeprecation("similar_item_providers", "similar item providers")),
 	}
 }
-
-const similarItemsNote = "Needs Jellyfin 12 or later: on Jellyfin 10.x it reads as null and setting it is an error."
 
 func ordersNote(kind, orderAttr string) string {
 	return fmt.Sprintf("Unless `%[1]s` is set, changing the list also sets Jellyfin's %[2]s order: these names, then the other names the server's order held. The list does not read that order back, so while it stays as it is, Jellyfin keeps the order it has, including one set by `%[1]s` or outside Terraform.", orderAttr, kind)
@@ -753,9 +742,8 @@ func (r *LibraryResource) ImportState(ctx context.Context, req resource.ImportSt
 	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
 }
 
-// ModifyPlan rejects attributes the server's Jellyfin version does not have,
-// and plans each type_options attribute left unset from the prior entry with
-// the same type, which is the server entry apply writes over.
+// ModifyPlan plans each type_options attribute left unset from the prior
+// entry with the same type, which is the server entry apply writes over.
 // UseStateForUnknown takes it from the prior entry at the same index instead,
 // so inserting or reordering entries would plan, and then write, another
 // type's values.
@@ -763,8 +751,7 @@ func (r *LibraryResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	if req.Plan.Raw.IsNull() {
 		return
 	}
-	checkServerHasFields(ctx, r.client, libraryWire, req.Config, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() || req.State.Raw.IsNull() {
+	if req.State.Raw.IsNull() {
 		return
 	}
 

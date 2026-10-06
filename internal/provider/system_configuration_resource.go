@@ -104,6 +104,7 @@ type SystemConfigurationResourceModel struct {
 var systemWire = sync.OnceValues(func() (*wire.Binding, error) {
 	return wire.Bind(schemaOf(&SystemConfigurationResource{}), "ServerConfiguration",
 		wire.Identity("id"),
+		wire.Key("ui_culture", "UICulture"),
 		// Merged into the served options, so that the settings a create
 		// leaves unset, and so plans unknown, keep their values.
 		wire.Document("TrickplayOptions"),
@@ -344,8 +345,7 @@ func (r *SystemConfigurationResource) ModifyPlan(ctx context.Context, req resour
 	if req.Plan.Raw.IsNull() {
 		return
 	}
-	checkServerHasFields(ctx, r.client, systemWire, req.Config, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() || req.State.Raw.IsNull() {
+	if req.State.Raw.IsNull() {
 		return
 	}
 

@@ -52,16 +52,10 @@ func TestAccUserResource(t *testing.T) {
 	})
 }
 
-// Jellyfin 12 accepts a rename that changes only letter case; 10.11 rejects
-// it with "The new and old names must be different".
+// Jellyfin accepts a rename that changes only letter case.
 func TestAccUserResourceRenameLetterCaseOnly(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck: func() {
-			testAccPreCheck(t)
-			if !testAccJellyfin12OrLater(t) {
-				t.Skip("requires Jellyfin 12 or newer")
-			}
-		},
+		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{

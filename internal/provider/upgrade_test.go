@@ -95,19 +95,15 @@ func testAccPutBackServerConfiguration(t *testing.T, taskID string) {
 
 func TestAccUpgradeFromV038(t *testing.T) {
 	testAccPreCheck(t)
-	jellyfin12 := testAccJellyfin12OrLater(t)
 	const taskID = "7738148ffcd07979c7ceb148e06b3aed"
 	testAccPutBackServerConfiguration(t, taskID)
 
-	encoding12, similarItems := "", ""
-	if jellyfin12 {
-		encoding12 = `
+	const encoding12 = `
   subtitle_extraction_timeout_minutes = 45
   hls_audio_seek_strategy             = "TranscodeAudio"`
-		similarItems = `
+	const similarItems = `
         similar_item_providers      = ["Local Genre/Tag"]
         similar_item_provider_order = ["Local Genre/Tag", "TheMovieDb"]`
-	}
 
 	for _, c := range []struct {
 		name, config string

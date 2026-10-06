@@ -23,12 +23,12 @@ type miniModel struct {
 func TestUnitModelReadsAndWrites(t *testing.T) {
 	ctx := t.Context()
 	hostAttrs := map[string]schema.Attribute{"url": optString(), "kind": optString()}
-	b, err := testCatalog().bind(schema.Schema{Attributes: map[string]schema.Attribute{
+	b, err := Bind(schema.Schema{Attributes: map[string]schema.Attribute{
 		"id":    schema.StringAttribute{Computed: true},
 		"name":  optString(),
 		"fresh": optString(),
 		"hosts": schema.ListNestedAttribute{Optional: true, Computed: true, NestedObject: schema.NestedAttributeObject{Attributes: hostAttrs}},
-	}}, "Doc", Identity("id"), Unmanaged("Host", "Extra", "not managed"), Unmanaged("Host", "Created", "not managed"))
+	}}, "Doc", Identity("id"), Unmanaged("Hosts[]", "Extra", "not managed"), Unmanaged("Hosts[]", "Created", "not managed"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestUnitModelReadsAndWrites(t *testing.T) {
 
 	applied := plan
 	d := b.FlattenAfterApply(ctx, `{"Name": "n", "Hosts": [{"Url": "u", "Kind": ""}]}`, &applied)
-	if !d.HasError() || !strings.Contains(d[0].Detail(), "needs Jellyfin 2.0 or later") {
+	if !d.HasError() || !strings.Contains(d[0].Detail(), "did not keep the value") {
 		t.Errorf("the dropped fresh is not reported: %v", d)
 	}
 	if !applied.Fresh.IsNull() || !applied.ID.IsUnknown() || applied.Name.ValueString() != "n" || len(applied.Hosts.Elements()) != 1 {

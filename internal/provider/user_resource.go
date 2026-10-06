@@ -34,7 +34,6 @@ import (
 var (
 	_ resource.Resource                = &UserResource{}
 	_ resource.ResourceWithImportState = &UserResource{}
-	_ resource.ResourceWithModifyPlan  = &UserResource{}
 	_ wireBound                        = &UserResource{}
 )
 
@@ -70,8 +69,8 @@ var userWire = sync.OnceValues(func() (*wire.Binding, error) {
 		wire.ReadMissingAs("is_administrator", types.BoolValue(false)),
 		wire.ReadMissingAs("is_disabled", types.BoolValue(false)),
 		wire.ReadMissingAs("enable_all_folders", types.BoolValue(false)),
-		wire.Unmanaged("AccessSchedule", "Id", "Jellyfin numbers access schedules itself"),
-		wire.Unmanaged("AccessSchedule", "UserId", "Jellyfin fills in the user the policy belongs to"))
+		wire.Unmanaged("Policy.AccessSchedules[]", "Id", "Jellyfin numbers access schedules itself"),
+		wire.Unmanaged("Policy.AccessSchedules[]", "UserId", "Jellyfin fills in the user the policy belongs to"))
 })
 
 func (r *UserResource) Wire() (*wire.Binding, error) { return userWire() }
@@ -442,14 +441,6 @@ func (r *UserResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 
 func (r *UserResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
-}
-
-// ModifyPlan gates each configured field on the Jellyfin version it needs, so
-// a field a later pin adds is checked without a change here.
-func (r *UserResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if !req.Plan.Raw.IsNull() {
-		checkServerHasFields(ctx, r.client, userWire, req.Config, &resp.Diagnostics)
-	}
 }
 
 // renameUser posts the user read from the server back with only Name changed.

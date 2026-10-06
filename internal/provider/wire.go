@@ -153,23 +153,3 @@ func (s singleton[M]) set(ctx context.Context, data *M, state *tfsdk.State, diag
 func (s singleton[M]) setID(ctx context.Context, state *tfsdk.State, diags *diag.Diagnostics) {
 	diags.Append(state.SetAttribute(ctx, path.Root("id"), types.StringValue(s.id))...)
 }
-
-// checkServerHasFields rejects, at plan time, configured values whose fields
-// the server's Jellyfin version lacks. Such a server accepts the write and
-// silently drops the value, which Terraform could only report after apply as
-// an inconsistent result. Terraform plans each resource this way again in the
-// refresh that precedes a destroy, so such a value left in the configuration
-// also fails terraform destroy unless it runs with -refresh=false.
-func checkServerHasFields(ctx context.Context, c *client.Client, bind func() (*wire.Binding, error), config tfsdk.Config, diags *diag.Diagnostics) {
-	b := wireBinding(diags, bind)
-	if b == nil || c == nil {
-		return
-	}
-	diags.Append(b.VersionErrors(ctx, config, func() (string, error) {
-		info, err := c.GetPublicSystemInfo(ctx)
-		if err != nil {
-			return "", err
-		}
-		return info.Version, nil
-	})...)
-}

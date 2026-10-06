@@ -44,7 +44,7 @@ func TestUnitLibraryOptionsRoundTrip(t *testing.T) {
 		"SaveTrickplayWithMedia": false,
 		"MetadataSavers": ["Nfo"],
 		"PathInfos": [
-			{"Path": "/media", "NetworkPath": "\\\\server\\media"}
+			{"Path": "/media"}
 		],
 		"PreferredMetadataLanguage": "en",
 		"MetadataCountryCode": "US",
@@ -739,84 +739,6 @@ func TestUnitLibraryUpdateWritesNoOptionsOverOlderState(t *testing.T) {
 	if collectionType.ValueString() != "mixed" || !subtitleFetchers.IsNull() {
 		t.Errorf("state after update: collection_type %s, subtitle_fetchers %s; want mixed and the prior null (%v)", collectionType, subtitleFetchers, resp.Diagnostics)
 	}
-}
-
-func TestUnitLibraryVersionErrorsFollowServerVersion(t *testing.T) {
-	ctx := t.Context()
-	similarItems := path.Root("library_options").AtName("type_options").AtListIndex(0).AtName("similar_item_providers")
-	networkPath := path.Root("library_options").AtName("path_infos").AtListIndex(0).AtName("network_path")
-	root, config := testUnitLibraryGatedConfig(t)
-
-	tests := map[string]struct {
-		version      string
-		similarError bool
-		networkError bool
-	}{
-		"10.9":        {version: "10.9.11", similarError: true},
-		"10.10":       {version: "10.10.0", similarError: true, networkError: true},
-		"10.11":       {version: "10.11.11", similarError: true, networkError: true},
-		"12.1":        {version: "12.1.0", networkError: true},
-		"unparseable": {version: "unknown"},
-	}
-	for name, test := range tests {
-		diags := root.VersionErrors(ctx, config, func() (string, error) { return test.version, nil })
-		gotSimilar, gotNetwork := false, false
-		for _, d := range diags {
-			withPath, ok := d.(diag.DiagnosticWithPath)
-			if !ok {
-				t.Errorf("%s: diagnostic without a path: %v", name, d)
-				continue
-			}
-			gotSimilar = gotSimilar || withPath.Path().Equal(similarItems)
-			gotNetwork = gotNetwork || withPath.Path().Equal(networkPath)
-		}
-		if gotSimilar != test.similarError || gotNetwork != test.networkError {
-			t.Errorf("%s: similar item error %t, network path error %t; want %t, %t", name, gotSimilar, gotNetwork, test.similarError, test.networkError)
-		}
-	}
-}
-
-// CI runs the acceptance tests on Jellyfin 12, which never reports the similar
-// item error, so no other test there sees its wording.
-func TestUnitLibraryVersionErrorWording(t *testing.T) {
-	root, config := testUnitLibraryGatedConfig(t)
-
-	diags := root.VersionErrors(t.Context(), config, func() (string, error) { return "10.11.11", nil })
-	var got []string
-	for _, d := range diags {
-		withPath, ok := d.(diag.DiagnosticWithPath)
-		if !ok {
-			t.Fatalf("diagnostic without a path: %v", d)
-		}
-		got = append(got, withPath.Path().String()+" | "+d.Summary()+" | "+d.Detail())
-	}
-	slices.Sort(got)
-	want := []string{
-		"library_options.path_infos[0].network_path | Network paths not supported | The server runs Jellyfin 10.11.11, and Jellyfin 10.10 removed network paths, so the server would drop the value. Remove library_options.path_infos[0].network_path from the configuration.",
-		"library_options.type_options[0].similar_item_providers | Similar item settings not supported | The server runs Jellyfin 10.11.11, and similar item providers need Jellyfin 12 or later. Remove library_options.type_options[0].similar_item_providers for this server.",
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("version errors:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
-	}
-}
-
-// testUnitLibraryGatedConfig configures a similar item provider and a network
-// path, which some Jellyfin versions lack.
-func testUnitLibraryGatedConfig(t *testing.T) (*wire.Binding, tfsdk.Config) {
-	t.Helper()
-	ctx := t.Context()
-	root := mustWire(t, libraryWire)
-	data := testUnitLibraryRead(t, mustWire(t, libraryOptionsWire),
-		`{"TypeOptions": [{"Type": "Movie", "SimilarItemProviders": ["Local Genre/Tag"]}], "PathInfos": [{"Path": "/media", "NetworkPath": "//nas/media"}]}`)
-	obj, d := types.ObjectValueFrom(ctx, root.AttrTypes, &data)
-	if d.HasError() {
-		t.Fatal(d)
-	}
-	raw, err := obj.ToTerraformValue(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return root, tfsdk.Config{Schema: schemaOf(NewLibraryResource()), Raw: raw}
 }
 
 func testUnitTypeOptions(typ string) TypeOptionsModel {

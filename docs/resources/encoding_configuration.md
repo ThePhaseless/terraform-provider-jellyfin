@@ -62,7 +62,6 @@ resource "jellyfin_encoding_configuration" "example" {
   hardware_decoding_codecs                                          = []
   allow_on_demand_metadata_based_keyframe_extraction_for_extensions = []
 
-  # Requires Jellyfin 12.0 or later; remove both on older servers.
   subtitle_extraction_timeout_minutes = 30
   hls_audio_seek_strategy             = "TrimCopiedAudio"
 }
@@ -105,12 +104,12 @@ resource "jellyfin_encoding_configuration" "example" {
 - `h265_crf` (Number) H265 CRF.
 - `hardware_acceleration_type` (String) Hardware acceleration type. One of `none`, `amf`, `qsv`, `nvenc`, `v4l2m2m`, `vaapi`, `videotoolbox`, `rkmpp`.
 - `hardware_decoding_codecs` (List of String) Hardware decoding codecs.
-- `hls_audio_seek_strategy` (String) Method used to seek the audio stream when transcoding HLS segments. One of `TrimCopiedAudio`, `TranscodeAudio`. Requires Jellyfin 12.0 or later.
+- `hls_audio_seek_strategy` (String) Method used to seek the audio stream when transcoding HLS segments. One of `TrimCopiedAudio`, `TranscodeAudio`.
 - `max_muxing_queue_size` (Number) Max muxing queue size.
 - `prefer_system_native_hw_decoder` (Boolean) Whether to prefer system native hardware decoder.
 - `qsv_device` (String) QSV device.
 - `segment_keep_seconds` (Number) Segment keep time in seconds.
-- `subtitle_extraction_timeout_minutes` (Number) Subtitle extraction timeout in minutes. Requires Jellyfin 12.0 or later.
+- `subtitle_extraction_timeout_minutes` (Number) Subtitle extraction timeout in minutes.
 - `throttle_delay_seconds` (Number) Throttle delay in seconds.
 - `tonemapping_algorithm` (String) Tonemapping algorithm. One of `none`, `clip`, `linear`, `gamma`, `reinhard`, `hable`, `mobius`, `bt2390`.
 - `tonemapping_desat` (Number) Tonemapping desaturation.

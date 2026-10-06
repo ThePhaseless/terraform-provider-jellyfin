@@ -23,7 +23,6 @@ import (
 var (
 	_ resource.Resource                = &NetworkingConfigurationResource{}
 	_ resource.ResourceWithImportState = &NetworkingConfigurationResource{}
-	_ resource.ResourceWithModifyPlan  = &NetworkingConfigurationResource{}
 	_ wireBound                        = &NetworkingConfigurationResource{}
 )
 
@@ -66,7 +65,13 @@ type NetworkingConfigurationResourceModel struct {
 }
 
 var networkingWire = sync.OnceValues(func() (*wire.Binding, error) {
-	return wire.Bind(schemaOf(&NetworkingConfigurationResource{}), "NetworkConfiguration", wire.Identity("id"))
+	return wire.Bind(schemaOf(&NetworkingConfigurationResource{}), "NetworkConfiguration",
+		wire.Identity("id"),
+		wire.Key("enable_ipv4", "EnableIPv4"),
+		wire.Key("enable_ipv6", "EnableIPv6"),
+		wire.Key("enable_upnp", "EnableUPnP"),
+		wire.Key("remote_ip_filter", "RemoteIPFilter"),
+		wire.Key("is_remote_ip_filter_blacklist", "IsRemoteIPFilterBlacklist"))
 })
 
 func (r *NetworkingConfigurationResource) Wire() (*wire.Binding, error) { return networkingWire() }
@@ -143,14 +148,6 @@ func (r *NetworkingConfigurationResource) Delete(_ context.Context, _ resource.D
 
 func (r *NetworkingConfigurationResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	r.singleton().setID(ctx, &resp.State, &resp.Diagnostics)
-}
-
-// ModifyPlan gates each configured field on the Jellyfin version it needs, so
-// a field a later pin adds is checked without a change here.
-func (r *NetworkingConfigurationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if !req.Plan.Raw.IsNull() {
-		checkServerHasFields(ctx, r.client, networkingWire, req.Config, &resp.Diagnostics)
-	}
 }
 
 func (r *NetworkingConfigurationResource) singleton() singleton[NetworkingConfigurationResourceModel] {

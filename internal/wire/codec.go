@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -259,48 +258,22 @@ func (c delimitedCodec) Decode(_ context.Context, raw json.RawMessage, _ attr.Va
 	return stringList(strings.Split(s, c.sep)), nil
 }
 
-// defaultCodec picks the codec an attribute of type t gets for property p, or
-// fails without a declared codec; a legacy key counts only its attribute type.
-func defaultCodec(t attr.Type, p Prop, legacy bool) (Codec, error) {
-	// fits reports whether the property is a list or not, as list says, of one
-	// of the scalars; a legacy key fits whatever the attribute's type.
-	fits := func(list bool, scalars ...string) bool {
-		return legacy || p.List == list && p.Ref == "" && slices.Contains(scalars, p.Scalar)
-	}
-	// The security plugin golden types every number "number", with no format
-	// telling integers apart, so an unformatted number takes an int64 too.
-	integer := legacy || p.Scalar == "integer" || p.Scalar == "number" && p.Format == ""
+// defaultCodec picks the codec an attribute of type t gets, or fails without
+// a declared codec.
+func defaultCodec(t attr.Type) (Codec, error) {
 	switch {
-	case t.Equal(types.StringType) && fits(false, "string"):
+	case t.Equal(types.StringType):
 		return stringCodec{}, nil
-	case t.Equal(boolType) && fits(false, "boolean"):
+	case t.Equal(boolType):
 		return boolCodec{}, nil
-	case t.Equal(types.Int64Type) && integer && fits(false, "integer", "number"):
+	case t.Equal(types.Int64Type):
 		return int64Codec{}, nil
-	case t.Equal(types.Float64Type) && fits(false, "number"):
+	case t.Equal(types.Float64Type):
 		return float64Codec{}, nil
-	case t.Equal(stringListType) && fits(true, "string"):
+	case t.Equal(stringListType):
 		return stringListCodec{}, nil
-	case t.Equal(types.ListType{ElemType: types.Int64Type}) && integer && fits(true, "integer", "number"):
+	case t.Equal(types.ListType{ElemType: types.Int64Type}):
 		return int64ListCodec{}, nil
 	}
-	return nil, fmt.Errorf("attribute type %s and wire type %s have no default codec; declare one", t, sigOf(p, legacy))
-}
-
-func sigOf(p Prop, legacy bool) string {
-	if legacy && p.Sig == "" {
-		return "(legacy)"
-	}
-	return p.Sig
-}
-
-func codecName(c Codec) string {
-	if s, ok := c.(fmt.Stringer); ok {
-		return s.String()
-	}
-	switch c.(type) {
-	case stringCodec, int64Codec, float64Codec, stringListCodec, int64ListCodec:
-		return ""
-	}
-	return "custom"
+	return nil, fmt.Errorf("attribute type %s has no default codec; declare one", t)
 }

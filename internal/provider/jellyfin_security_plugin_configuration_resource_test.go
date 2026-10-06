@@ -364,7 +364,7 @@ func testAccSecurityPluginPayloadShape(t *testing.T, c *client.Client) []string 
 		}
 	}
 	if len(dropped) > 0 {
-		t.Fatalf("the plugin serves %s empty after %q was written into each, so the golden cannot type them. It now drops entries it does not accept: give each an entry the plugin keeps in the probe in testAccSecurityPluginPayloadShape.", strings.Join(dropped, ", "), payloadListPlaceholder)
+		t.Fatalf("the plugin serves %s empty after %q was written into each, so the shape cannot type them. It now drops entries it does not accept: give each an entry the plugin keeps in the probe in testAccSecurityPluginPayloadShape.", strings.Join(dropped, ", "), payloadListPlaceholder)
 	}
 	return lines
 }

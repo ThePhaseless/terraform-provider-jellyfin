@@ -12,11 +12,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
-
-	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/release"
 )
 
 // KeepPlannedNulls returns got with each attribute inside a nested list
@@ -195,7 +192,7 @@ func dropped(n *node, planned, got basetypes.ObjectValue, at path.Path, diags *d
 			continue
 		}
 		if gv == nil || gv.IsNull() {
-			diags.Append(droppedDiag(p, f))
+			diags.Append(droppedDiag(p))
 			continue
 		}
 		if f.Elem == nil {
@@ -223,142 +220,8 @@ func dropped(n *node, planned, got basetypes.ObjectValue, at path.Path, diags *d
 	}
 }
 
-func droppedDiag(p path.Path, f *Field) diag.Diagnostic {
+func droppedDiag(p path.Path) diag.Diagnostic {
 	notKept := fmt.Sprintf("The Jellyfin server read %s back as null after the write, so it did not keep the value.", p)
-	hint := "Jellyfin drops a value for a setting it does not have; check that the server's version has it."
-	if f.Since != "" {
-		hint = fmt.Sprintf("It needs Jellyfin %s or later; remove it from the configuration for older servers.", f.Since)
-	}
+	hint := "Jellyfin drops a value for a setting it does not have; check that the server runs the Jellyfin version this provider supports."
 	return diag.NewAttributeErrorDiagnostic(p, "Value not kept by Jellyfin", notKept+" "+hint)
-}
-
-type gatedValue struct {
-	p path.Path
-	f *Field
-}
-
-// VersionGap is a configured value that the server's Jellyfin version lacks,
-// as VersionErrors hands it to a VersionMessage.
-type VersionGap struct {
-	// Path leads to the value, with list indexes.
-	Path path.Path
-	Key  string
-	// Since is set when the server is older than the field, Until when the
-	// server is as new as the release that removed it.
-	Since         string
-	Until         string
-	ServerVersion string
-}
-
-// VersionErrors rejects each configured value whose field the server's
-// Jellyfin version lacks: a field with a Since version on older servers, and
-// a Legacy field on its until version and later. It asks serverVersion for the
-// server's version only when such a value is configured. It leaves out values
-// unknown at plan time; Terraform plans again during apply, once they are
-// known.
-func (b *Binding) VersionErrors(ctx context.Context, cfg tfsdk.Config, serverVersion func() (string, error)) diag.Diagnostics {
-	var diags diag.Diagnostics
-	if cfg.Schema == nil || cfg.Raw.IsNull() {
-		return diags
-	}
-	v, err := cfg.Schema.Type().ValueFromTerraform(ctx, cfg.Raw)
-	if err != nil {
-		diags.AddError("Failed to read the configuration", err.Error())
-		return diags
-	}
-	obj, ok := v.(basetypes.ObjectValue)
-	if !ok {
-		return diags
-	}
-	var gated []gatedValue
-	collectGated(b.nodes, obj, path.Empty(), &gated)
-	if len(gated) == 0 {
-		return diags
-	}
-	ver, err := serverVersion()
-	if err != nil {
-		diags.AddError("Failed to read the Jellyfin version", err.Error())
-		return diags
-	}
-	if !release.HasLeadingDigit(ver) {
-		return diags
-	}
-	for _, g := range gated {
-		gap := VersionGap{Path: g.p, Key: g.f.versionKey(), ServerVersion: ver}
-		switch {
-		case g.f.Since != "" && release.Compare(ver, g.f.Since) < 0:
-			gap.Since = g.f.Since
-		case g.f.Until != "" && release.Compare(ver, g.f.Until) >= 0:
-			gap.Until = g.f.Until
-		default:
-			continue
-		}
-		message := g.f.VersionMessage
-		if message == nil {
-			message = g.f.genericVersionMessage
-		}
-		summary, detail := message(gap)
-		diags.AddAttributeError(g.p, summary, detail)
-	}
-	return diags
-}
-
-// versionKey is the key whose version gates f. A Complement has no key of its
-// own and takes its Since from a key it writes.
-func (f *Field) versionKey() string {
-	if len(f.KeyPath) > 0 {
-		return f.key()
-	}
-	for _, s := range f.Shares {
-		if s.Since == f.Since {
-			return s.key()
-		}
-	}
-	return f.Name
-}
-
-func (f *Field) genericVersionMessage(g VersionGap) (summary, detail string) {
-	if g.Since != "" {
-		return "Unsupported Jellyfin server version",
-			fmt.Sprintf("%s requires Jellyfin %s or later: the server runs Jellyfin %s, which has no %s field, so it would discard the value. Remove %s from the configuration or upgrade the server.", g.Path, g.Since, g.ServerVersion, g.Key, g.Path)
-	}
-	return "Unsupported Jellyfin server version",
-		fmt.Sprintf("The server runs Jellyfin %s. %s Remove %s from the configuration.", g.ServerVersion, f.Reason, g.Path)
-}
-
-func collectGated(n *node, obj basetypes.ObjectValue, at path.Path, out *[]gatedValue) {
-	if !known(obj) {
-		return
-	}
-	attrs := obj.Attributes()
-	for _, name := range slices.Sorted(maps.Keys(n.children)) {
-		child, v, p := n.children[name], attrs[name], at.AtName(name)
-		if !known(v) {
-			continue
-		}
-		if child.field == nil {
-			if o, ok := v.(basetypes.ObjectValue); ok {
-				collectGated(child, o, p, out)
-			}
-			continue
-		}
-		f := child.field.f
-		if f.Since != "" || f.Until != "" {
-			*out = append(*out, gatedValue{p: p, f: f})
-			continue
-		}
-		if f.Elem == nil {
-			continue
-		}
-		switch x := v.(type) {
-		case basetypes.ObjectValue:
-			collectGated(f.Elem.nodes, x, p, out)
-		case basetypes.ListValue:
-			for i, e := range x.Elements() {
-				if o, ok := e.(basetypes.ObjectValue); ok {
-					collectGated(f.Elem.nodes, o, p.AtListIndex(i), out)
-				}
-			}
-		}
-	}
 }

@@ -136,8 +136,8 @@ func (p *JellyfinProvider) Configure(ctx context.Context, req provider.Configure
 	}
 
 	if info != nil {
-		if detail, ok := versionNewerWarning("Jellyfin server", info.Version, supportedJellyfinVersion()); ok {
-			resp.Diagnostics.AddWarning("Jellyfin version newer than supported", detail)
+		if summary, detail, ok := jellyfinVersionWarning(info.Version, supportedJellyfinVersion()); ok {
+			resp.Diagnostics.AddWarning(summary, detail)
 		}
 	}
 

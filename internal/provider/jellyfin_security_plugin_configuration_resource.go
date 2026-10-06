@@ -139,6 +139,11 @@ type JellyfinSecurityPluginConfigurationResourceModel struct {
 var securityPluginWire = sync.OnceValues(func() (*wire.Binding, error) {
 	opts := []wire.Option{
 		wire.Identity("id", "plugin_id"),
+		wire.Key("hide_builtin_forgot_password", "HideBuiltInForgotPassword"),
+		wire.Key("hide_builtin_passkey_button", "HideBuiltInPasskeyButton"),
+		wire.Key("hide_builtin_two_factor_button", "HideBuiltInTwoFactorButton"),
+		wire.Key("webauthn_origins", "WebAuthnOrigins"),
+		wire.Key("webauthn_rp_id", "WebAuthnRpId"),
 		wire.CarryServed("oidc_providers", "CreatedAt", "id"),
 		wire.WithCodec("enrollment_deadline", sameInstantCodec{}),
 		wire.ReadMissingAs("enrollment_deadline", types.StringValue("")),
@@ -154,7 +159,7 @@ var securityPluginWire = sync.OnceValues(func() (*wire.Binding, error) {
 	for _, name := range omittedWhenFalse {
 		opts = append(opts, wire.ReadMissingAs(name, types.BoolValue(false)))
 	}
-	return wire.Bind(schemaOf(&JellyfinSecurityPluginConfigurationResource{}), wire.SecurityPluginRoot, opts...)
+	return wire.Bind(schemaOf(&JellyfinSecurityPluginConfigurationResource{}), "JellyfinSecurity", opts...)
 })
 
 // oidcDelimited maps each list attribute of an OIDC provider that the plugin

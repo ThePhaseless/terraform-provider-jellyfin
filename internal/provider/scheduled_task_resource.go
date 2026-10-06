@@ -330,14 +330,11 @@ func (r *ScheduledTaskResource) Update(ctx context.Context, req resource.UpdateR
 	r.writeTriggers(ctx, &data, "update", &resp.Diagnostics, &resp.State)
 }
 
-// ModifyPlan gates each configured field on the Jellyfin version it needs, so
-// a field a later pin adds is checked without a change here, and checks a
-// configured key against the server's tasks.
+// ModifyPlan checks a configured key against the server's tasks.
 func (r *ScheduledTaskResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	if req.Plan.Raw.IsNull() {
 		return
 	}
-	checkServerHasFields(ctx, r.client, scheduledTaskWire, req.Config, &resp.Diagnostics)
 	resp.Diagnostics.Append(r.planTaskForKey(ctx, req, resp)...)
 }
 

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- Support for Jellyfin releases other than the latest. Each provider release now supports one Jellyfin release, named in its release title (for example `v0.5.0 (Jellyfin 12.2)`), and its release notes list the supported plugin builds. The provider no longer rejects settings by server version at plan time: `subtitle_extraction_timeout_minutes`, `hls_audio_seek_strategy`, `similar_item_providers` and `similar_item_provider_order` are plain attributes, and `library_options.path_infos[].network_path`, which current Jellyfin no longer has, is rejected like the other unsupported library options.
+- The committed Jellyfin OpenAPI, floor and JellyfinSecurity schema goldens and the bindings golden. Keys are now the attribute name in PascalCase, with explicit overrides for acronyms such as `EnableIPv6`, and CI checks every key against the OpenAPI document and plugin configuration that the tested server serves. Payloads sent to Jellyfin are unchanged.
+
+### Changed
+
+- The provider warns when the Jellyfin server runs an older release than the supported one, as it already did for a newer one. A patch release of the supported version, such as 12.2.1 for 12.2, does not warn.
+
 ### Added
 
 - `jellyfin_library`: `library_options.enable_trickplay_image_extraction`, `extract_trickplay_images_during_library_scan` and `save_trickplay_with_media`, Jellyfin's trickplay settings for the library, and `metadata_savers`, the enabled metadata savers such as `Nfo`. An empty `metadata_savers` enables none ([#140](https://github.com/ThePhaseless/terraform-provider-jellyfin/issues/140)).

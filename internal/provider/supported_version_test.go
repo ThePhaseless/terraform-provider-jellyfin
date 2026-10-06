@@ -55,3 +55,27 @@ func TestVersionNewerWarning(t *testing.T) {
 		})
 	}
 }
+
+func TestUnitJellyfinVersionWarning(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		installed, supported, summary string
+	}{
+		{"12.2.0", "12.2", ""},
+		{"12.2.3", "12.2", ""},
+		{"12.3.0", "12.2", "Jellyfin version newer than supported"},
+		{"13.0.0", "12.2", "Jellyfin version newer than supported"},
+		{"12.1.4", "12.2", "Jellyfin version older than supported"},
+		{"10.11.11", "12.2", "Jellyfin version older than supported"},
+		{"unknown", "12.2", ""},
+	} {
+		summary, detail, ok := jellyfinVersionWarning(tt.installed, tt.supported)
+		if summary != tt.summary || ok != (tt.summary != "") {
+			t.Errorf("jellyfinVersionWarning(%q, %q) = %q, %t; want %q", tt.installed, tt.supported, summary, ok, tt.summary)
+		}
+		if ok && (!strings.Contains(detail, tt.installed) || !strings.Contains(detail, tt.supported)) {
+			t.Errorf("jellyfinVersionWarning(%q, %q) detail names neither version: %s", tt.installed, tt.supported, detail)
+		}
+	}
+}

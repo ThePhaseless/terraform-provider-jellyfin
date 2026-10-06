@@ -6,7 +6,6 @@ package wire
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"maps"
 	"strconv"
 	"strings"
@@ -14,8 +13,6 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflogtest"
@@ -162,7 +159,6 @@ func TestUnitFlattenReadsEachAttribute(t *testing.T) {
 		"fresh":              `"f"`,
 		"stamp":              `"ABC"`,
 		"gone":               `<null>`,
-		"legacy":             `"//old"`,
 		"hoisted":            `false`,
 		"hosts[0].created":   `"c0"`,
 		"hosts[1].kind":      `"k1"`,
@@ -196,7 +192,7 @@ func TestUnitFlattenReadsAKeySpelledOtherwise(t *testing.T) {
 		t.Fatal(d)
 	}
 	checkAt(t, got, map[string]string{"name": `"lower"`, "ratio": "2.500000", "tags": `["exact"]`, "sizes": "<null>"})
-	if !strings.Contains(logs.String(), `"served":"name"`) || !strings.Contains(logs.String(), "Reading a Jellyfin key spelled otherwise than the golden") {
+	if !strings.Contains(logs.String(), `"served":"name"`) || !strings.Contains(logs.String(), "Reading a Jellyfin key spelled otherwise than the binding") {
 		t.Errorf("the fallback read is not logged:\n%s", logs.String())
 	}
 }
@@ -410,141 +406,12 @@ func TestUnitDroppedNamesEachAttributeReadBackAsNull(t *testing.T) {
 			t.Fatalf("%v has no path", e)
 		}
 		paths = append(paths, pe.Path().String())
-		if pe.Path().String() == "fresh" && !strings.Contains(e.Detail(), "needs Jellyfin 2.0 or later") {
-			t.Errorf("fresh does not name the version it needs: %s", e.Detail())
+		if pe.Path().String() == "fresh" && !strings.Contains(e.Detail(), "the Jellyfin version this provider supports") {
+			t.Errorf("fresh does not point at the supported version: %s", e.Detail())
 		}
 	}
 	if got, want := strings.Join(paths, " "), "fresh name sub.flag types[0].images[0].limit"; got != want {
 		t.Errorf("Dropped reports %s, want %s", got, want)
-	}
-}
-
-func configOf(t *testing.T, attrs map[string]schema.Attribute, v attr.Value) tfsdk.Config {
-	t.Helper()
-	raw, err := v.ToTerraformValue(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return tfsdk.Config{Schema: schema.Schema{Attributes: attrs}, Raw: raw}
-}
-
-func diagPaths(diags diag.Diagnostics) string {
-	var paths []string
-	for _, e := range diags {
-		if pe, ok := e.(diag.DiagnosticWithPath); ok {
-			paths = append(paths, pe.Path().String())
-		}
-	}
-	return strings.Join(paths, " ")
-}
-
-func versionErrorLines(diags diag.Diagnostics) []string {
-	var out []string
-	for _, e := range diags {
-		if pe, ok := e.(diag.DiagnosticWithPath); ok {
-			out = append(out, pe.Path().String()+" | "+e.Summary()+" | "+e.Detail())
-		}
-	}
-	return out
-}
-
-func TestUnitVersionErrors(t *testing.T) {
-	ctx := t.Context()
-	b := testBinding(t)
-	full, _ := b.Flatten(ctx, doc(t, testServed), types.ObjectNull(b.AttrTypes))
-	config := func(v attr.Value) tfsdk.Config { return configOf(t, testAttrs(), v) }
-	unset := with(t, with(t, full, "fresh", types.StringNull()), "legacy", types.StringNull())
-
-	for _, c := range []struct {
-		name    string
-		cfg     attr.Value
-		version string
-		want    string
-		calls   int
-	}{
-		{"both on an old server", full, "1.9.3", "fresh", 1},
-		{"both on a new server", full, "2.0.0", "legacy", 1},
-		{"a version without digits", full, "unstable", "", 1},
-		{"neither", unset, "1.0", "", 0},
-		{"an unknown value", with(t, unset, "fresh", types.StringUnknown()), "1.0", "", 0},
-	} {
-		calls := 0
-		diags := b.VersionErrors(ctx, config(c.cfg), func() (string, error) {
-			calls++
-			return c.version, nil
-		})
-		if got := diagPaths(diags); got != c.want || calls != c.calls {
-			t.Errorf("%s: errors at %q after %d version reads, want %q after %d", c.name, got, calls, c.want, c.calls)
-		}
-	}
-	diags := b.VersionErrors(ctx, config(full), func() (string, error) { return "", fmt.Errorf("offline") })
-	if !diags.HasError() || !strings.Contains(diags[0].Summary(), "Jellyfin version") {
-		t.Errorf("a failed version read is not reported: %v", diags)
-	}
-
-	for version, want := range map[string]string{
-		"1.9.3": "fresh | Unsupported Jellyfin server version | fresh requires Jellyfin 2.0 or later: the server runs Jellyfin 1.9.3, which has no Fresh field, so it would discard the value. Remove fresh from the configuration or upgrade the server.",
-		"2.0.0": "legacy | Unsupported Jellyfin server version | The server runs Jellyfin 2.0.0. Jellyfin 2.0 removed it. Remove legacy from the configuration.",
-	} {
-		got := versionErrorLines(b.VersionErrors(ctx, config(full), func() (string, error) { return version, nil }))
-		if len(got) != 1 || got[0] != want {
-			t.Errorf("on %s: %q\nwant %q", version, got, want)
-		}
-	}
-}
-
-func TestUnitVersionErrorsUseTheDeclaredMessage(t *testing.T) {
-	ctx := t.Context()
-	message := func(g VersionGap) (string, string) {
-		return "No " + g.Key, fmt.Sprintf("%s since=%s until=%s server=%s", g.Path, g.Since, g.Until, g.ServerVersion)
-	}
-	b, err := testCatalog().bind(schema.Schema{Attributes: testAttrs()}, "Doc",
-		append(testOptions(), VersionMessage("fresh", message), VersionMessage("legacy", message))...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	full, _ := b.Flatten(ctx, doc(t, testServed), types.ObjectNull(b.AttrTypes))
-	for version, want := range map[string]string{
-		"1.9.3": "fresh | No Fresh | fresh since=2.0 until= server=1.9.3",
-		"2.0.0": "legacy | No OldPath | legacy since= until=2.0 server=2.0.0",
-	} {
-		got := versionErrorLines(b.VersionErrors(ctx, configOf(t, testAttrs(), full), func() (string, error) { return version, nil }))
-		if len(got) != 1 || got[0] != want {
-			t.Errorf("on %s: %q\nwant %q", version, got, want)
-		}
-	}
-}
-
-func TestUnitVersionErrorsGateANewNestedAttributeAsAWhole(t *testing.T) {
-	ctx := t.Context()
-	c := &catalog{
-		pinned:      parseAPIGolden("schema Doc.Name: string\nschema Doc.News: []#New\nschema New.Title: string\n"),
-		floor:       parseAPIGolden("schema Doc.Name: string\n"),
-		unversioned: map[string]bool{}, floorVer: "1.9", sinceVer: "2.0",
-	}
-	attrs := map[string]schema.Attribute{
-		"name": optString(),
-		"news": schema.ListNestedAttribute{Optional: true, Computed: true, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
-			"title": optString(),
-		}}},
-	}
-	b, err := c.bind(schema.Schema{Attributes: attrs}, "Doc")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := strings.Join(b.Describe(), "\n"), "name -> Doc.Name string\nnews -> Doc.News []#New since=2.0\nnews.title -> New.Title string"; got != want {
-		t.Errorf("Describe:\n%s\nwant:\n%s", got, want)
-	}
-	cfg, d := b.Flatten(ctx, doc(t, `{"Name": "n", "News": [{"Title": "t"}]}`), types.ObjectNull(b.AttrTypes))
-	if d.HasError() {
-		t.Fatal(d)
-	}
-	if got := diagPaths(b.VersionErrors(ctx, configOf(t, attrs, cfg), func() (string, error) { return "1.9", nil })); got != "news" {
-		t.Errorf("errors at %q, want news only", got)
-	}
-	message := VersionMessage("news.title", func(VersionGap) (string, string) { return "", "" })
-	if _, err := c.bind(schema.Schema{Attributes: attrs}, "Doc", message); err == nil || !strings.Contains(err.Error(), "news.title: VersionMessage names an attribute VersionErrors never reports") {
-		t.Errorf("a version message inside the gated list binds: %v", err)
 	}
 }
 
