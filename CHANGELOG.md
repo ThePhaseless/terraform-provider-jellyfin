@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-06
+
 ### Removed
 
 - Support for Jellyfin releases other than the latest. Each provider release now supports one Jellyfin release, named in its release title (for example `v0.5.0 (Jellyfin 12.2)`), and its release notes list the supported plugin builds. The provider no longer rejects settings by server version at plan time: `subtitle_extraction_timeout_minutes`, `hls_audio_seek_strategy`, `similar_item_providers` and `similar_item_provider_order` are plain attributes, and `library_options.path_infos[].network_path`, which current Jellyfin no longer has, is rejected like the other unsupported library options.
@@ -14,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Supports only Jellyfin 12.2, with JellyfinSecurity plugin 2.6.3.1 (versions tested in CI). Use an earlier provider release for an earlier Jellyfin.
 - The provider warns when the Jellyfin server runs an older release than the supported one, as it already did for a newer one. A patch release of the supported version, such as 12.2.1 for 12.2, does not warn.
 
 ### Added
