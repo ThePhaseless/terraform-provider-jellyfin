@@ -19,7 +19,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Changelog and patch tag
+      # Each release supports one Jellyfin release, so a new tested version
+      # is a minor release.
+      - name: Changelog and minor tag
         id: bump
         run: |
           set -euo pipefail
@@ -28,21 +30,10 @@ jobs:
           test -n "$JV" && test -n "$SV"
           LATEST="$(git tag -l 'v*' --sort=-version:refname | head -1)"
           BASE="${LATEST#v}"
-          IFS=. read -r MA MI PA <<< "$BASE"
-          NEXT="v${MA}.${MI}.$((PA + 1))"
-          DATE="$(date +%F)"
-          awk -v ver="${NEXT#v}" -v date="$DATE" -v jv="$JV" -v sv="$SV" '
-            /^## \[Unreleased\]$/ {
-              print; print "";
-              print "## [" ver "] - " date;
-              print "";
-              print "### Changed";
-              print "";
-              print "- Supports only Jellyfin " jv ", with JellyfinSecurity plugin " sv " (versions tested in CI). Use an earlier provider release for an earlier Jellyfin.";
-              next
-            }
-            { print }
-          ' CHANGELOG.md > CHANGELOG.md.new && mv CHANGELOG.md.new CHANGELOG.md
+          IFS=. read -r MA MI _ <<< "$BASE"
+          NEXT="v${MA}.$((MI + 1)).0"
+          scripts/release_changelog.sh "${NEXT#v}" "$(date +%F)" \
+            "- Supports only Jellyfin ${JV}, with JellyfinSecurity plugin ${SV} (versions tested in CI). Use an earlier provider release for an earlier Jellyfin."
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add CHANGELOG.md

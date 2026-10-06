@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: MPL-2.0
+
 # Prints, as KEY=value lines for $GITHUB_ENV, what a release says about the
 # versions it supports: JELLYFIN_VERSION, the one Jellyfin release it
 # supports, and RELEASE_NOTES, a Markdown header listing that release and each
