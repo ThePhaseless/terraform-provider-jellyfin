@@ -1,25 +1,18 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
-  // Renovate merges the PR itself: the repo has allow_auto_merge off and no
-  // branch protection, so GitHub's auto-merge button does not exist.
-  "automergeType": "pr",
+  // The repo also allows merge commits, which "auto" could pick.
   "automergeStrategy": "squash",
-  "platformAutomerge": false,
-  "ignoreTests": false,
   "prConcurrentLimit": 20,
-  // tools/go.mod pulls in tools/copywrite-patched through a local replace, so
-  // a bump inside the fork leaves tools/go.mod stale and `make generate`
-  // refuses to run. gomodTidyAll also tidies every module that reaches the
-  // updated one through a local replace, in the same branch.
+  // tools/go.mod reaches tools/copywrite-patched through a local replace. A
+  // bump inside the fork must also tidy tools/, or `make generate` refuses to
+  // run.
   "postUpdateOptions": ["gomodTidyAll"],
-  // Raise security fixes from the OSV database, for indirect modules too, as
-  // Dependabot's security updates do.
+  // Security fixes for indirect modules too, as Dependabot raises them.
   "osvVulnerabilityAlerts": true,
-  // github-releases would yield the three-segment tag; Jellyfin resolves an
-  // install against manifest.json, which carries four-segment assembly
-  // versions. Read the manifest directly so the stored value is installable.
   "customDatasources": {
+    // Jellyfin installs a plugin by the four-segment version in its manifest,
+    // which the three-segment release tags do not carry.
     "jellyfin-security-manifest": {
       "defaultRegistryUrlTemplate": "https://raw.githubusercontent.com/ZL154/JellyfinSecurity/main/manifest.json",
       "format": "json",
@@ -49,20 +42,13 @@
   ],
   "packageRules": [
     {
-      "description": "Stay current on its own; CI is the gate.",
+      // CI is the gate. Majors stay manual.
       "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
       "automerge": true
     },
     {
-      "description": "Majors are breaking by definition.",
-      "matchUpdateTypes": ["major"],
-      "automerge": false
-    },
-    {
-      // Renovate leaves `// indirect` Go modules alone by default, so a fix in
-      // one, such as grpc's, arrived only through Dependabot. One grouped PR
-      // keeps them current, and the minor/patch rule above automerges it.
-      "description": "Keep indirect Go modules current, in one PR.",
+      // Renovate skips `// indirect` Go modules by default. One grouped PR
+      // keeps them current, including fixes such as grpc's.
       "matchManagers": ["gomod"],
       "matchDepTypes": ["indirect"],
       "enabled": true,
@@ -70,47 +56,40 @@
     },
     {
       // A major Go version is a new module path. Nothing imports the new path
-      // of a module that is only indirect, so `go mod tidy` drops it again and
-      // the bump can never build.
-      "description": "No major bumps of indirect Go modules.",
+      // of an indirect module, so `go mod tidy` drops it and the bump never
+      // builds.
       "matchManagers": ["gomod"],
       "matchDepTypes": ["indirect"],
       "matchUpdateTypes": ["major"],
       "enabled": false
     },
     {
-      // A fork of hashicorp/copywrite, patched and pinned. Following its
-      // dependencies past what upstream pins only widens the diff it carries.
-      "description": "No major bumps inside the vendored copywrite fork.",
+      // A patched fork of hashicorp/copywrite. Following its dependencies past
+      // upstream's majors only widens the diff it carries.
       "matchFileNames": ["tools/copywrite-patched/**"],
       "matchUpdateTypes": ["major"],
       "enabled": false
     },
     {
-      // gomodTidyAll tidies tools/ when the fork changes, writing tools/go.mod
-      // too. A branch that also updates tools/go.mod itself ends up with one
-      // pass's go.mod and the other's go.sum, and `make generate` fails on the
-      // missing sums. Updates to the fork get branches of their own.
-      "description": "Keep updates to the copywrite fork off branches that touch tools/go.mod.",
+      // gomodTidyAll rewrites tools/go.mod when the fork changes. On a branch
+      // that also updates tools/go.mod, one pass's go.mod lands beside the
+      // other's go.sum and `make generate` fails on the missing sums.
       "matchFileNames": ["tools/copywrite-patched/**"],
       "additionalBranchPrefix": "copywrite-patched-",
       "commitMessageSuffix": "in the copywrite fork"
     },
     {
-      // Safe to automerge because schema-check.yaml fails the PR when the
-      // plugin's public config properties changed across the bump.
+      // Majors automerge too: schema-check.yaml fails the PR when the plugin's
+      // public config properties change. The manifest lists each release twice,
+      // .0 for the Jellyfin 10.11 ABI and .1 for 12.x, which CI runs.
       "matchPackageNames": ["JellyfinSecurity"],
+      "allowedVersions": "/^\\d+\\.\\d+\\.\\d+\\.1$/",
       "commitMessagePrefix": "chore:",
       "commitMessageTopic": "JellyfinSecurity plugin version",
       "automerge": true
     },
     {
-      // .0 builds target the Jellyfin 10.11 ABI; CI and the supported server run 12.x.
-      "matchPackageNames": ["JellyfinSecurity"],
-      "allowedVersions": "/^\\d+\\.\\d+\\.\\d+\\.1$/"
-    },
-    {
-      // Gated by the acceptance suite, which boots this Jellyfin version.
+      // Majors automerge too: the acceptance suite boots this Jellyfin version.
       "matchPackageNames": ["jellyfin/jellyfin"],
       "commitMessagePrefix": "chore:",
       "commitMessageTopic": "Jellyfin server version",
