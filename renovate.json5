@@ -69,12 +69,32 @@
       "groupName": "indirect Go modules"
     },
     {
+      // A major Go version is a new module path. Nothing imports the new path
+      // of a module that is only indirect, so `go mod tidy` drops it again and
+      // the bump can never build.
+      "description": "No major bumps of indirect Go modules.",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["indirect"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
       // A fork of hashicorp/copywrite, patched and pinned. Following its
       // dependencies past what upstream pins only widens the diff it carries.
       "description": "No major bumps inside the vendored copywrite fork.",
       "matchFileNames": ["tools/copywrite-patched/**"],
       "matchUpdateTypes": ["major"],
       "enabled": false
+    },
+    {
+      // gomodTidyAll tidies tools/ when the fork changes, writing tools/go.mod
+      // too. A branch that also updates tools/go.mod itself ends up with one
+      // pass's go.mod and the other's go.sum, and `make generate` fails on the
+      // missing sums. Updates to the fork get branches of their own.
+      "description": "Keep updates to the copywrite fork off branches that touch tools/go.mod.",
+      "matchFileNames": ["tools/copywrite-patched/**"],
+      "additionalBranchPrefix": "copywrite-patched-",
+      "commitMessageSuffix": "in the copywrite fork"
     },
     {
       // Safe to automerge because schema-check.yaml fails the PR when the
