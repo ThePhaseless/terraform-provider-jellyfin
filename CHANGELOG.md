@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Supports JellyfinSecurity plugin 2.6.4.1.
+
+### Added
+
+- `jellyfin_security_plugin_configuration`: `allow_app_passwords_when_password_login_disabled`, `geo_protection_handled_externally`, `hide_two_factor_setup_for_sso_users`, `suspicious_login_enabled`, and `telegram_bot_token` with `telegram_chat_id` for Telegram alerts (JellyfinSecurity 2.6.4).
+
 ## [0.5.0] - 2026-10-06
 
 ### Removed

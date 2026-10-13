@@ -75,6 +75,7 @@ variable "oidc_client_secret" {
 ### Optional
 
 - `allow_admin_password_login` (Boolean) Allow password login for administrators.
+- `allow_app_passwords_when_password_login_disabled` (Boolean) While disable_password_login is on, still let users sign in with one of their app passwords, never the account password, for native apps that ask for a password. An app password keeps working after the identity provider stops letting its user in, until it is revoked. Requires plugin 2.6.4 or later.
 - `allow_indefinite_trust` (Boolean) Allow indefinite trust for devices.
 - `allow_password_login_on_lan` (Boolean) Allow password login on LAN.
 - `allow_private_notification_targets` (Boolean) Allow private network notification targets.
@@ -96,12 +97,14 @@ variable "oidc_client_secret" {
 - `geo_ip_asn_db_path` (String) Path to GeoIP ASN database.
 - `geo_ip_city_db_path` (String) Path to GeoIP city database.
 - `geo_ip_country_db_path` (String) Path to GeoIP country database.
+- `geo_protection_handled_externally` (Boolean) Geographic checks are done outside the plugin (a WAF, CrowdSec, a firewall): the security score leaves impossible-travel detection out while it is off or has no city database, instead of counting it as failed. Turns no detector on or off. Requires plugin 2.6.4 or later.
 - `gotify_app_token` (String, Sensitive) Gotify app token.
 - `gotify_url` (String) Gotify notification URL.
 - `hibp_enabled` (Boolean) Enable Have I Been Pwned password check.
 - `hide_builtin_forgot_password` (Boolean) Hide the built-in forgot password link.
 - `hide_builtin_passkey_button` (Boolean) Hide the built-in passkey login button.
 - `hide_builtin_two_factor_button` (Boolean) Hide the built-in 2FA login button.
+- `hide_two_factor_setup_for_sso_users` (Boolean) Hide the plugin's own two-factor setup on the account page from non-administrators with a linked identity provider. A factor the user already has stays visible so it can be removed. A UI gate only. Requires plugin 2.6.4 or later.
 - `impossible_travel_enabled` (Boolean) Enable impossible travel detection.
 - `impossible_travel_max_kmh` (Number) Impossible travel max speed in km/h.
 - `ip_ban_duration_hours` (Number) IP ban duration in hours.
@@ -145,6 +148,9 @@ variable "oidc_client_secret" {
 - `smtp_username` (String) SMTP username.
 - `step_up_level` (String) Step-up level: Off, Destructive, AllConfigChanges, or Everything.
 - `step_up_window_seconds` (Number) Step-up authentication window in seconds.
+- `suspicious_login_enabled` (Boolean) Run the suspicious-login detector when an ASN or country database is configured. Off keeps the database paths and does not stop impossible-travel alerts. The plugin defaults to on. Requires plugin 2.6.4 or later.
+- `telegram_bot_token` (String, Sensitive) Telegram bot token from @BotFather. With telegram_chat_id also set, security alerts go to that chat. Requires plugin 2.6.4 or later.
+- `telegram_chat_id` (String) Telegram chat that receives security alerts: a user or group ID (group and channel IDs are negative) or a public channel's @username. Requires plugin 2.6.4 or later.
 - `totp_issuer_name` (String) TOTP issuer name.
 - `trust_cookie_ttl_days` (Number) Trust cookie TTL in days.
 - `trust_forwarded_for` (Boolean) Trust X-Forwarded-For header.
