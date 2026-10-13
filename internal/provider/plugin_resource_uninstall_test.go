@@ -47,6 +47,58 @@ type fakePluginServer struct {
 	packagesStatus int
 	// installStatus, when set, replaces the 204 an install answers with.
 	installStatus int
+	// installID, when set, is the ID under which a successful install lists
+	// the version it installed, with the status Restart.
+	installID string
+	installs  []string
+
+	// pluginUpdateTriggers are the triggers of the PluginUpdates task that
+	// GET /ScheduledTasks lists, which turn automatic plugin updates on.
+	pluginUpdateTriggers []json.RawMessage
+	// tasksStatus, when set, is what GET /ScheduledTasks answers instead.
+	tasksStatus  int
+	taskRequests int
+	// tasksHook runs while GET /ScheduledTasks is answered.
+	tasksHook func()
+}
+
+// updatesOn lists PluginUpdates with Jellyfin's default triggers.
+var updatesOn = []json.RawMessage{
+	json.RawMessage(`{"Type":"StartupTrigger"}`),
+	json.RawMessage(`{"Type":"IntervalTrigger","IntervalTicks":864000000000}`),
+}
+
+func (f *fakePluginServer) setTasksHook(hook func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tasksHook = hook
+}
+
+func (f *fakePluginServer) scheduledTaskRequests() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.taskRequests
+}
+
+func (f *fakePluginServer) serveScheduledTasks(w http.ResponseWriter) {
+	f.mu.Lock()
+	f.taskRequests++
+	hook := f.tasksHook
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.tasksStatus != 0 {
+		w.WriteHeader(f.tasksStatus)
+		return
+	}
+	tasks := []client.ScheduledTask{{Name: "Update Plugins", ID: updatePluginsID, Key: PluginUpdatesTaskKey, Triggers: f.pluginUpdateTriggers}}
+	if err := json.NewEncoder(w).Encode(tasks); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (f *fakePluginServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +109,8 @@ func (f *fakePluginServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewEncoder(w).Encode(f.plugins); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
+	case r.Method == http.MethodGet && r.URL.Path == "/ScheduledTasks":
+		f.serveScheduledTasks(w)
 	case r.Method == http.MethodGet && r.URL.Path == "/Packages":
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -88,6 +142,9 @@ func (f *fakePluginServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if f.inFlight > 1 {
 			status = http.StatusBadRequest
 		}
+		if r.Method == http.MethodPost && status == http.StatusNoContent {
+			f.install(strings.TrimPrefix(r.URL.Path, "/Packages/Installed/"), r.URL.Query().Get("version"))
+		}
 		f.inFlight--
 		w.WriteHeader(status)
 	default:
@@ -114,6 +171,21 @@ func (f *fakePluginServer) uninstall(idAndVersion string) int {
 		return http.StatusNoContent
 	}
 	return http.StatusNotFound
+}
+
+func (f *fakePluginServer) install(name, version string) {
+	f.installs = append(f.installs, name+" "+version)
+	if f.installID != "" {
+		f.plugins = append(f.plugins, client.InstalledPlugin{ID: f.installID, Name: name, Version: version, Status: "Restart", CanUninstall: true})
+	}
+}
+
+// installed returns the installs Jellyfin answered with success, as "name
+// version".
+func (f *fakePluginServer) installed() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.installs...)
 }
 
 func (f *fakePluginServer) listed() []client.InstalledPlugin {
@@ -353,6 +425,7 @@ func replacePluginVersionFirst(t *testing.T, creator, destroyer *PluginResource)
 	ctx := t.Context()
 
 	createResp := &resource.CreateResponse{State: pluginResourceNullState(ctx)}
+	initPrivate(&createResp.Private)
 	creator.Create(ctx, resource.CreateRequest{Plan: pluginResourcePlan(t, plannedBookshelf("13.0.0.0"))}, createResp)
 	if createResp.Diagnostics.HasError() {
 		t.Fatalf("Create: %v", createResp.Diagnostics.Errors())
@@ -419,6 +492,7 @@ func TestUnitPluginCreateReportsAVersionNoRepositoryOffers(t *testing.T) {
 	defer cancel()
 
 	resp := &resource.CreateResponse{State: pluginResourceNullState(ctx)}
+	initPrivate(&resp.Private)
 	r.Create(ctx, resource.CreateRequest{Plan: pluginResourcePlan(t, plannedBookshelf("13.0.0"))}, resp)
 	if !resp.Diagnostics.HasError() || !strings.Contains(resp.Diagnostics.Errors()[0].Detail(), "No enabled plugin repository offers Bookshelf 13.0.0") {
 		t.Errorf("Create diagnostics = %v, want the version reported as not offered", resp.Diagnostics)

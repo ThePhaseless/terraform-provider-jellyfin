@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -31,9 +32,27 @@ const (
 	pluginPollInterval   = 2 * time.Second
 )
 
-// pluginStatusDeleted is the status Jellyfin lists for a version it could not
-// remove from disk and deletes at the next restart instead.
-const pluginStatusDeleted = "Deleted"
+// Plugin statuses Jellyfin lists in GET /Plugins.
+const (
+	// pluginStatusDeleted is the status of a version Jellyfin could not remove
+	// from disk and deletes at the next restart instead.
+	pluginStatusDeleted = "Deleted"
+	// pluginStatusDisabled is the status of a version disabled on the
+	// dashboard's Plugins page, which Jellyfin does not load.
+	pluginStatusDisabled = "Disabled"
+	// pluginStatusNotSupported is the status of a version built for another
+	// Jellyfin version than the server's, which Jellyfin does not load.
+	pluginStatusNotSupported = "NotSupported"
+	// pluginStatusMalfunctioned is the status of a version that failed to
+	// load.
+	pluginStatusMalfunctioned = "Malfunctioned"
+)
+
+// usablePluginStatus reports whether a version with status s is one Jellyfin
+// keeps and can load.
+func usablePluginStatus(s string) bool {
+	return s != pluginStatusDeleted && s != pluginStatusNotSupported && s != pluginStatusMalfunctioned
+}
 
 const (
 	pluginVersionSupported = "supported"
@@ -62,6 +81,7 @@ type PluginResourceModel struct {
 	Name             types.String `tfsdk:"name"`
 	Version          types.String `tfsdk:"version"`
 	InstalledVersion types.String `tfsdk:"installed_version"`
+	Status           types.String `tfsdk:"status"`
 	RepositoryURL    types.String `tfsdk:"repository_url"`
 }
 
@@ -72,16 +92,36 @@ func (r *PluginResource) Metadata(_ context.Context, req resource.MetadataReques
 func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Installs a plugin on the Jellyfin server. The server may require a restart after installation.\n\n" +
-			"Jellyfin's Update Plugins scheduled task (key PluginUpdates) runs at startup and every 24 hours by default and upgrades every plugin to the newest compatible version its repositories offer. " +
-			"No API exempts a single plugin: the task skips only a plugin whose meta.json, in its folder under the server's plugins directory, sets \"autoUpdate\": false. Jellyfin reads that file at startup and writes its own copy back whenever the plugin's status changes, so edit it while Jellyfin is stopped, and every install of the plugin, including the reinstall a replacement makes, writes a new one set to true. " +
-			"A pinned version therefore drifts once the task runs: the newer version loads at the next restart, and because changing version replaces the resource, the next apply reinstalls the pinned version, which the task upgrades again at the following startup. " +
-			"To keep a pin, set that flag on the server, or remove the task's triggers with jellyfin_scheduled_task, which stops automatic updates for every plugin. To follow updates instead, leave version unset, set it to latest, or add lifecycle { ignore_changes = [version] }.\n\n" +
+			"Jellyfin's Update Plugins scheduled task (key PluginUpdates) upgrades every plugin to the newest compatible version its repositories offer, at startup and every 24 hours by default. " +
+			"This resource counts automatic plugin updates as on while that task has at least one trigger in GET /ScheduledTasks, and as off while it has none or the server lists no such task. " +
+			"The setting is global: the autoUpdate flag in a plugin's meta.json is not read. " +
+			"While updates are on, version is a minimum that any installed version at least as new satisfies, so a plugin the task upgraded stays as it is; while they are off, version is exact, and the next apply reinstalls the configured version in place of any other. " +
+			"To hold every plugin at its configured version, remove the task's triggers with jellyfin_scheduled_task; with the depends_on below, the apply that removes them also reinstalls each plugin the task had moved past its version.\n\n" +
+			"When a jellyfin_scheduled_task in the configuration manages PluginUpdates, give every jellyfin_plugin depends_on = [jellyfin_scheduled_task.<name>], or give the module that holds the plugins a depends_on on it. " +
+			"Terraform then plans and applies the schedule before the plugins, so each plugin is planned against the schedule the apply sets, and a jellyfin_restart that depends on the plugins restarts the server only after the schedule is written. " +
+			"Without it, Terraform may refresh a plugin before it plans the task; if the task changes whether updates are on and that changes the plugin's plan, the plan fails with an error asking for depends_on, terraform destroy included, and even a plan that succeeds may apply the schedule after the plugins. " +
+			"A plan that replaces the plugin for a new name or repository_url is the same under either schedule and does not fail, but the provider cannot see a replacement that -replace asks for, so such a plan can still fail this way; depends_on avoids it. A tainted plugin is planned as a new one, so it does not fail. " +
+			"If the task resource depends on a plugin, as a for_each over tasks that plugins add can, manage PluginUpdates in a jellyfin_scheduled_task of its own. " +
+			"With depends_on, triggers unknown until apply count as on; without it, a plugin planned before the task uses the schedule the server has. " +
+			"Either way, a plugin whose plan depends on the schedule gets a warning naming the schedule it was planned with, and if the apply sets the other one, the next plan corrects it. " +
+			"A plan that does not refresh the plugin, such as with -refresh=false, uses whether updates were on when Terraform last refreshed or created it, or off while its state, written by an earlier provider version, has not been refreshed since, with a warning when the configuration changes that. " +
+			"Only resources that use the same provider configuration see each other's plans: across provider configurations, even with depends_on, a plugin is planned against the schedule the server has, without a warning or an error, and the next plan corrects it, so keep the task and the plugins on one provider alias.\n\n" +
 			"Replacing the resource also replaces the resources that take its id, such as jellyfin_plugin_configuration, because the id is unknown until the plugin is installed again. They then write their configuration again, which Jellyfin accepts only once a restart has loaded the reinstalled plugin, so put a jellyfin_restart between them, as the jellyfin_security_plugin_configuration example does.",
 		MarkdownDescription: "Installs a plugin on the Jellyfin server. The server may require a restart after installation.\n\n" +
-			"Jellyfin's *Update Plugins* scheduled task (key `PluginUpdates`) runs at startup and every 24 hours by default and upgrades every plugin to the newest compatible version its repositories offer. " +
-			"No API exempts a single plugin: the task skips only a plugin whose `meta.json`, in its folder under the server's `plugins` directory, sets `\"autoUpdate\": false`. Jellyfin reads that file at startup and writes its own copy back whenever the plugin's status changes, so edit it while Jellyfin is stopped, and every install of the plugin, including the reinstall a replacement makes, writes a new one set to `true`. " +
-			"A pinned `version` therefore drifts once the task runs: the newer version loads at the next restart, and because changing `version` replaces the resource, the next apply reinstalls the pinned version, which the task upgrades again at the following startup. " +
-			"To keep a pin, set that flag on the server, or remove the task's triggers with `jellyfin_scheduled_task`, which stops automatic updates for every plugin. To follow updates instead, leave `version` unset, set it to `latest`, or add `lifecycle { ignore_changes = [version] }`.\n\n" +
+			"Jellyfin's *Update Plugins* scheduled task (key `PluginUpdates`) upgrades every plugin to the newest compatible version its repositories offer, at startup and every 24 hours by default. " +
+			"This resource counts automatic plugin updates as on while that task has at least one trigger in `GET /ScheduledTasks`, and as off while it has none or the server lists no such task. " +
+			"The setting is global: the `autoUpdate` flag in a plugin's `meta.json` is not read. " +
+			"While updates are on, `version` is a minimum that any installed version at least as new satisfies, so a plugin the task upgraded stays as it is; while they are off, `version` is exact, and the next apply reinstalls the configured version in place of any other. " +
+			"To hold every plugin at its configured version, remove the task's triggers with `jellyfin_scheduled_task`; with the `depends_on` below, the apply that removes them also reinstalls each plugin the task had moved past its `version`.\n\n" +
+			"When a `jellyfin_scheduled_task` in the configuration manages `PluginUpdates`, give every `jellyfin_plugin` `depends_on = [jellyfin_scheduled_task.<name>]`, or give the module that holds the plugins a `depends_on` on it. " +
+			"Terraform then plans and applies the schedule before the plugins, so each plugin is planned against the schedule the apply sets, and a `jellyfin_restart` that depends on the plugins restarts the server only after the schedule is written. " +
+			"Without it, Terraform may refresh a plugin before it plans the task; if the task changes whether updates are on and that changes the plugin's plan, the plan fails with an error asking for `depends_on`, `terraform destroy` included, and even a plan that succeeds may apply the schedule after the plugins. " +
+			"A plan that replaces the plugin for a new `name` or `repository_url` is the same under either schedule and does not fail, but the provider cannot see a replacement that `-replace` asks for, so such a plan can still fail this way; `depends_on` avoids it. A tainted plugin is planned as a new one, so it does not fail. " +
+			"If the task resource depends on a plugin, as a `for_each` over tasks that plugins add can, manage `PluginUpdates` in a `jellyfin_scheduled_task` of its own. " +
+			"With `depends_on`, triggers unknown until apply count as on; without it, a plugin planned before the task uses the schedule the server has. " +
+			"Either way, a plugin whose plan depends on the schedule gets a warning naming the schedule it was planned with, and if the apply sets the other one, the next plan corrects it. " +
+			"A plan that does not refresh the plugin, such as with `-refresh=false`, uses whether updates were on when Terraform last refreshed or created it, or off while its state, written by an earlier provider version, has not been refreshed since, with a warning when the configuration changes that. " +
+			"Only resources that use the same provider configuration see each other's plans: across provider configurations, even with `depends_on`, a plugin is planned against the schedule the server has, without a warning or an error, and the next plan corrects it, so keep the task and the plugins on one provider alias.\n\n" +
 			"Replacing the resource also replaces the resources that take its `id`, such as `jellyfin_plugin_configuration`, because the `id` is unknown until the plugin is installed again. They then write their configuration again, which Jellyfin accepts only once a restart has loaded the reinstalled plugin, so put a `jellyfin_restart` between them, as the `jellyfin_security_plugin_configuration` example does.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -102,8 +142,8 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"version": schema.StringAttribute{
-				Description:         "The plugin version to install, as the repository lists it (e.g. 13.0.0.0), or a keyword: latest installs the newest version the repositories offer, and supported installs the Jellyfin Security release this provider was tested against, in the build the server accepts. A keyword is resolved only when the plugin is installed, or when it replaces another value, and stays in state as written; installed_version holds the result. Omitted, it installs as supported does for Jellyfin Security and as latest does for any other plugin, and then holds the installed version, as it also does once a keyword is removed from the configuration. Changing the value reinstalls the plugin, unless the new value names the installed version, as a keyword set on an imported plugin usually does; then only state changes.",
-				MarkdownDescription: "The plugin version to install, as the repository lists it (e.g. `13.0.0.0`), or a keyword: `latest` installs the newest version the repositories offer, and `supported` installs the Jellyfin Security release this provider was tested against, in the build the server accepts. A keyword is resolved only when the plugin is installed, or when it replaces another value, and stays in state as written; `installed_version` holds the result. Omitted, it installs as `supported` does for Jellyfin Security and as `latest` does for any other plugin, and then holds the installed version, as it also does once a keyword is removed from the configuration. Changing the value reinstalls the plugin, unless the new value names the installed version, as a keyword set on an imported plugin usually does; then only state changes.",
+				Description:         "The plugin version to install, as the repository lists it (e.g. 13.0.0.0), or a keyword: latest installs the newest version the repositories offer, and supported installs the Jellyfin Security release this provider was tested against, in the build the server accepts. A keyword is resolved only when the plugin is installed, or when it replaces another value, and stays in state as written; installed_version holds the result. Omitted, it installs as supported does for Jellyfin Security and as latest does for any other plugin, and then holds the installed version, as it also does once a keyword is removed from the configuration. A configured version is a minimum while Jellyfin's automatic plugin updates are on, meaning its PluginUpdates task (Update Plugins) has at least one trigger, and exact while they are off. A keyword is compared the same way, as the version it resolves to, only when the plugin is installed or when the keyword replaces another value; kept in the configuration, it follows whatever version is installed, under either schedule. As a minimum, any installed version at least as new satisfies it: version keeps the configured value while installed_version follows the updates, creating the resource adopts an installed version newer than it instead of installing an older one, unless Jellyfin lists that version as NotSupported or Malfunctioned, and changing the value reinstalls the plugin only when the installed version is older than the new value. As exact, an installed version other than the configured one reads back into version, so the next apply reinstalls the configured version, and changing the value reinstalls the plugin unless the new value names the installed version, as a keyword set on an imported plugin usually does. A change that needs no reinstall only changes state; a reinstall replaces the resource. A refresh cannot see the configuration, so the provider stores whether it sets version whenever an apply creates or changes the resource, and until then, as after an import or in state an earlier provider version wrote, counts a version in state as set. The first plan after the task upgrades the plugin therefore changes version in place once, only in state, in two cases: where the configuration omits version for a plugin imported without it, created by an earlier provider version, or whose version was removed from the configuration while it named the installed version, version moves to the new installed version; and where a configuration adds a version equal to the one in state, version moves from the installed version back to the configured one.",
+				MarkdownDescription: "The plugin version to install, as the repository lists it (e.g. `13.0.0.0`), or a keyword: `latest` installs the newest version the repositories offer, and `supported` installs the Jellyfin Security release this provider was tested against, in the build the server accepts. A keyword is resolved only when the plugin is installed, or when it replaces another value, and stays in state as written; `installed_version` holds the result. Omitted, it installs as `supported` does for Jellyfin Security and as `latest` does for any other plugin, and then holds the installed version, as it also does once a keyword is removed from the configuration. A configured version is a minimum while Jellyfin's automatic plugin updates are on, meaning its `PluginUpdates` task (*Update Plugins*) has at least one trigger, and exact while they are off. A keyword is compared the same way, as the version it resolves to, only when the plugin is installed or when the keyword replaces another value; kept in the configuration, it follows whatever version is installed, under either schedule. As a minimum, any installed version at least as new satisfies it: `version` keeps the configured value while `installed_version` follows the updates, creating the resource adopts an installed version newer than it instead of installing an older one, unless Jellyfin lists that version as `NotSupported` or `Malfunctioned`, and changing the value reinstalls the plugin only when the installed version is older than the new value. As exact, an installed version other than the configured one reads back into `version`, so the next apply reinstalls the configured version, and changing the value reinstalls the plugin unless the new value names the installed version, as a keyword set on an imported plugin usually does. A change that needs no reinstall only changes state; a reinstall replaces the resource. A refresh cannot see the configuration, so the provider stores whether it sets `version` whenever an apply creates or changes the resource, and until then, as after an import or in state an earlier provider version wrote, counts a version in state as set. The first plan after the task upgrades the plugin therefore changes `version` in place once, only in state, in two cases: where the configuration omits `version` for a plugin imported without it, created by an earlier provider version, or whose `version` was removed from the configuration while it named the installed version, `version` moves to the new installed version; and where a configuration adds a `version` equal to the one in state, `version` moves from the installed version back to the configured one.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -112,8 +152,16 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"installed_version": schema.StringAttribute{
-				Description:         "The version Jellyfin lists for the plugin. While an update waits for a restart Jellyfin lists both versions, and this keeps the one it held before.",
-				MarkdownDescription: "The version Jellyfin lists for the plugin. While an update waits for a restart Jellyfin lists both versions, and this keeps the one it held before.",
+				Description:         "The version Jellyfin lists for the plugin, which can be newer than version while Jellyfin's automatic plugin updates are on. While an update waits for a restart Jellyfin lists both versions, and this keeps the one it held before, whose status then reads Superceded or Superseded.",
+				MarkdownDescription: "The version Jellyfin lists for the plugin, which can be newer than `version` while Jellyfin's automatic plugin updates are on. While an update waits for a restart Jellyfin lists both versions, and this keeps the one it held before, whose `status` then reads `Superceded` or `Superseded`.",
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"status": schema.StringAttribute{
+				Description:         "The status Jellyfin lists for installed_version: Active once it is loaded; Restart while it waits for a restart to load, as a new install or update does; Superceded or Superseded, depending on the Jellyfin version, while a newer version installed next to it waits for a restart to replace it; Disabled while it is disabled on the Plugins page of the Jellyfin dashboard; NotSupported while it targets a Jellyfin version other than the server's, as after a Jellyfin upgrade, so Jellyfin does not load it; or Malfunctioned once it has failed to load, which the server log explains. A version Jellyfin removes at the next restart (Deleted) is never read. Creating the resource never keeps or adopts a version Jellyfin lists as NotSupported or Malfunctioned: it installs the configured version instead, which fails, naming the version, while no enabled repository offers a build of it for this server. It also fails when Jellyfin lists the version it installed as NotSupported or Malfunctioned; Terraform then keeps the plugin as tainted, and the next apply installs the configured version again, after uninstalling this one unless the resource sets create_before_destroy. Each refresh reads the status, and an update in place keeps it.",
+				MarkdownDescription: "The status Jellyfin lists for `installed_version`: `Active` once it is loaded; `Restart` while it waits for a restart to load, as a new install or update does; `Superceded` or `Superseded`, depending on the Jellyfin version, while a newer version installed next to it waits for a restart to replace it; `Disabled` while it is disabled on the Plugins page of the Jellyfin dashboard; `NotSupported` while it targets a Jellyfin version other than the server's, as after a Jellyfin upgrade, so Jellyfin does not load it; or `Malfunctioned` once it has failed to load, which the server log explains. A version Jellyfin removes at the next restart (`Deleted`) is never read. Creating the resource never keeps or adopts a version Jellyfin lists as `NotSupported` or `Malfunctioned`: it installs the configured version instead, which fails, naming the version, while no enabled repository offers a build of it for this server. It also fails when Jellyfin lists the version it installed as `NotSupported` or `Malfunctioned`; Terraform then keeps the plugin as tainted, and the next apply installs the configured version again, after uninstalling this one unless the resource sets `create_before_destroy`. Each refresh reads the status, and an update in place keeps it.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -156,7 +204,8 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 		)
 		return
 	}
-	resolvedVersion, err := r.resolvePluginVersion(ctx, data.Name.ValueString(), data.Version)
+	pinned := !data.Version.IsNull() && !data.Version.IsUnknown()
+	resolvedVersion, err := r.resolvePluginVersion(ctx, data.Name.ValueString(), data.Version, &resp.Diagnostics)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to resolve plugin version", err.Error())
 		return
@@ -168,17 +217,20 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 		)
 		return
 	}
-	// A configured keyword must come back from apply as written, so only an
-	// omitted version takes the resolved one.
-	if data.Version.IsNull() || data.Version.IsUnknown() {
-		data.Version = types.StringValue(resolvedVersion)
-	}
 
-	installed, err := r.findInstalledPlugin(ctx, data.Name.ValueString(), resolvedVersion)
+	plugins, err := r.client.GetInstalledPlugins(ctx)
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to check installed plugins", err.Error())
+		resp.Diagnostics.AddError("Failed to check installed plugins", fmt.Sprintf("listing installed plugins: %s", err))
 		return
 	}
+	// The schedule decides whether a newer installed version is adopted, and
+	// private state keeps it for a plan that does not refresh.
+	schedule, err := pluginUpdatesOn(ctx, r.client)
+	if err != nil {
+		scheduleReadError(&resp.Diagnostics, err)
+		return
+	}
+	installed, adopted := installedToKeep(plugins, data.Name.ValueString(), resolvedVersion, schedule)
 
 	if installed == nil {
 		if err := r.client.InstallPlugin(ctx, data.Name.ValueString(), resolvedVersion, data.RepositoryURL.ValueString()); err != nil {
@@ -193,11 +245,75 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 		}
 	}
 
-	r.recordCreated(*installed)
+	// A configured keyword must come back from apply as written, so only an
+	// omitted version takes the resolved one, or the newer one adopted.
+	if !pinned {
+		data.Version = types.StringValue(resolvedVersion)
+		if adopted {
+			data.Version = types.StringValue(installed.Version)
+		}
+	}
+
+	// A create_before_destroy replacement's destroy spares a version created
+	// this run, so it would never remove one Jellyfin cannot load.
+	if usablePluginStatus(installed.Status) {
+		r.recordCreated(*installed)
+	}
 	data.ID = types.StringValue(installed.ID)
 	data.InstalledVersion = types.StringValue(installed.Version)
+	data.Status = types.StringValue(installed.Status)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	resp.Diagnostics.Append(storeVersionPinned(ctx, resp.Private, pinned)...)
+	resp.Diagnostics.Append(storeAutoUpdate(ctx, resp.Private, schedule)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	// The state is set, so Terraform keeps the plugin as tainted and replaces
+	// it at the next apply.
+	if detail := unloadablePluginDetail(*installed); detail != "" {
+		resp.Diagnostics.AddError("Plugin cannot be loaded", detail)
+	}
+}
+
+// installedToKeep returns the GET /Plugins entry of name that Create keeps
+// instead of installing version, or nil to install it: the entry at version
+// if Jellyfin can load it, else, while schedule has automatic plugin updates
+// on, the newest newer entry Jellyfin can load, which adopted reports. An
+// entry Jellyfin cannot load is never kept, so the install replaces it.
+func installedToKeep(plugins []client.InstalledPlugin, name, version string, schedule autoUpdate) (keep *client.InstalledPlugin, adopted bool) {
+	var newest *client.InstalledPlugin
+	for i := range plugins {
+		p := &plugins[i]
+		switch {
+		case p.Name != name || !usablePluginStatus(p.Status):
+		case samePluginVersion(p.Version, version):
+			return p, false
+		case release.Compare(p.Version, version) > 0 && (newest == nil || release.Compare(p.Version, newest.Version) > 0):
+			newest = p
+		}
+	}
+	if newest != nil && schedule.minimum() {
+		return newest, true
+	}
+	return nil, false
+}
+
+// unloadablePluginDetail explains why Jellyfin does not load p, the version
+// Create installed, or returns "" when its status does not say so.
+func unloadablePluginDetail(p client.InstalledPlugin) string {
+	// Create never keeps a version Jellyfin cannot load, so the replacement
+	// installs the configured version again whichever order it runs in.
+	const next = "Terraform keeps the plugin as tainted, and the next apply installs the configured version again, after uninstalling this one unless the resource sets create_before_destroy"
+	switch p.Status {
+	case pluginStatusNotSupported:
+		return fmt.Sprintf("Jellyfin lists %s %s with the status NotSupported: it targets another Jellyfin version than this server runs, so Jellyfin does not load it. "+
+			next+"; set version to a build for this server.", p.Name, p.Version)
+	case pluginStatusMalfunctioned:
+		return fmt.Sprintf("Jellyfin lists %s %s with the status Malfunctioned: Jellyfin failed to load it, and the server log names the error. "+
+			next+".", p.Name, p.Version)
+	}
+	return ""
 }
 
 func (r *PluginResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -218,10 +334,20 @@ func (r *PluginResource) Read(ctx context.Context, req resource.ReadRequest, res
 		resp.State.RemoveResource(ctx)
 		return
 	}
+	schedule, ok := r.scheduleForRead(ctx, p, &resp.Diagnostics)
+	if !ok {
+		return
+	}
+	pinned, diags := storedVersionPinned(ctx, req.Private, data.Version)
+	resp.Diagnostics.Append(diags...)
+
 	data.ID = types.StringValue(p.ID)
 	data.Name = types.StringValue(p.Name)
 	data.InstalledVersion = types.StringValue(p.Version)
-	if !versionDescribes(data.Version, p.Version) {
+	data.Status = types.StringValue(p.Status)
+	// Read cannot see the configuration, so a version it only holds because
+	// it was omitted follows the installed one even while updates are on.
+	if !versionDescribes(data.Version, p.Version, schedule.minimum() && pinned) {
 		data.Version = types.StringValue(p.Version)
 	}
 
@@ -232,28 +358,88 @@ func (r *PluginResource) Read(ctx context.Context, req resource.ReadRequest, res
 		}
 	}
 
+	resp.Diagnostics.Append(storeAutoUpdate(ctx, resp.Private, schedule)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-// ModifyPlan decides whether a change of version reinstalls the plugin, which
-// needs the client to resolve a keyword.
+// scheduleForRead returns the Update Plugins schedule a refresh of p reads
+// version against: the one a jellyfin_scheduled_task planned in this walk,
+// else the server's.
+func (r *PluginResource) scheduleForRead(ctx context.Context, p client.InstalledPlugin, diags *diag.Diagnostics) (autoUpdate, bool) {
+	walk := autoUpdateWalkFor(r.client)
+	id := normalizeGUID(p.ID)
+	if planned, ok := walk.plannedFor(id, p.Name); ok {
+		return planned, true
+	}
+	// The walk is not locked while the server answers; decided takes a
+	// schedule a task planned meanwhile over the server's.
+	server, err := pluginUpdatesOn(ctx, r.client)
+	if err != nil {
+		scheduleReadError(diags, err)
+		return "", false
+	}
+	return walk.decided(id, p.Name, server), true
+}
+
+// ModifyPlan decides whether a change of version reinstalls the plugin, from
+// the Update Plugins schedule the refresh read version against, and checks
+// that schedule against one a jellyfin_scheduled_task plans in this walk. It
+// reads neither the schedule nor the walk's plan to decide, so the apply's
+// plan matches the plan's.
 func (r *PluginResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
+	if req.Plan.Raw.IsNull() {
 		return
 	}
+	var configured, configuredRepository types.String
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("version"), &configured)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("repository_url"), &configuredRepository)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(storeVersionPinned(ctx, resp.Private, !configured.IsNull())...)
+	// Create reads the schedule itself.
+	if req.State.Raw.IsNull() {
+		return
+	}
+
 	var plan, state PluginResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() || plan.Version.Equal(state.Version) {
+	schedule, recorded, diags := storedAutoUpdate(ctx, req.Private)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
-	keeps, err := r.versionNamesInstalled(ctx, plan.Name.ValueString(), plan.Version, heldVersion(state))
-	if err != nil {
-		resp.Diagnostics.AddAttributeError(path.Root("version"), "Failed to resolve plugin version", err.Error())
+	installed := heldVersion(state)
+	required, known := r.requiredVersion(ctx, plan.Name.ValueString(), plan.Version, state.Version, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
 		return
 	}
-	if !keeps {
-		resp.RequiresReplace = append(resp.RequiresReplace, path.Root("version"))
+
+	if !plan.Version.Equal(state.Version) {
+		keeps := known && installed != ""
+		if schedule.minimum() {
+			keeps = keeps && release.Compare(installed, required) >= 0
+		} else {
+			keeps = keeps && samePluginVersion(installed, required)
+		}
+		if !keeps {
+			resp.RequiresReplace = append(resp.RequiresReplace, path.Root("version"))
+		}
+	}
+
+	// Only an installed version newer than the required one is kept with
+	// updates on and reinstalled with them off, unless the plan replaces the
+	// plugin anyway: name and repository_url replace it as their plan
+	// modifiers do, which the framework does not tell ModifyPlan. A
+	// replacement -replace asks for is not seen at all; a tainted plugin is
+	// planned with a null state and never gets here.
+	replaced := !plan.Name.Equal(state.Name) || (!configuredRepository.IsNull() && !configuredRepository.Equal(state.RepositoryURL))
+	sensitive := !replaced && !configured.IsNull() && known && release.Compare(installed, required) > 0
+	if r.client != nil {
+		resp.Diagnostics.Append(autoUpdateWalkFor(r.client).checkPlugin(normalizeGUID(state.ID.ValueString()), pluginAutoUpdate{
+			name: plan.Name.ValueString(), used: schedule, recorded: recorded, sensitive: sensitive, installed: installed, required: required,
+		})...)
 	}
 }
 
@@ -270,31 +456,35 @@ func heldVersion(state PluginResourceModel) string {
 	return held
 }
 
-// versionNamesInstalled reports whether version, planned to replace another value, names the
-// installed version; a keyword is resolved as an install would resolve it.
-func (r *PluginResource) versionNamesInstalled(ctx context.Context, name string, version types.String, installed string) (bool, error) {
-	if version.IsUnknown() || version.IsNull() || installed == "" {
-		return false, nil
+// requiredVersion returns the version planned requires and whether there is
+// one: planned itself, or the version a keyword that replaces prior resolves
+// to as an install would resolve it. A keyword kept from prior, or a version
+// unknown until apply, requires none.
+func (r *PluginResource) requiredVersion(ctx context.Context, name string, planned, prior types.String, diags *diag.Diagnostics) (string, bool) {
+	if planned.IsUnknown() || planned.IsNull() {
+		return "", false
 	}
-	want := version.ValueString()
-	if isPluginVersionKeyword(want) {
-		if r.client == nil {
-			return false, nil
-		}
-		resolved, err := r.resolvePluginVersion(ctx, name, version)
-		if err != nil {
-			return false, err
-		}
-		if resolved == "" {
-			return false, fmt.Errorf("no package named %q found in configured repositories, so %q cannot be resolved; register the plugin repository first", name, want)
-		}
-		want = resolved
+	want := planned.ValueString()
+	if !isPluginVersionKeyword(want) {
+		return want, true
 	}
-	return samePluginVersion(installed, want), nil
+	if planned.Equal(prior) || r.client == nil {
+		return "", false
+	}
+	resolved, err := r.resolvePluginVersion(ctx, name, planned, diags)
+	if err == nil && resolved == "" {
+		err = fmt.Errorf("no package named %q found in configured repositories, so %q cannot be resolved; register the plugin repository first", name, want)
+	}
+	if err != nil {
+		diags.AddAttributeError(path.Root("version"), "Failed to resolve plugin version", err.Error())
+		return "", false
+	}
+	return resolved, true
 }
 
-// Update only runs for a change ModifyPlan found to name the installed
-// version, so Jellyfin has nothing to change.
+// Update only runs for a change ModifyPlan found the installed version to
+// satisfy, so Jellyfin has nothing to change. The planned private state
+// already holds whether the configuration sets version.
 func (r *PluginResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state PluginResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -308,6 +498,9 @@ func (r *PluginResource) Update(ctx context.Context, req resource.UpdateRequest,
 	}
 	if plan.InstalledVersion.IsUnknown() {
 		plan.InstalledVersion = state.InstalledVersion
+	}
+	if plan.Status.IsUnknown() {
+		plan.Status = state.Status
 	}
 	if plan.RepositoryURL.IsUnknown() {
 		plan.RepositoryURL = state.RepositoryURL
@@ -382,7 +575,8 @@ func (r *PluginResource) uninstall(ctx context.Context, id string) ([]client.Ins
 }
 
 // pluginVersionsCreated holds the plugin versions a jellyfin_plugin created or adopted,
-// keyed by client (one Terraform run), so a destroy spares a create_before_destroy replacement.
+// keyed by client, which the provider configures anew for each Terraform walk, so a
+// destroy spares a create_before_destroy replacement.
 var pluginVersionsCreated sync.Map
 
 type createdPluginVersion struct {
@@ -409,20 +603,27 @@ func pluginVersions(plugins []client.InstalledPlugin) []string {
 }
 
 // selectInstalledPlugin returns the GET /Plugins entry for id (either GUID spelling) or name:
-// the one at version, else the newest, skipping versions pending deletion.
+// the one at version, preferring one Jellyfin can load, as a reinstall next to one it
+// cannot is, else the newest, skipping versions pending deletion.
 func selectInstalledPlugin(plugins []client.InstalledPlugin, id, name, version string) (client.InstalledPlugin, bool) {
-	var selected client.InstalledPlugin
-	found := false
+	var selected, atVersion client.InstalledPlugin
+	found, foundAtVersion := false, false
 	for _, p := range plugins {
-		if p.Status == pluginStatusDeleted || (normalizeGUID(p.ID) != normalizeGUID(id) && p.Name != name) {
-			continue
-		}
-		if version != "" && samePluginVersion(p.Version, version) {
-			return p, true
-		}
-		if !found || release.Compare(p.Version, selected.Version) > 0 {
+		switch {
+		case p.Status == pluginStatusDeleted || (normalizeGUID(p.ID) != normalizeGUID(id) && p.Name != name):
+		case version != "" && samePluginVersion(p.Version, version):
+			if usablePluginStatus(p.Status) {
+				return p, true
+			}
+			if !foundAtVersion {
+				atVersion, foundAtVersion = p, true
+			}
+		case !found || release.Compare(p.Version, selected.Version) > 0:
 			selected, found = p, true
 		}
+	}
+	if foundAtVersion {
+		return atVersion, true
 	}
 	return selected, found
 }
@@ -464,7 +665,8 @@ func (r *PluginResource) listedPlugins(ctx context.Context, id string) ([]client
 }
 
 // waitForPlugin blocks until name is installed at version and returns the
-// entry GET /Plugins lists for it.
+// entry GET /Plugins lists for it, preferring one Jellyfin can load over one
+// listed at the same version before the install.
 func (r *PluginResource) waitForPlugin(ctx context.Context, name, version string, timeout time.Duration) (*client.InstalledPlugin, error) {
 	deadline := time.Now().Add(timeout)
 	var seen string
@@ -473,14 +675,20 @@ func (r *PluginResource) waitForPlugin(ctx context.Context, name, version string
 		if err != nil {
 			return nil, err
 		}
+		var unloadable *client.InstalledPlugin
 		for _, p := range plugins {
-			if p.Name != name || p.Status == pluginStatusDeleted {
-				continue
-			}
-			if samePluginVersion(p.Version, version) {
+			switch {
+			case p.Name != name || p.Status == pluginStatusDeleted:
+			case !samePluginVersion(p.Version, version):
+				seen = p.Version
+			case usablePluginStatus(p.Status):
 				return &p, nil
+			case unloadable == nil:
+				unloadable = &p
 			}
-			seen = p.Version
+		}
+		if unloadable != nil {
+			return unloadable, nil
 		}
 		tflog.Debug(ctx, "Waiting for plugin to appear", map[string]any{"plugin": name, "version": version, "seen": seen})
 		if err := pause(ctx, min(pluginPollInterval, time.Until(deadline))); err != nil {
@@ -503,36 +711,30 @@ func notOfferedHint(err error, name, version string) string {
 	return fmt.Sprintf("\n\nNo enabled plugin repository offers %s %s for this server's Jellyfin version. Check the version as the repository lists it (four parts, such as 13.0.0.0), and the repository_url.", name, version)
 }
 
-// findInstalledPlugin returns the entry GET /Plugins lists for name at
-// version, or nil if that version is not installed.
-func (r *PluginResource) findInstalledPlugin(ctx context.Context, name, version string) (*client.InstalledPlugin, error) {
-	plugins, err := r.client.GetInstalledPlugins(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing installed plugins: %w", err)
-	}
-	for _, p := range plugins {
-		if p.Name == name && p.Status != pluginStatusDeleted && samePluginVersion(p.Version, version) {
-			return &p, nil
-		}
-	}
-	return nil, nil
-}
-
 // versionDescribes reports whether version in state still describes installed: a keyword,
-// or the installed release in any spelling samePluginVersion accepts.
-func versionDescribes(version types.String, installed string) bool {
+// the installed release in any spelling samePluginVersion accepts, or, as a
+// minimum, any release up to it.
+func versionDescribes(version types.String, installed string, minimum bool) bool {
 	if version.IsNull() || version.IsUnknown() {
 		return false
 	}
-	return isPluginVersionKeyword(version.ValueString()) || samePluginVersion(installed, version.ValueString())
+	v := version.ValueString()
+	switch {
+	case isPluginVersionKeyword(v):
+		return true
+	case minimum:
+		return release.Compare(installed, v) >= 0
+	}
+	return samePluginVersion(installed, v)
 }
 
 // omittedVersionPlanModifier plans the installed version for a version the
-// configuration no longer sets while state holds a keyword.
+// configuration no longer sets while state holds a keyword, or a pinned
+// version that the installed one, updated while it was a minimum, has passed.
 type omittedVersionPlanModifier struct{}
 
 func (omittedVersionPlanModifier) Description(context.Context) string {
-	return "Plans the installed version when the configuration drops a version keyword."
+	return "Plans the installed version when the configuration drops a version keyword, or a pinned version the installed one has passed."
 }
 
 func (m omittedVersionPlanModifier) MarkdownDescription(ctx context.Context) string {
@@ -540,7 +742,7 @@ func (m omittedVersionPlanModifier) MarkdownDescription(ctx context.Context) str
 }
 
 func (omittedVersionPlanModifier) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
-	if !req.ConfigValue.IsNull() || req.StateValue.IsNull() || !isPluginVersionKeyword(req.StateValue.ValueString()) {
+	if !req.ConfigValue.IsNull() || req.StateValue.IsNull() || req.StateValue.IsUnknown() {
 		return
 	}
 	var installed types.String
@@ -548,7 +750,9 @@ func (omittedVersionPlanModifier) PlanModifyString(ctx context.Context, req plan
 	if installed.ValueString() == "" {
 		return
 	}
-	resp.PlanValue = installed
+	if held := req.StateValue.ValueString(); isPluginVersionKeyword(held) || !samePluginVersion(held, installed.ValueString()) {
+		resp.PlanValue = installed
+	}
 }
 
 func isPluginVersionKeyword(version string) bool {
@@ -604,8 +808,9 @@ func PluginRepositoryURL(pkgs []client.PackageInfo, name, version string) string
 }
 
 // resolvePluginVersion resolves "supported", "latest" or an unset version to the version to
-// install, in the build this server is offered; any other value is used as-is.
-func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, version types.String) (string, error) {
+// install, in the build this server is offered; any other value is used as-is. It warns
+// in diags when latest resolves past the supported release.
+func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, version types.String, diags *diag.Diagnostics) (string, error) {
 	supported := supportedVersionForPlugin(name)
 
 	switch {
@@ -627,12 +832,9 @@ func (r *PluginResource) resolvePluginVersion(ctx context.Context, name string, 
 			return "", err
 		}
 		if supported != "" && latest != "" && release.Compare(pluginRelease(latest), pluginRelease(supported)) > 0 {
-			tflog.Warn(ctx, "Plugin version newer than supported", map[string]any{
-				"plugin":    name,
-				"latest":    latest,
-				"supported": supported,
-				"warning":   fmt.Sprintf("Installing %s v%s which is newer than the tested/supported v%s. The typed Terraform resource may not cover all properties in this version.", name, latest, supported),
-			})
+			diags.AddAttributeWarning(path.Root("version"), "Plugin version newer than supported", fmt.Sprintf(
+				"latest resolves %s to %s, which is newer than %s, the release this provider was tested against, so the typed Terraform resource for its configuration may not cover every setting of this version. "+
+					"Set version to supported to install the tested release.", name, latest, supported))
 		}
 		return latest, nil
 

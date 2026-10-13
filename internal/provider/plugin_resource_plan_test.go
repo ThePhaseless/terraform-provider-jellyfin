@@ -26,14 +26,54 @@ func pluginResourcePlan(t *testing.T, m PluginResourceModel) tfsdk.Plan {
 	return plan
 }
 
-func modifyPluginPlan(t *testing.T, r *PluginResource, state, plan PluginResourceModel) *resource.ModifyPlanResponse {
+// modifyPluginPlan runs ModifyPlan for a change of state to plan whose
+// configuration sets plan's version, with private as the prior private state.
+func modifyPluginPlan(t *testing.T, r *PluginResource, state, plan PluginResourceModel, private ...privateKey) *resource.ModifyPlanResponse {
 	t.Helper()
-	req := resource.ModifyPlanRequest{
-		Plan:  pluginResourcePlan(t, plan),
-		State: pluginResourceState(t, state),
+	return planPlugin(t, r, &state, &plan, plan.Version, private...)
+}
+
+// planPlugin runs ModifyPlan as the framework does when the configuration
+// sets version to configured, where a nil state plans a create and a nil
+// plan a destroy, and private is the prior private state. The response shares
+// the request's private state, as in the framework.
+func planPlugin(t *testing.T, r *PluginResource, state, plan *PluginResourceModel, configured types.String, private ...privateKey) *resource.ModifyPlanResponse {
+	t.Helper()
+	var config *PluginResourceModel
+	if plan != nil {
+		c := *plan
+		c.ID, c.InstalledVersion, c.Status = types.StringNull(), types.StringNull(), types.StringNull()
+		c.Version = configured
+		if c.RepositoryURL.IsUnknown() {
+			c.RepositoryURL = types.StringNull()
+		}
+		config = &c
 	}
-	resp := &resource.ModifyPlanResponse{Plan: req.Plan}
-	r.ModifyPlan(t.Context(), req, resp)
+	return planPluginFor(t, r, state, plan, config, private...)
+}
+
+// planPluginFor runs ModifyPlan as planPlugin does, for the configuration
+// config, which is nil with a nil plan.
+func planPluginFor(t *testing.T, r *PluginResource, state, plan, config *PluginResourceModel, private ...privateKey) *resource.ModifyPlanResponse {
+	t.Helper()
+	ctx := t.Context()
+	null := pluginResourceNullState(ctx)
+	req := resource.ModifyPlanRequest{
+		Config: tfsdk.Config(null),
+		Plan:   tfsdk.Plan(null),
+		State:  null,
+	}
+	if state != nil {
+		req.State = pluginResourceState(t, *state)
+	}
+	if plan != nil {
+		req.Plan = pluginResourcePlan(t, *plan)
+		req.Config = tfsdk.Config(pluginResourcePlan(t, *config))
+	}
+	initPrivate(&req.Private)
+	setPrivate(t, req.Private, private...)
+	resp := &resource.ModifyPlanResponse{Plan: req.Plan, Private: req.Private}
+	r.ModifyPlan(ctx, req, resp)
 	return resp
 }
 
@@ -51,6 +91,7 @@ func plannedBookshelf(version string) PluginResourceModel {
 		Name:             types.StringValue("Bookshelf"),
 		Version:          types.StringValue(version),
 		InstalledVersion: types.StringUnknown(),
+		Status:           types.StringUnknown(),
 		RepositoryURL:    types.StringValue(stableRepoURL),
 	}
 }
@@ -59,6 +100,7 @@ func installedBookshelf(version, installedVersion string) PluginResourceModel {
 	m := plannedBookshelf(version)
 	m.ID = types.StringValue(bookshelfID)
 	m.InstalledVersion = types.StringValue(installedVersion)
+	m.Status = types.StringValue("Active")
 	return m
 }
 
@@ -104,6 +146,8 @@ func TestUnitPluginVersionChangeReplacesUnlessItNamesInstalledVersion(t *testing
 	}
 }
 
+// An update in place keeps the status the refresh read, as it keeps the
+// installed version.
 func TestUnitPluginUpdateOnlyChangesState(t *testing.T) {
 	fake := &fakePluginServer{}
 	r := newFakePluginResource(t, fake)
@@ -113,6 +157,7 @@ func TestUnitPluginUpdateOnlyChangesState(t *testing.T) {
 	prior.RepositoryURL = types.StringNull()
 	planned := prior
 	planned.Version = types.StringValue("latest")
+	planned.Status = types.StringUnknown()
 	planned.RepositoryURL = types.StringUnknown()
 
 	state := pluginResourceState(t, prior)
@@ -192,6 +237,8 @@ func TestUnitPluginVersionPlan(t *testing.T) {
 		{"keyword removed from the configuration", stateWith("latest"), types.StringNull(), types.StringValue("13.0.0.0")},
 		{"keyword kept in the configuration", stateWith("latest"), types.StringValue("latest"), types.StringValue("latest")},
 		{"version removed from the configuration", stateWith("13.0.0.0"), types.StringNull(), types.StringValue("13.0.0.0")},
+		{"pinned version the installed version passed, removed from the configuration", stateWith("12.0.0.0"), types.StringNull(), types.StringValue("13.0.0.0")},
+		{"pinned version the installed version passed, kept in the configuration", stateWith("12.0.0.0"), types.StringValue("12.0.0.0"), types.StringValue("12.0.0.0")},
 		{"create without a version", nil, types.StringNull(), types.StringUnknown()},
 	}
 

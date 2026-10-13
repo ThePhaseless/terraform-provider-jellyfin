@@ -104,6 +104,10 @@ type generator struct {
 	outputDir string
 	usedNames map[string]bool // resource addresses already handed out
 	warnings  io.Writer
+	// pluginUpdatesTask is the name of the jellyfin_scheduled_task written for
+	// the PluginUpdates task, whose triggers decide whether a jellyfin_plugin
+	// version is a minimum or exact, or "" before one is written.
+	pluginUpdatesTask string
 }
 
 func (g *generator) warnf(format string, args ...any) {
@@ -139,8 +143,9 @@ func (g *generator) Generate(ctx context.Context) error {
 		{"libraries", g.generateLibraries, false},
 		{"API keys", g.generateAPIKeys, true},
 		{"plugin repositories", g.generatePluginRepositories, false},
-		{"plugins", g.generatePlugins, false},
+		// Before the plugins, which depend on the PluginUpdates task.
 		{"scheduled tasks", g.generateScheduledTasks, false},
+		{"plugins", g.generatePlugins, false},
 		{"configurations", g.generateSingletonConfigs, false},
 	}
 
@@ -335,6 +340,11 @@ func (g *generator) generatePlugins(ctx context.Context) ([]string, []string, er
 		if repoURL := repoURLs[plugin.ID]; repoURL != "" {
 			attrs["repository_url"] = hclString(repoURL)
 		}
+		// Terraform then plans the schedule, which decides whether version is
+		// a minimum or exact, before the plugin.
+		if g.pluginUpdatesTask != "" {
+			attrs["depends_on"] = "[jellyfin_scheduled_task." + g.pluginUpdatesTask + "]"
+		}
 		resources = append(resources, resourceBlock("jellyfin_plugin", name, attrs))
 	}
 
@@ -382,6 +392,9 @@ func (g *generator) generateScheduledTasks(ctx context.Context) ([]string, []str
 		}
 		name := g.uniqueName("jellyfin_scheduled_task", sanitizeName(task.Name))
 		imports = append(imports, importBlock("jellyfin_scheduled_task", name, ref))
+		if task.Key == provider.PluginUpdatesTaskKey {
+			g.pluginUpdatesTask = name
+		}
 
 		raw, err := json.Marshal(task)
 		if err != nil {

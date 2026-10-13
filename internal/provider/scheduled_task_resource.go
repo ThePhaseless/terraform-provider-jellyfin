@@ -94,8 +94,14 @@ func (r *ScheduledTaskResource) Metadata(_ context.Context, req resource.Metadat
 
 func (r *ScheduledTaskResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Manages triggers for a Jellyfin scheduled task.",
-		MarkdownDescription: "Manages triggers for a Jellyfin scheduled task.",
+		Description: "Manages triggers for a Jellyfin scheduled task. Destroying the resource, or removing it from the configuration, leaves the task's triggers as last applied; Jellyfin does not restore its defaults.\n\n" +
+			"The triggers of the PluginUpdates task (Update Plugins) also decide how jellyfin_plugin reads version: with at least one trigger, Jellyfin updates plugins automatically and version is a minimum, and with none it is exact. " +
+			"Give every jellyfin_plugin a depends_on on the resource that manages PluginUpdates, so Terraform plans and applies the schedule first. " +
+			"A plan fails when it changes whether updates are on after Terraform refreshed a plugin whose plan that changes, or when two resources give PluginUpdates one schedule with triggers and one without; see jellyfin_plugin.",
+		MarkdownDescription: "Manages triggers for a Jellyfin scheduled task. Destroying the resource, or removing it from the configuration, leaves the task's triggers as last applied; Jellyfin does not restore its defaults.\n\n" +
+			"The triggers of the `PluginUpdates` task (*Update Plugins*) also decide how `jellyfin_plugin` reads `version`: with at least one trigger, Jellyfin updates plugins automatically and `version` is a minimum, and with none it is exact. " +
+			"Give every `jellyfin_plugin` a `depends_on` on the resource that manages `PluginUpdates`, so Terraform plans and applies the schedule first. " +
+			"A plan fails when it changes whether updates are on after Terraform refreshed a plugin whose plan that changes, or when two resources give `PluginUpdates` one schedule with triggers and one without; see `jellyfin_plugin`.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description:         "The resource identifier, matching the scheduled task ID.",
@@ -330,12 +336,86 @@ func (r *ScheduledTaskResource) Update(ctx context.Context, req resource.UpdateR
 	r.writeTriggers(ctx, &data, "update", &resp.Diagnostics, &resp.State)
 }
 
-// ModifyPlan checks a configured key against the server's tasks.
+// ModifyPlan checks a configured key against the server's tasks, and tells
+// the jellyfin_plugin resources of this walk the schedule planned for
+// PluginUpdates. A destroy leaves the triggers as they are, so it plans no
+// schedule.
 func (r *ScheduledTaskResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	if req.Plan.Raw.IsNull() {
 		return
 	}
 	resp.Diagnostics.Append(r.planTaskForKey(ctx, req, resp)...)
+	if resp.Diagnostics.HasError() || r.client == nil {
+		return
+	}
+	resp.Diagnostics.Append(r.recordPluginUpdatesPlan(ctx, req, resp)...)
+}
+
+// recordPluginUpdatesPlan records, for a plan of the PluginUpdates task,
+// whether its planned triggers turn automatic plugin updates on: any trigger
+// does, and a list unknown until apply may.
+func (r *ScheduledTaskResource) recordPluginUpdatesPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) diag.Diagnostics {
+	key, diags := r.plannedTaskKey(ctx, req, resp)
+	if diags.HasError() || key != PluginUpdatesTaskKey {
+		return diags
+	}
+	var triggers types.List
+	diags.Append(resp.Plan.GetAttribute(ctx, path.Root("triggers"), &triggers)...)
+	if diags.HasError() {
+		return diags
+	}
+	schedule := autoUpdateOff
+	switch {
+	case triggers.IsUnknown():
+		schedule = autoUpdateUnknown
+	case len(triggers.Elements()) > 0:
+		schedule = autoUpdateOn
+	}
+	return append(diags, autoUpdateWalkFor(r.client).planSchedule(schedule)...)
+}
+
+// plannedTaskKey returns the key of the task the plan writes triggers to, or
+// "" when the plan does not say. A configured key names it. Otherwise the
+// planned key is the state's, which names it only while task_id stays that
+// of the state; for a replacement the plan of its create names it instead.
+func (r *ScheduledTaskResource) plannedTaskKey(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) (string, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	var configured, taskID types.String
+	diags.Append(req.Config.GetAttribute(ctx, path.Root("key"), &configured)...)
+	diags.Append(resp.Plan.GetAttribute(ctx, path.Root("task_id"), &taskID)...)
+	switch {
+	case diags.HasError():
+		return "", diags
+	case !configured.IsNull() && !configured.IsUnknown():
+		return configured.ValueString(), diags
+	case len(resp.RequiresReplace) > 0:
+		return "", diags
+	}
+	if !req.State.Raw.IsNull() {
+		var stored ScheduledTaskResourceModel
+		diags.Append(req.State.Get(ctx, &stored)...)
+		if diags.HasError() {
+			return "", diags
+		}
+		if stored.Key.ValueString() != "" && !taskID.IsUnknown() && strings.EqualFold(stored.TaskID.ValueString(), taskID.ValueString()) {
+			return stored.Key.ValueString(), diags
+		}
+	}
+	if taskID.IsNull() || taskID.IsUnknown() {
+		return "", diags
+	}
+	task, err := r.client.GetScheduledTask(ctx, taskID.ValueString())
+	switch {
+	case client.IsNotFound(err):
+		// Create reports a task_id no task has.
+		return "", diags
+	case err != nil:
+		// Planning on would miss a PluginUpdates task that this plan changes.
+		diags.AddError("Failed to read scheduled task", err.Error()+
+			"\n\nThe plan reads the task task_id names to tell whether it is PluginUpdates, whose triggers decide whether jellyfin_plugin reads version as a minimum or exact.")
+		return "", diags
+	}
+	return task.Key, diags
 }
 
 // planTaskForKey plans task_id from a key configured alone (replacing on a

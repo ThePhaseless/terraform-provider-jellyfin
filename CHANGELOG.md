@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `jellyfin_plugin`: computed `status`, the status Jellyfin lists for `installed_version` (`Active`, `Restart`, `Superceded` or `Superseded`, `Disabled`, `NotSupported` or `Malfunctioned`). Creating the resource fails with "Plugin cannot be loaded" when Jellyfin lists the version it installed as `NotSupported` or `Malfunctioned`; Terraform keeps the plugin as tainted, and the next apply installs the configured version again, after uninstalling this one unless the resource sets `create_before_destroy`.
+
+### Changed
+
+- `jellyfin_plugin`: `version` is a minimum while Jellyfin's automatic plugin updates are on, that is while its `PluginUpdates` task (*Update Plugins*) has at least one trigger. An installed version at least as new satisfies it, so a plugin the task upgraded is no longer reinstalled at the pinned version by the next apply and upgraded again at the following startup; a change of `version` that the installed version satisfies only updates state; and creating the resource adopts a newer installed version instead of installing an older one. With no triggers, `version` stays exact. The `autoUpdate` flag in a plugin's `meta.json` is not read. A keyword kept in the configuration still follows whatever version is installed, under either schedule.
+- `jellyfin_plugin`: a refresh cannot see the configuration, so the provider stores whether it sets `version` whenever an apply creates or changes the resource, and until then counts a version in state as set. An imported plugin, including every one `jellyfin-import` generates, and a pinned plugin in state from 0.4.0 therefore plan no change after the task upgrades them. The first plan after the task upgrades a plugin changes `version` in place once, only in state, in two cases: where the configuration omits `version` for a plugin imported without it, created by 0.4.0, or whose `version` was removed from the configuration while it named the installed version, `version` moves to the new installed version; and where a configuration adds a `version` equal to the one in state, `version` moves from the installed version back to the configured one. A pinned plugin whose 0.4.0 state already holds a version the task installed, as a refresh-only apply records, shows `version` changing to the configured one in place at the first plan. None of these downgrade the plugin.
+- `jellyfin_plugin`: give each `jellyfin_plugin` `depends_on` on the `jellyfin_scheduled_task` that manages `PluginUpdates`, so Terraform plans and applies the schedule first. A plan that changes whether updates are on now fails for a plugin Terraform refreshed before the task, when that changes the plugin's plan, instead of planning it against the old schedule. A plan that replaces the plugin for a new `name` or `repository_url` does not fail, but one that `-replace` asks for can, since the provider cannot see it; `depends_on` avoids that. A tainted plugin is planned as a new one and does not fail. A plan that does not refresh, such as with `-refresh=false`, warns instead, and uses the schedule of the plugin's last refresh or create, or off for 0.4.0 state not refreshed since. With `depends_on`, triggers unknown until apply count as on; without it, a plugin planned before the task uses the server's schedule; either way with a warning. Two `jellyfin_scheduled_task` resources that give `PluginUpdates` one schedule with triggers and one without fail the plan. Across provider configurations nothing is checked, even with `depends_on`: a plugin is planned against the server's schedule, and the next plan corrects it, so keep the task and the plugins on one provider alias.
+- `jellyfin_plugin`: creating the resource no longer keeps an installed version Jellyfin lists as `NotSupported` or `Malfunctioned`, and never adopts one; it installs the configured version instead. Creating it reads the *Update Plugins* schedule and fails with "Failed to read the Update Plugins schedule" when Jellyfin does not answer.
+- `jellyfin_plugin`: `latest` resolving to a Jellyfin Security release newer than the supported one now shows a "Plugin version newer than supported" warning instead of only logging it.
+- `jellyfin_scheduled_task`: a plan for a resource that sets only `task_id` reads that task to tell whether it is `PluginUpdates`, and fails with "Failed to read scheduled task" when Jellyfin answers with an error other than 404.
+- `jellyfin_security_plugin_configuration`: create and update fail with "JellyfinSecurity plugin not loaded" when Jellyfin lists the plugin as `Disabled`, `NotSupported` or `Malfunctioned`.
+- `jellyfin-import`: each generated `jellyfin_plugin` depends on the generated `PluginUpdates` task, and scheduled tasks are written before plugins.
+
+### Fixed
+
+- `jellyfin_security_plugin_configuration`: a JellyfinSecurity plugin that Jellyfin lists only as pending deletion counts as not installed.
+
 ## [0.6.0] - 2026-10-13
 
 ### Changed

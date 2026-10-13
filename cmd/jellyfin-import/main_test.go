@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -683,6 +684,94 @@ func TestGeneratePlugins(t *testing.T) {
 	}
 	if !strings.Contains(resources[0], `repository_url = "https://repo.jellyfin.org/files/plugin/manifest.json"`) {
 		t.Errorf("expected repository_url resolved from packages: %s", resources[0])
+	}
+	if strings.Contains(resources[0], "depends_on") {
+		t.Errorf("expected no depends_on without a PluginUpdates task: %s", resources[0])
+	}
+}
+
+// updatePluginsTask is Jellyfin's Update Plugins task with its default
+// triggers, as GET /ScheduledTasks lists it.
+var updatePluginsTask = map[string]any{
+	"Name": "Update Plugins",
+	"Id":   "f9b057c054e9e6daee4a88ffd146a403",
+	"Key":  provider.PluginUpdatesTaskKey,
+	"Triggers": []map[string]any{
+		{"Type": "StartupTrigger"},
+		{"Type": "IntervalTrigger", "IntervalTicks": 864000000000},
+	},
+}
+
+// The triggers of the PluginUpdates task decide whether a jellyfin_plugin
+// version is a minimum or exact, so Terraform must plan the task first.
+func TestGeneratePluginsDependOnThePluginUpdatesTask(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ScheduledTasks", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]any{updatePluginsTask})
+	})
+	mux.HandleFunc("/Plugins", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]any{{"Name": "MusicBrainz", "Version": "14.0.0.0", "Id": "plugin-id-1"}})
+	})
+	mux.HandleFunc("/Packages", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []map[string]any{{"name": "MusicBrainz", "versions": []map[string]any{
+			{"version": "14.0.0.0", "repositoryUrl": "https://repo.jellyfin.org/files/plugin/manifest.json"},
+		}}})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
+	if _, _, err := g.generateScheduledTasks(t.Context()); err != nil {
+		t.Fatalf("generateScheduledTasks() error: %v", err)
+	}
+	_, resources, err := g.generatePlugins(t.Context())
+	if err != nil {
+		t.Fatalf("generatePlugins() error: %v", err)
+	}
+
+	want := `resource "jellyfin_plugin" "musicbrainz" {
+  depends_on     = [jellyfin_scheduled_task.update_plugins]
+  name           = "MusicBrainz"
+  repository_url = "https://repo.jellyfin.org/files/plugin/manifest.json"
+  version        = "14.0.0.0"
+}
+`
+	if len(resources) != 1 || resources[0] != want {
+		t.Errorf("resources = %q, want %q", resources, want)
+	}
+}
+
+// Generate writes the scheduled tasks before the plugins, which name the
+// PluginUpdates task.
+func TestFullGenerateWritesPluginsAfterThePluginUpdatesTask(t *testing.T) {
+	inner := setupTestServer(t)
+	defer inner.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ScheduledTasks" {
+			writeJSON(t, w, []map[string]any{updatePluginsTask})
+			return
+		}
+		inner.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+
+	outputDir := t.TempDir()
+	g := &generator{client: client.NewClient(server.URL, "test-key"), outputDir: outputDir, warnings: io.Discard}
+	if err := g.Generate(t.Context()); err != nil {
+		t.Fatalf("Generate() error: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(outputDir, "resources.tf"))
+	if err != nil {
+		t.Fatalf("reading resources.tf: %v", err)
+	}
+	resources := string(content)
+	task := strings.Index(resources, `resource "jellyfin_scheduled_task" "update_plugins"`)
+	plugin := strings.Index(resources, `resource "jellyfin_plugin" "musicbrainz"`)
+	if task < 0 || plugin < task {
+		t.Errorf("resources.tf lists the PluginUpdates task at %d and the plugin at %d, want the task first:\n%s", task, plugin, resources)
+	}
+	if !strings.Contains(resources[plugin:], "depends_on     = [jellyfin_scheduled_task.update_plugins]") {
+		t.Errorf("the plugin does not depend on the PluginUpdates task:\n%s", resources[plugin:])
 	}
 }
 

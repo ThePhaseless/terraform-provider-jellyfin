@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"slices"
 	"sync"
 	"time"
 
@@ -445,8 +444,8 @@ func (r *JellyfinSecurityPluginConfigurationResource) Read(ctx context.Context, 
 		return
 	}
 
-	if _, version, err := r.securityPlugin(ctx); err == nil {
-		warnIfNewerThanSupported(version, &resp.Diagnostics)
+	if p, found, err := r.securityPlugin(ctx); err == nil && found {
+		warnIfNewerThanSupported(p.Version, &resp.Diagnostics)
 	}
 }
 
@@ -462,38 +461,47 @@ func (r *JellyfinSecurityPluginConfigurationResource) ImportState(ctx context.Co
 	resource.ImportStatePassthroughID(ctx, path.Root("plugin_id"), req, resp)
 }
 
-// securityPlugin reports whether GET /Plugins lists the JellyfinSecurity
-// plugin, and the version jellyfin_plugin reads for it.
-func (r *JellyfinSecurityPluginConfigurationResource) securityPlugin(ctx context.Context) (installed bool, version string, err error) {
+// securityPlugin returns the entry of the JellyfinSecurity plugin that
+// jellyfin_plugin reads, the newest GET /Plugins lists other than one Jellyfin
+// deletes at the next restart, and whether there is one.
+func (r *JellyfinSecurityPluginConfigurationResource) securityPlugin(ctx context.Context) (client.InstalledPlugin, bool, error) {
 	plugins, err := r.client.GetInstalledPlugins(ctx)
 	if err != nil {
-		return false, "", err
+		return client.InstalledPlugin{}, false, err
 	}
-	installed = slices.ContainsFunc(plugins, func(p client.InstalledPlugin) bool {
-		return normalizeGUID(p.ID) == normalizeGUID(jellyfinSecurityPluginID)
-	})
-	if p, found := selectInstalledPlugin(plugins, jellyfinSecurityPluginID, "", ""); found {
-		version = p.Version
-	}
-	return installed, version, nil
+	p, found := selectInstalledPlugin(plugins, jellyfinSecurityPluginID, "", "")
+	return p, found, nil
 }
 
-// requireInstalled reports, unless the JellyfinSecurity plugin is installed,
-// why its configuration cannot be written, and otherwise returns its version.
+// requireInstalled reports, unless Jellyfin has the JellyfinSecurity plugin
+// installed and can load it, why its configuration cannot be written, and
+// otherwise returns its version.
 func (r *JellyfinSecurityPluginConfigurationResource) requireInstalled(ctx context.Context, diags *diag.Diagnostics) (version string, ok bool) {
-	installed, version, err := r.securityPlugin(ctx)
+	p, found, err := r.securityPlugin(ctx)
 	switch {
 	case err != nil:
 		diags.AddError("Failed to check installed plugins", err.Error())
-		return "", false
-	case !installed:
+	case !found:
 		diags.AddError(
 			"JellyfinSecurity plugin not installed",
 			fmt.Sprintf("JellyfinSecurity plugin %s is not installed on the server. Register the plugin repository and install the plugin before managing its configuration, for example with the jellyfin_plugin_repository and jellyfin_plugin resources.", jellyfinSecurityPluginID),
 		)
-		return "", false
+	case p.Status == pluginStatusDisabled:
+		diags.AddError("JellyfinSecurity plugin not loaded", fmt.Sprintf(
+			"Jellyfin lists JellyfinSecurity plugin %s at %s with the status Disabled, so it does not load the plugin or apply its configuration. "+
+				"Enable the plugin on the Plugins page of the Jellyfin dashboard and restart the server before managing its configuration.", jellyfinSecurityPluginID, p.Version))
+	case p.Status == pluginStatusNotSupported:
+		diags.AddError("JellyfinSecurity plugin not loaded", fmt.Sprintf(
+			"Jellyfin lists JellyfinSecurity plugin %s at %s with the status NotSupported: it targets another Jellyfin version than this server runs, so Jellyfin does not load it. "+
+				"Install a build for this server, for example with a jellyfin_plugin whose version is supported, and restart the server.", jellyfinSecurityPluginID, p.Version))
+	case p.Status == pluginStatusMalfunctioned:
+		diags.AddError("JellyfinSecurity plugin not loaded", fmt.Sprintf(
+			"Jellyfin lists JellyfinSecurity plugin %s at %s with the status Malfunctioned: Jellyfin failed to load it, and the server log names the error. "+
+				"Reinstall the plugin or install another version, and restart the server.", jellyfinSecurityPluginID, p.Version))
+	default:
+		return p.Version, true
 	}
-	return version, true
+	return "", false
 }
 
 func warnIfNewerThanSupported(version string, diags *diag.Diagnostics) {

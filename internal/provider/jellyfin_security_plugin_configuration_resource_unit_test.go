@@ -451,10 +451,14 @@ func samplePayloadValue(typ string) any {
 	}
 }
 
-// securityPluginServer does not list the JellyfinSecurity plugin when version
-// is "", and a POST replaces config with afterPost when that is set.
+// securityPluginServer lists the JellyfinSecurity plugin at version with
+// status, Active by default, or plugins in its place when they are set, and
+// none when version is "". A POST replaces config with afterPost when that is
+// set.
 type securityPluginServer struct {
 	version   string
+	status    string
+	plugins   []client.InstalledPlugin
 	postFails bool
 	afterPost string
 
@@ -472,9 +476,9 @@ func (f *securityPluginServer) client(t *testing.T) *client.Client {
 		f.requests = append(f.requests, r.Method+" "+r.URL.Path)
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/Plugins":
-			plugins := []client.InstalledPlugin{}
-			if f.version != "" {
-				plugins = append(plugins, client.InstalledPlugin{ID: jellyfinSecurityPluginID, Name: "JellyfinSecurity", Version: f.version, Status: "Active"})
+			plugins := append([]client.InstalledPlugin{}, f.plugins...)
+			if f.plugins == nil && f.version != "" {
+				plugins = append(plugins, client.InstalledPlugin{ID: jellyfinSecurityPluginID, Name: "JellyfinSecurity", Version: f.version, Status: cmp.Or(f.status, "Active")})
 			}
 			_ = json.NewEncoder(w).Encode(plugins)
 		case r.Method == http.MethodGet && r.URL.Path == configPath:
@@ -503,10 +507,15 @@ func TestUnitSecurityPluginApplyChecksThePlugin(t *testing.T) {
 	const newer = "999.0.0.0"
 	cfg := "/Plugins/" + jellyfinSecurityPluginID + "/Configuration"
 	written := []string{"GET /Plugins", "GET " + cfg, "POST " + cfg, "GET " + cfg}
+	listed := func(version, status string) client.InstalledPlugin {
+		return client.InstalledPlugin{ID: jellyfinSecurityPluginID, Name: "JellyfinSecurity", Version: version, Status: status}
+	}
 
 	for _, test := range []struct {
 		name         string
 		version      string
+		status       string
+		plugins      []client.InstalledPlugin
 		postFails    bool
 		afterPost    string
 		wantRequests []string
@@ -517,6 +526,41 @@ func TestUnitSecurityPluginApplyChecksThePlugin(t *testing.T) {
 			name:         "not installed",
 			wantRequests: []string{"GET /Plugins"},
 			wantErrors:   []string{"JellyfinSecurity plugin not installed"},
+		},
+		{
+			name:         "listed only as pending deletion",
+			plugins:      []client.InstalledPlugin{listed(supportedSecurityPluginVersion(), pluginStatusDeleted)},
+			wantRequests: []string{"GET /Plugins"},
+			wantErrors:   []string{"JellyfinSecurity plugin not installed"},
+		},
+		{
+			name:         "disabled",
+			version:      supportedSecurityPluginVersion(),
+			status:       pluginStatusDisabled,
+			wantRequests: []string{"GET /Plugins"},
+			wantErrors:   []string{"JellyfinSecurity plugin not loaded"},
+		},
+		{
+			name:         "built for another Jellyfin version",
+			version:      supportedSecurityPluginVersion(),
+			status:       pluginStatusNotSupported,
+			wantRequests: []string{"GET /Plugins"},
+			wantErrors:   []string{"JellyfinSecurity plugin not loaded"},
+		},
+		{
+			name:         "failed to load",
+			version:      supportedSecurityPluginVersion(),
+			status:       pluginStatusMalfunctioned,
+			wantRequests: []string{"GET /Plugins"},
+			wantErrors:   []string{"JellyfinSecurity plugin not loaded"},
+		},
+		{
+			// The newer version is what jellyfin_plugin reads while it waits
+			// for a restart.
+			name:         "updated, waiting for a restart",
+			plugins:      []client.InstalledPlugin{listed(supportedSecurityPluginVersion(), "Superceded"), listed(newer, "Restart")},
+			wantRequests: written,
+			wantWarnings: []string{"JellyfinSecurity plugin version newer than supported"},
 		},
 		{
 			name:         "at the supported version",
@@ -547,7 +591,7 @@ func TestUnitSecurityPluginApplyChecksThePlugin(t *testing.T) {
 		for _, op := range []string{"create", "update"} {
 			t.Run(test.name+"/"+op, func(t *testing.T) {
 				ctx := t.Context()
-				srv := &securityPluginServer{version: test.version, postFails: test.postFails, afterPost: test.afterPost, config: `{"Enabled":true}`}
+				srv := &securityPluginServer{version: test.version, status: test.status, plugins: test.plugins, postFails: test.postFails, afterPost: test.afterPost, config: `{"Enabled":true}`}
 				r := &JellyfinSecurityPluginConfigurationResource{client: srv.client(t)}
 				s := schemaOf(r)
 				data := readWire[JellyfinSecurityPluginConfigurationResourceModel](t, mustWire(t, securityPluginWire), srv.config)

@@ -94,20 +94,28 @@ func TestVersionDescribes(t *testing.T) {
 	cases := []struct {
 		version   types.String
 		installed string
+		minimum   bool
 		describes bool
 	}{
-		{types.StringValue("latest"), "15.0.0.0", true},
-		{types.StringValue("supported"), "2.6.3.1", true},
-		{types.StringValue("13.0.0.0"), "13.0.0.0", true},
-		{types.StringValue("2.5.22"), "2.5.22.0", true},
-		{types.StringValue("12.0.0.0"), "13.0.0.0", false}, // Jellyfin updated the plugin
-		{types.StringValue(""), "13.0.0.0", true},          // configured empty, installed as if omitted
-		{types.StringNull(), "13.0.0.0", false},            // imported
+		{types.StringValue("latest"), "15.0.0.0", false, true},
+		{types.StringValue("supported"), "2.6.3.1", false, true},
+		{types.StringValue("13.0.0.0"), "13.0.0.0", false, true},
+		{types.StringValue("2.5.22"), "2.5.22.0", false, true},
+		{types.StringValue("12.0.0.0"), "13.0.0.0", false, false}, // Jellyfin updated the plugin
+		{types.StringValue(""), "13.0.0.0", false, true},          // configured empty, installed as if omitted
+		{types.StringNull(), "13.0.0.0", false, false},            // imported
+		{types.StringValue("12.0.0.0"), "13.0.0.0", true, true},   // updated past a minimum
+		{types.StringValue("12.0.0"), "12.0.0.0", true, true},
+		{types.StringValue("12.0.0.0"), "11.0.0.0", true, false}, // downgraded below a minimum
+		{types.StringValue("latest"), "11.0.0.0", true, true},
+		{types.StringValue(""), "13.0.0.0", true, true},
+		{types.StringNull(), "13.0.0.0", true, false},
+		{types.StringUnknown(), "13.0.0.0", true, false},
 	}
 
 	for _, c := range cases {
-		if got := versionDescribes(c.version, c.installed); got != c.describes {
-			t.Errorf("versionDescribes(%s, %q) = %t, want %t", c.version, c.installed, got, c.describes)
+		if got := versionDescribes(c.version, c.installed, c.minimum); got != c.describes {
+			t.Errorf("versionDescribes(%s, %q, %t) = %t, want %t", c.version, c.installed, c.minimum, got, c.describes)
 		}
 	}
 }

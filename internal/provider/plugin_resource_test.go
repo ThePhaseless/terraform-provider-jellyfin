@@ -42,6 +42,7 @@ resource "jellyfin_plugin" "test" {
 					resource.TestCheckResourceAttr("jellyfin_plugin.test", "name", pluginName),
 					resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", pluginVersion),
 					resource.TestCheckResourceAttr("jellyfin_plugin.test", "installed_version", pluginVersion),
+					resource.TestCheckResourceAttrSet("jellyfin_plugin.test", "status"),
 				),
 			},
 			// ImportState by the resource's own ID (round-trip verification).
@@ -138,6 +139,91 @@ resource "jellyfin_plugin" "test" {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", older),
 					resource.TestCheckResourceAttr("jellyfin_plugin.test", "installed_version", older),
+				),
+			},
+		},
+	})
+}
+
+// TestAccPluginResourceVersionIsAMinimumWhileUpdatesAreOn follows Jellyfin's
+// Update Plugins task past a pinned version while the task has its default
+// triggers, without the restart that would load the update: installing the
+// newer version and uninstalling the pinned one leaves Jellyfin listing only
+// the newer one, as after the task ran and the server restarted. Its name
+// stays outside the pattern of the isolated restart step.
+func TestAccPluginResourceVersionIsAMinimumWhileUpdatesAreOn(t *testing.T) {
+	pkg := testAccFindUninstalledPackage(t, stableRepoURL, 2)
+	older, newer := pkg.Versions[1].Version, pkg.Versions[0].Version
+	testAccRestorePluginUpdateTriggers(t)
+	config := func(version string) string {
+		return fmt.Sprintf(`
+resource "jellyfin_plugin" "test" {
+  name           = %q
+  version        = %q
+  repository_url = %q
+}
+`, pkg.Name, version, stableRepoURL)
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckPluginNotListed(t, pkg.Name),
+		Steps: []resource.TestStep{
+			{
+				Config: config(older),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "installed_version", older),
+					resource.TestCheckResourceAttrSet("jellyfin_plugin.test", "status"),
+				),
+			},
+			{
+				PreConfig: func() {
+					// A client from before the step is signed out by the
+					// provider's own sign-in, which shares its device ID.
+					c := testAccClient(t)
+					ctx := t.Context()
+					if err := c.InstallPlugin(ctx, pkg.Name, newer, stableRepoURL); err != nil {
+						t.Fatalf("installing %s %s: %v", pkg.Name, newer, err)
+					}
+					if _, err := (&PluginResource{client: c}).waitForPlugin(ctx, pkg.Name, newer, pluginInstallTimeout); err != nil {
+						t.Fatal(err)
+					}
+					listed, err := testAccListedPlugins(ctx, c, pkg.Name)
+					if err != nil {
+						t.Fatalf("listing %s: %v", pkg.Name, err)
+					}
+					for _, p := range listed {
+						if p.Version != older {
+							continue
+						}
+						if err := c.UninstallPluginVersion(ctx, p.ID, p.Version); err != nil {
+							t.Fatalf("uninstalling %s %s: %v", pkg.Name, older, err)
+						}
+					}
+				},
+				Config: config(older),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", older),
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "installed_version", newer),
+				),
+			},
+			// The installed version satisfies the new pin, so only state
+			// changes.
+			{
+				Config: config(newer),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("jellyfin_plugin.test", plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "version", newer),
+					resource.TestCheckResourceAttr("jellyfin_plugin.test", "installed_version", newer),
+					testAccCheckPluginListedOnlyAt(t, pkg.Name, newer),
 				),
 			},
 		},

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -482,6 +483,8 @@ func TestFindTask(t *testing.T) {
 // its ID ignoring case.
 type fakeTaskServer struct {
 	tasks []client.ScheduledTask
+	// byIDStatus, when set, is what GET /ScheduledTasks/{id} answers instead.
+	byIDStatus int
 
 	mu       sync.Mutex
 	requests int
@@ -500,6 +503,10 @@ func (f *fakeTaskServer) client(t *testing.T) *client.Client {
 		}
 		if r.URL.Path == "/ScheduledTasks" {
 			_ = json.NewEncoder(w).Encode(f.tasks)
+			return
+		}
+		if f.byIDStatus != 0 {
+			w.WriteHeader(f.byIDStatus)
 			return
 		}
 		id := strings.TrimPrefix(r.URL.Path, "/ScheduledTasks/")
@@ -898,5 +905,203 @@ func TestScheduledTaskReadDropsATaskThatIsGone(t *testing.T) {
 	resp := readAgainst(t, NewScheduledTaskResource(), srv.client(t), tfsdk.State{Schema: s, Raw: scheduledTaskValue(t, gone)})
 	if resp.Diagnostics.HasError() || !resp.State.Raw.IsNull() {
 		t.Errorf("Read() = %v with state %v, want the resource removed without an error", resp.Diagnostics, resp.State.Raw)
+	}
+}
+
+// plannedSchedule returns the schedule a PluginUpdates task planned through c.
+func plannedSchedule(c *client.Client) autoUpdate {
+	w := autoUpdateWalkFor(c)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.planned
+}
+
+// planPluginUpdatesCreate plans a jellyfin_scheduled_task that creates
+// triggers for the PluginUpdates task by its key.
+func planPluginUpdatesCreate(t *testing.T, c *client.Client, triggers types.List) resource.ModifyPlanResponse {
+	t.Helper()
+	config := keyConfig(PluginUpdatesTaskKey)
+	config.Triggers = triggers
+	plan := keyCreatePlan(PluginUpdatesTaskKey)
+	plan.Triggers = triggers
+	_, resp := planScheduledTask(t, c, config, nil, plan)
+	return resp
+}
+
+func TestUnitScheduledTaskPlanRecordsThePluginUpdatesSchedule(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		key      string
+		triggers func(*testing.T) types.List
+		want     autoUpdate
+	}{
+		"PluginUpdates with a trigger":                    {key: PluginUpdatesTaskKey, triggers: updateTriggersOn, want: autoUpdateOn},
+		"PluginUpdates without triggers":                  {key: PluginUpdatesTaskKey, triggers: updateTriggersOff, want: autoUpdateOff},
+		"PluginUpdates with triggers unknown until apply": {key: PluginUpdatesTaskKey, triggers: updateTriggersUnknown, want: autoUpdateUnknown},
+		"another task": {key: "RefreshLibrary", triggers: updateTriggersOn},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			c := (&fakeTaskServer{tasks: testTasks()}).client(t)
+			config := keyConfig(tc.key)
+			config.Triggers = tc.triggers(t)
+			plan := keyCreatePlan(tc.key)
+			plan.Triggers = config.Triggers
+			if _, resp := planScheduledTask(t, c, config, nil, plan); resp.Diagnostics.HasError() {
+				t.Fatalf("ModifyPlan() = %v", resp.Diagnostics)
+			}
+			if got := plannedSchedule(c); got != tc.want {
+				t.Errorf("planned schedule %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	// Destroying the resource leaves the triggers as they are.
+	t.Run("destroyed", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		srv := &fakeTaskServer{tasks: testTasks()}
+		c := srv.client(t)
+		s := scheduledTaskSchema(t)
+		null := tfsdk.Plan{Schema: s, Raw: scheduledTaskValue(t, nil)}
+		resp := resource.ModifyPlanResponse{Plan: null}
+		(&ScheduledTaskResource{client: c}).ModifyPlan(ctx, resource.ModifyPlanRequest{
+			Config: tfsdk.Config(null),
+			State:  tfsdk.State{Schema: s, Raw: scheduledTaskValue(t, storedTask(updatePluginsID, types.StringValue(PluginUpdatesTaskKey)))},
+			Plan:   null,
+		}, &resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("ModifyPlan() = %v", resp.Diagnostics)
+		}
+		if got := plannedSchedule(c); got != "" || srv.requestCount() != 0 {
+			t.Errorf("planned schedule %q after %d requests, want none", got, srv.requestCount())
+		}
+	})
+}
+
+// With only task_id set, the planned key is the state's, which names the task
+// only while task_id stays the state's; otherwise the task is looked up.
+func TestUnitScheduledTaskPlanFindsPluginUpdatesByTaskID(t *testing.T) {
+	t.Parallel()
+
+	byID := func(t *testing.T, taskID string) ScheduledTaskResourceModel {
+		return ScheduledTaskResourceModel{ID: types.StringNull(), Key: types.StringNull(), TaskID: types.StringValue(taskID), Triggers: updateTriggersOn(t)}
+	}
+	tests := map[string]struct {
+		state        *ScheduledTaskResourceModel
+		taskID       string
+		wantRequests int
+		want         autoUpdate
+	}{
+		"create":                           {taskID: updatePluginsID, wantRequests: 1, want: autoUpdateOn},
+		"update":                           {state: storedTask(updatePluginsID, types.StringValue(PluginUpdatesTaskKey)), taskID: updatePluginsID, want: autoUpdateOn},
+		"update in another case":           {state: storedTask(strings.ToUpper(updatePluginsID), types.StringValue(PluginUpdatesTaskKey)), taskID: updatePluginsID, want: autoUpdateOn},
+		"replacing another task by it":     {state: storedTask(scanMediaLibraryID, types.StringValue("RefreshLibrary")), taskID: updatePluginsID, wantRequests: 1, want: autoUpdateOn},
+		"replacing it by another task":     {state: storedTask(updatePluginsID, types.StringValue(PluginUpdatesTaskKey)), taskID: scanMediaLibraryID, wantRequests: 1},
+		"create for a task_id no task has": {taskID: cleanLogFilesID, wantRequests: 1},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := &fakeTaskServer{tasks: testTasks()}
+			c := srv.client(t)
+			config := byID(t, tc.taskID)
+			plan := config
+			plan.ID, plan.Key = types.StringUnknown(), types.StringUnknown()
+			if tc.state != nil {
+				// The framework plans the stored key for an unset one.
+				plan.ID, plan.Key = tc.state.ID, tc.state.Key
+			}
+			if _, resp := planScheduledTask(t, c, config, tc.state, plan); resp.Diagnostics.HasError() {
+				t.Fatalf("ModifyPlan() = %v", resp.Diagnostics)
+			}
+			if n := srv.requestCount(); n != tc.wantRequests {
+				t.Errorf("ModifyPlan() made %d requests, want %d", n, tc.wantRequests)
+			}
+			if got := plannedSchedule(c); got != tc.want {
+				t.Errorf("planned schedule %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A task_id no task has is Create's to report, but any other failure to read
+// the task fails the plan: planning on could miss a PluginUpdates task the
+// plan changes.
+func TestUnitScheduledTaskPlanReportsAFailedLookUpByTaskID(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		status     int
+		wantErrors []string
+	}{
+		"not found":           {status: http.StatusNotFound},
+		"server error":        {status: http.StatusInternalServerError, wantErrors: []string{"error Failed to read scheduled task"}},
+		"service unavailable": {status: http.StatusServiceUnavailable, wantErrors: []string{"error Failed to read scheduled task"}},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := &fakeTaskServer{tasks: testTasks(), byIDStatus: tc.status}
+			c := srv.client(t)
+			config := ScheduledTaskResourceModel{ID: types.StringNull(), Key: types.StringNull(), TaskID: types.StringValue(updatePluginsID), Triggers: updateTriggersOff(t)}
+			plan := config
+			plan.ID, plan.Key = types.StringUnknown(), types.StringUnknown()
+			_, resp := planScheduledTask(t, c, config, nil, plan)
+			if got := described(resp.Diagnostics); !slices.Equal(got, tc.wantErrors) {
+				t.Fatalf("ModifyPlan() diagnostics %q, want %q", got, tc.wantErrors)
+			}
+			if tc.wantErrors != nil && !strings.Contains(resp.Diagnostics[0].Detail(), strconv.Itoa(tc.status)) {
+				t.Errorf("ModifyPlan() error detail %q, want the status Jellyfin answered", resp.Diagnostics[0].Detail())
+			}
+			if got := plannedSchedule(c); got != "" {
+				t.Errorf("planned schedule %q, want none", got)
+			}
+		})
+	}
+}
+
+func TestUnitScheduledTaskPlanRejectsTwoSchedulesForPluginUpdates(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		first, second func(*testing.T) types.List
+		wantErrors    []string
+		want          autoUpdate
+	}{
+		"off, then on": {
+			first: updateTriggersOff, second: updateTriggersOn,
+			wantErrors: []string{"error PluginUpdates task scheduled twice at triggers"}, want: autoUpdateOff,
+		},
+		"on twice":          {first: updateTriggersOn, second: updateTriggersOn, want: autoUpdateOn},
+		"on, then unknown":  {first: updateTriggersOn, second: updateTriggersUnknown, want: autoUpdateUnknown},
+		"unknown, then off": {first: updateTriggersUnknown, second: updateTriggersOff, want: autoUpdateUnknown},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			c := (&fakeTaskServer{tasks: testTasks()}).client(t)
+			if resp := planPluginUpdatesCreate(t, c, tc.first(t)); len(resp.Diagnostics) > 0 {
+				t.Fatalf("first ModifyPlan() = %v", resp.Diagnostics)
+			}
+			resp := planPluginUpdatesCreate(t, c, tc.second(t))
+			if got := described(resp.Diagnostics); !slices.Equal(got, tc.wantErrors) {
+				t.Errorf("second ModifyPlan() diagnostics %q, want %q", got, tc.wantErrors)
+			}
+			if got := plannedSchedule(c); got != tc.want {
+				t.Errorf("planned schedule %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

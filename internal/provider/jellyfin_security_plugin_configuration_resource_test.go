@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
@@ -121,7 +122,7 @@ func TestAccSecurityPluginSupportedVersionKeyword(t *testing.T) {
 	testAccRegisterRepository(t, "JellyfinSecurity", securityPluginRepoURL)
 
 	installer := &PluginResource{client: testAccClient(t)}
-	build, err := installer.resolvePluginVersion(t.Context(), securityPluginName, types.StringValue(pluginVersionSupported))
+	build, err := installer.resolvePluginVersion(t.Context(), securityPluginName, types.StringValue(pluginVersionSupported), new(diag.Diagnostics))
 	if err != nil {
 		t.Fatalf("resolving the supported JellyfinSecurity build: %v", err)
 	}
@@ -218,7 +219,7 @@ func testAccInstallSecurityPlugin(t *testing.T) *client.Client {
 	}
 
 	installer := &PluginResource{client: c}
-	version, err := installer.resolvePluginVersion(ctx, securityPluginName, types.StringNull())
+	version, err := installer.resolvePluginVersion(ctx, securityPluginName, types.StringNull(), new(diag.Diagnostics))
 	if err != nil {
 		t.Fatalf("resolving the supported JellyfinSecurity build: %v", err)
 	}
