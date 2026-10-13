@@ -5,6 +5,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -54,9 +56,11 @@ func (r *APIKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"external applications to access the Jellyfin API.",
 		Attributes: map[string]schema.Attribute{
 			"app_name": schema.StringAttribute{
-				Description:         "The application name for the API key.",
-				MarkdownDescription: "The application name for the API key.",
-				Required:            true,
+				Description:         "The application name for the API key. Defaults to `Terraform`.",
+				MarkdownDescription: "The application name for the API key. Defaults to `Terraform`.",
+				Optional:            true,
+				Computed:            true,
+				Default:             stringdefault.StaticString("Terraform"),
 				Validators: []validator.String{
 					stringvalidator.LengthAtLeast(1),
 				},
@@ -199,6 +203,46 @@ func (r *APIKeyResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	}
 }
 
+// ImportState takes the access token of the key or, when no key has that
+// token, its app name. Read fills in the rest from the access token.
 func (r *APIKeyResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("access_token"), req, resp)
+	keys, err := r.client.GetAPIKeys(ctx)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to list API keys", err.Error())
+		return
+	}
+
+	key, problem := importedAPIKey(keys, req.ID)
+	if key == nil {
+		resp.Diagnostics.AddError("Failed to import API key", problem)
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), key.AccessToken)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("access_token"), key.AccessToken)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("app_name"), key.AppName)...)
+}
+
+// importedAPIKey returns the key whose access token is id, else the only key
+// whose app name is id. Without one it returns nil and what is wrong, which
+// never contains an access token.
+func importedAPIKey(keys []client.APIKey, id string) (*client.APIKey, string) {
+	if i := slices.IndexFunc(keys, func(k client.APIKey) bool { return k.AccessToken == id }); i >= 0 {
+		return &keys[i], ""
+	}
+
+	var named []*client.APIKey
+	for i := range keys {
+		if keys[i].AppName == id {
+			named = append(named, &keys[i])
+		}
+	}
+	switch len(named) {
+	case 0:
+		return nil, fmt.Sprintf("No API key has %q as its access token or app name.", id)
+	case 1:
+		return named[0], ""
+	default:
+		return nil, fmt.Sprintf("%d API keys have the app name %q. Import one of them by its access token.", len(named), id)
+	}
 }

@@ -373,11 +373,120 @@ func TestGenerateAPIKeys(t *testing.T) {
 	if len(imports) != 1 {
 		t.Errorf("expected 1 import block, got %d", len(imports))
 	}
-	if !strings.Contains(imports[0], `"test-token-123"`) {
-		t.Errorf("expected import ID test-token-123: %s", imports[0])
+	if !strings.Contains(imports[0], `id = "MyApp"`) || strings.Contains(imports[0], "test-token-123") {
+		t.Errorf("expected import ID MyApp and no token: %s", imports[0])
 	}
 	if !strings.Contains(resources[0], `app_name = "MyApp"`) {
 		t.Errorf("expected app_name MyApp: %s", resources[0])
+	}
+}
+
+// apiKeyServer serves keys as the API keys of a server.
+func apiKeyServer(t *testing.T, keys []client.APIKey) *httptest.Server {
+	t.Helper()
+	inner := setupTestServer(t)
+	t.Cleanup(inner.Close)
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/Auth/Keys" {
+			writeJSON(t, w, map[string]any{"Items": keys})
+			return
+		}
+		inner.Config.Handler.ServeHTTP(w, r)
+	}))
+}
+
+// The access token is a secret, so a key whose app name is shared, empty or a
+// token itself is imported by token and named in the warning; the others are
+// imported by app name.
+func TestGenerateAPIKeysImportIDs(t *testing.T) {
+	server := apiKeyServer(t, []client.APIKey{
+		{AccessToken: "tok-sonarr", AppName: "Sonarr"},
+		{AccessToken: "tok-east", AppName: "Grafana"},
+		{AccessToken: "tok-west", AppName: "Grafana"},
+		{AccessToken: "tok-blank", AppName: ""},
+		{AccessToken: "tok-radarr", AppName: "tok-sonarr"},
+	})
+	defer server.Close()
+
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
+	imports, resources, err := g.generateAPIKeys(t.Context())
+	if err != nil {
+		t.Fatalf("generateAPIKeys() error: %v", err)
+	}
+
+	wantIDs := []string{"Sonarr", "tok-east", "tok-west", "tok-blank", "tok-radarr"}
+	if len(imports) != len(wantIDs) || len(resources) != len(wantIDs) {
+		t.Fatalf("got %d imports and %d resources, want %d each", len(imports), len(resources), len(wantIDs))
+	}
+	for i, want := range wantIDs {
+		if !strings.Contains(imports[i], `id = "`+want+`"`) {
+			t.Errorf("import %d = %s, want ID %s", i, imports[i], want)
+		}
+	}
+	if want := []string{`"Grafana"`, `""`, `"tok-sonarr"`}; !slices.Equal(g.tokenImportedKeys, want) {
+		t.Errorf("tokenImportedKeys = %q, want %q", g.tokenImportedKeys, want)
+	}
+}
+
+func TestGenerateAPIKeysImportsUniqueNamesByName(t *testing.T) {
+	server := apiKeyServer(t, []client.APIKey{
+		{AccessToken: "tok-sonarr", AppName: "Sonarr"},
+		{AccessToken: "tok-grafana", AppName: "Grafana"},
+	})
+	defer server.Close()
+
+	g := &generator{client: client.NewClient(server.URL, "test-key")}
+	imports, _, err := g.generateAPIKeys(t.Context())
+	if err != nil {
+		t.Fatalf("generateAPIKeys() error: %v", err)
+	}
+	for i, want := range []string{"Sonarr", "Grafana"} {
+		if !strings.Contains(imports[i], `id = "`+want+`"`) || strings.Contains(imports[i], "tok-") {
+			t.Errorf("import %d = %s, want ID %s and no token", i, imports[i], want)
+		}
+	}
+	if len(g.tokenImportedKeys) != 0 {
+		t.Errorf("tokenImportedKeys = %q, want none", g.tokenImportedKeys)
+	}
+}
+
+// The warning appears only when imports.tf holds a token, and names the keys
+// by app name without it.
+func TestGenerateWarnsAboutAPIKeyTokensOnlyWhenWritten(t *testing.T) {
+	tests := map[string]struct {
+		keys        []client.APIKey
+		wantWarning string
+	}{
+		"unique names": {
+			keys: []client.APIKey{{AccessToken: "tok-sonarr", AppName: "Sonarr"}, {AccessToken: "tok-radarr", AppName: "Radarr"}},
+		},
+		"no keys": {},
+		"shared name": {
+			keys:        []client.APIKey{{AccessToken: "tok-sonarr", AppName: "Sonarr"}, {AccessToken: "tok-east", AppName: "Grafana"}, {AccessToken: "tok-west", AppName: "Grafana"}},
+			wantWarning: `Warning: imports.tf holds access tokens as the import IDs of the API keys named "Grafana", because jellyfin_api_key imports by app name only when one key has it; keep imports.tf out of version control, and remove those import blocks once terraform apply has imported the keys` + "\n",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			server := apiKeyServer(t, tc.keys)
+			defer server.Close()
+
+			var warnings strings.Builder
+			g := &generator{client: client.NewClient(server.URL, "test-key"), outputDir: t.TempDir(), warnings: &warnings}
+			if err := g.Generate(t.Context()); err != nil {
+				t.Fatalf("Generate() error: %v", err)
+			}
+			got := warnings.String()
+			for _, k := range tc.keys {
+				if strings.Contains(got, k.AccessToken) {
+					t.Errorf("warning %q holds the access token %s", got, k.AccessToken)
+				}
+			}
+			if got != tc.wantWarning {
+				t.Errorf("warnings = %q, want %q", got, tc.wantWarning)
+			}
+		})
 	}
 }
 
@@ -809,9 +918,9 @@ func TestFullGenerate(t *testing.T) {
 	if err := g.Generate(t.Context()); err != nil {
 		t.Fatalf("Generate() error: %v", err)
 	}
-	// The server has an API key, whose token is its import ID.
-	if got := warnings.String(); strings.Count(got, "Warning:") != 1 || !strings.Contains(got, "access token of each API key") {
-		t.Errorf("expected only the API key token warning for an empty output directory, got %q", got)
+	// The server's one API key is imported by its app name, not its token.
+	if got := warnings.String(); got != "" {
+		t.Errorf("expected no warning for an empty output directory, got %q", got)
 	}
 
 	importsContent, err := os.ReadFile(filepath.Join(outputDir, "imports.tf"))

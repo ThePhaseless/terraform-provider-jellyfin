@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/defaults"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
@@ -50,5 +51,26 @@ func TestUnitCreatedAPIKeyTakesTheKeyOfItsApp(t *testing.T) {
 		case got != nil && got.AccessToken != test.want:
 			t.Errorf("%s: took %s, want %q", test.app, got.AccessToken, test.want)
 		}
+	}
+}
+
+// A config without app_name plans the name Terraform; one that sets it keeps
+// what it sets, since the attribute stays settable.
+func TestAPIKeyResourceAppNameDefaultsToTerraform(t *testing.T) {
+	t.Parallel()
+
+	s := schemaOf(&APIKeyResource{})
+	attr, ok := s.Attributes["app_name"].(rschema.StringAttribute)
+	if !ok {
+		t.Fatalf("app_name attribute type = %T, want schema.StringAttribute", s.Attributes["app_name"])
+	}
+	if !attr.Optional || !attr.Computed || attr.Required {
+		t.Errorf("app_name optional %t, computed %t, required %t; want optional and computed", attr.Optional, attr.Computed, attr.Required)
+	}
+
+	var resp defaults.StringResponse
+	attr.Default.DefaultString(t.Context(), defaults.StringRequest{}, &resp)
+	if resp.PlanValue.ValueString() != "Terraform" {
+		t.Errorf("default app_name = %v, want Terraform", resp.PlanValue)
 	}
 }

@@ -41,6 +41,31 @@ resource "jellyfin_api_key" "test" {
 				},
 				ImportStateVerifyIgnore: []string{"access_token"},
 			},
+			{
+				ResourceName:                         "jellyfin_api_key.test",
+				ImportState:                          true,
+				ImportStateVerify:                    true,
+				ImportStateVerifyIdentifierAttribute: "access_token",
+				ImportStateId:                        "terraform-test-key",
+			},
+		},
+	})
+}
+
+func TestAccAPIKeyResourceDefaultAppName(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "jellyfin_api_key" "test" {}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("jellyfin_api_key.test", "app_name", "Terraform"),
+					resource.TestCheckResourceAttrSet("jellyfin_api_key.test", "access_token"),
+				),
+			},
 		},
 	})
 }

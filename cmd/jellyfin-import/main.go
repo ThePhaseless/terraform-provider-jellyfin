@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -108,6 +109,9 @@ type generator struct {
 	// the PluginUpdates task, whose triggers decide whether a jellyfin_plugin
 	// version is a minimum or exact, or "" before one is written.
 	pluginUpdatesTask string
+	// tokenImportedKeys are the quoted app names, each once, of the API keys
+	// whose import ID is the access token.
+	tokenImportedKeys []string
 }
 
 func (g *generator) warnf(format string, args ...any) {
@@ -135,28 +139,25 @@ func (g *generator) uniqueName(resourceType, baseName string) string {
 // Generate generates all Terraform files.
 func (g *generator) Generate(ctx context.Context) error {
 	sections := []struct {
-		name          string
-		generate      func(context.Context) ([]string, []string, error)
-		importsTokens bool
+		name     string
+		generate func(context.Context) ([]string, []string, error)
 	}{
-		{"users", g.generateUsers, false},
-		{"libraries", g.generateLibraries, false},
-		{"API keys", g.generateAPIKeys, true},
-		{"plugin repositories", g.generatePluginRepositories, false},
+		{"users", g.generateUsers},
+		{"libraries", g.generateLibraries},
+		{"API keys", g.generateAPIKeys},
+		{"plugin repositories", g.generatePluginRepositories},
 		// Before the plugins, which depend on the PluginUpdates task.
-		{"scheduled tasks", g.generateScheduledTasks, false},
-		{"plugins", g.generatePlugins, false},
-		{"configurations", g.generateSingletonConfigs, false},
+		{"scheduled tasks", g.generateScheduledTasks},
+		{"plugins", g.generatePlugins},
+		{"configurations", g.generateSingletonConfigs},
 	}
 
 	var imports, resources []string
-	tokensImported := false
 	for _, s := range sections {
 		sectionImports, sectionResources, err := s.generate(ctx)
 		if err != nil {
 			return fmt.Errorf("generating %s: %w", s.name, err)
 		}
-		tokensImported = tokensImported || s.importsTokens && len(sectionImports) > 0
 		imports = append(imports, sectionImports...)
 		resources = append(resources, sectionResources...)
 	}
@@ -165,8 +166,8 @@ func (g *generator) Generate(ctx context.Context) error {
 		if err := g.writeFile("imports.tf", strings.Join(imports, "\n")); err != nil {
 			return fmt.Errorf("writing imports.tf: %w", err)
 		}
-		if tokensImported {
-			g.warnf("imports.tf holds the access token of each API key as its import ID; keep it out of version control, and remove those import blocks once terraform apply has imported the keys")
+		if len(g.tokenImportedKeys) > 0 {
+			g.warnf("imports.tf holds access tokens as the import IDs of the API keys named %s, because jellyfin_api_key imports by app name only when one key has it; keep imports.tf out of version control, and remove those import blocks once terraform apply has imported the keys", strings.Join(g.tokenImportedKeys, ", "))
 		}
 	}
 
@@ -272,10 +273,25 @@ func (g *generator) generateAPIKeys(ctx context.Context) ([]string, []string, er
 		return nil, nil, err
 	}
 
+	// The access token is a secret, so the app name is the import ID when it
+	// is unique among the keys and cannot be mistaken for a token.
+	seen := map[string]int{}
+	for _, key := range keys {
+		seen[key.AppName]++
+		seen[key.AccessToken]++
+	}
+
 	var imports, resources []string
 	for _, key := range keys {
 		name := g.uniqueName("jellyfin_api_key", sanitizeName(key.AppName))
-		imports = append(imports, importBlock("jellyfin_api_key", name, key.AccessToken))
+		importID := key.AppName
+		if key.AppName == "" || seen[key.AppName] > 1 {
+			importID = key.AccessToken
+			if quoted := hclString(key.AppName); !slices.Contains(g.tokenImportedKeys, quoted) {
+				g.tokenImportedKeys = append(g.tokenImportedKeys, quoted)
+			}
+		}
+		imports = append(imports, importBlock("jellyfin_api_key", name, importID))
 
 		attrs := map[string]string{
 			"app_name": hclString(key.AppName),
