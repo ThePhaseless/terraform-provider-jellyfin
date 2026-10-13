@@ -167,7 +167,7 @@ func (g *generator) Generate(ctx context.Context) error {
 			return fmt.Errorf("writing imports.tf: %w", err)
 		}
 		if len(g.tokenImportedKeys) > 0 {
-			g.warnf("imports.tf holds access tokens as the import IDs of the API keys named %s, because jellyfin_api_key imports by app name only when one key has it; keep imports.tf out of version control, and remove those import blocks once terraform apply has imported the keys", strings.Join(g.tokenImportedKeys, ", "))
+			g.warnf("imports.tf imports the API keys named %s by access token, because more than one key has each of those names; keep imports.tf out of version control, and remove those import blocks once terraform apply has imported the keys", strings.Join(g.tokenImportedKeys, ", "))
 		}
 	}
 

@@ -100,12 +100,10 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"The setting is global; the autoUpdate flag in a plugin's meta.json is not read. " +
 			"Creating the resource never keeps a version Jellyfin lists as NotSupported or Malfunctioned: it installs the configured version, and fails if no enabled repository offers a build of it for this server.\n\n" +
 			"To hold every plugin at its configured version, remove the task's triggers with jellyfin_scheduled_task. " +
-			"Whenever a jellyfin_scheduled_task manages PluginUpdates, give every jellyfin_plugin depends_on = [jellyfin_scheduled_task.<name>], or put the depends_on on the module that holds the plugins. " +
-			"Terraform then applies the schedule before the plugins and before any jellyfin_restart that depends on them, and an apply that removes the triggers also reinstalls each plugin the task moved past its version. " +
-			"Without depends_on, a plan that turns updates on or off can fail with an error asking for it, terraform destroy included. " +
-			"If the task resource itself depends on a plugin, as a for_each over tasks that plugins add can, manage PluginUpdates in a jellyfin_scheduled_task of its own. " +
-			"Keep the task and the plugins on one provider configuration: across provider aliases the provider cannot see the planned schedule, so it plans a plugin against the server's current one, without a warning, until the next plan. " +
-			"When a plan cannot know the schedule, as with triggers unknown until apply or -refresh=false, it warns, and the next plan corrects it.\n\n" +
+			"When a jellyfin_scheduled_task manages PluginUpdates, give each jellyfin_plugin depends_on = [jellyfin_scheduled_task.<name>], so Terraform applies the schedule first, and one apply that removes the triggers also reinstalls the plugins the task moved past their version. " +
+			"Without it, a plan that turns updates on or off can fail and ask for it. " +
+			"Keep the task and the plugins on one provider configuration. " +
+			"A plan that cannot know the schedule, such as with triggers unknown until apply or -refresh=false, warns, and the next plan corrects it.\n\n" +
 			"Replacing the resource also replaces the resources that take its id, such as jellyfin_plugin_configuration, because the id is unknown until the plugin is installed again. They then write their configuration again, which Jellyfin accepts only once a restart has loaded the reinstalled plugin, so put a jellyfin_restart between them, as the jellyfin_security_plugin_configuration example does.",
 		MarkdownDescription: "Installs a plugin on the Jellyfin server. The server may require a restart after installation.\n\n" +
 			"Jellyfin's *Update Plugins* scheduled task (key `PluginUpdates`) upgrades every plugin to the newest compatible version its repositories offer, at startup and every 24 hours by default. " +
@@ -114,12 +112,10 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"The setting is global; the `autoUpdate` flag in a plugin's `meta.json` is not read. " +
 			"Creating the resource never keeps a version Jellyfin lists as `NotSupported` or `Malfunctioned`: it installs the configured version, and fails if no enabled repository offers a build of it for this server.\n\n" +
 			"To hold every plugin at its configured version, remove the task's triggers with `jellyfin_scheduled_task`. " +
-			"Whenever a `jellyfin_scheduled_task` manages `PluginUpdates`, give every `jellyfin_plugin` `depends_on = [jellyfin_scheduled_task.<name>]`, or put the `depends_on` on the module that holds the plugins. " +
-			"Terraform then applies the schedule before the plugins and before any `jellyfin_restart` that depends on them, and an apply that removes the triggers also reinstalls each plugin the task moved past its `version`. " +
-			"Without `depends_on`, a plan that turns updates on or off can fail with an error asking for it, `terraform destroy` included. " +
-			"If the task resource itself depends on a plugin, as a `for_each` over tasks that plugins add can, manage `PluginUpdates` in a `jellyfin_scheduled_task` of its own. " +
-			"Keep the task and the plugins on one provider configuration: across provider aliases the provider cannot see the planned schedule, so it plans a plugin against the server's current one, without a warning, until the next plan. " +
-			"When a plan cannot know the schedule, as with triggers unknown until apply or `-refresh=false`, it warns, and the next plan corrects it.\n\n" +
+			"When a `jellyfin_scheduled_task` manages `PluginUpdates`, give each `jellyfin_plugin` `depends_on = [jellyfin_scheduled_task.<name>]`, so Terraform applies the schedule first, and one apply that removes the triggers also reinstalls the plugins the task moved past their `version`. " +
+			"Without it, a plan that turns updates on or off can fail and ask for it. " +
+			"Keep the task and the plugins on one provider configuration. " +
+			"A plan that cannot know the schedule, such as with triggers unknown until apply or `-refresh=false`, warns, and the next plan corrects it.\n\n" +
 			"Replacing the resource also replaces the resources that take its `id`, such as `jellyfin_plugin_configuration`, because the `id` is unknown until the plugin is installed again. They then write their configuration again, which Jellyfin accepts only once a restart has loaded the reinstalled plugin, so put a `jellyfin_restart` between them, as the `jellyfin_security_plugin_configuration` example does.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{

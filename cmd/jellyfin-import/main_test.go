@@ -463,7 +463,7 @@ func TestGenerateWarnsAboutAPIKeyTokensOnlyWhenWritten(t *testing.T) {
 		"no keys": {},
 		"shared name": {
 			keys:        []client.APIKey{{AccessToken: "tok-sonarr", AppName: "Sonarr"}, {AccessToken: "tok-east", AppName: "Grafana"}, {AccessToken: "tok-west", AppName: "Grafana"}},
-			wantWarning: `Warning: imports.tf holds access tokens as the import IDs of the API keys named "Grafana", because jellyfin_api_key imports by app name only when one key has it; keep imports.tf out of version control, and remove those import blocks once terraform apply has imported the keys` + "\n",
+			wantWarning: `Warning: imports.tf imports the API keys named "Grafana" by access token, because more than one key has each of those names; keep imports.tf out of version control, and remove those import blocks once terraform apply has imported the keys` + "\n",
 		},
 	}
 

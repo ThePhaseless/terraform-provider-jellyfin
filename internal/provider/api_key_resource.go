@@ -56,7 +56,7 @@ func (r *APIKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"external applications to access the Jellyfin API.",
 		Attributes: map[string]schema.Attribute{
 			"app_name": schema.StringAttribute{
-				Description:         "The application name for the API key. Defaults to `Terraform`.",
+				Description:         "The application name for the API key. Defaults to Terraform.",
 				MarkdownDescription: "The application name for the API key. Defaults to `Terraform`.",
 				Optional:            true,
 				Computed:            true,
