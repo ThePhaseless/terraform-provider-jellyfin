@@ -139,6 +139,17 @@ type autoUpdateWalk struct {
 	// plugins holds each plugin refreshed or planned in this walk, keyed by
 	// normalizeGUID of its ID.
 	plugins map[string]*pluginAutoUpdate
+	// server is the read of the server's schedule that the refreshes in this
+	// walk share, or nil until one starts and after one fails.
+	server *scheduleRead
+}
+
+// scheduleRead is one GET /ScheduledTasks: schedule and err are set before
+// done closes.
+type scheduleRead struct {
+	done     chan struct{}
+	schedule autoUpdate
+	err      error
 }
 
 type pluginAutoUpdate struct {
@@ -194,6 +205,38 @@ func (w *autoUpdateWalk) plannedFor(id, name string) (autoUpdate, bool) {
 	e := w.entry(id, name)
 	e.used, e.refreshed = w.planned, true
 	return w.planned, true
+}
+
+// serverSchedule returns the server's schedule, which the refreshes in this
+// walk read once: no apply runs in a walk that refreshes, so none changes it.
+// The walk is not locked while the server answers. A refresh that waits for a
+// read that fails gets its error, and a later one reads again.
+func (w *autoUpdateWalk) serverSchedule(ctx context.Context, c *client.Client) (autoUpdate, error) {
+	if w == nil {
+		return pluginUpdatesOn(ctx, c)
+	}
+	w.mu.Lock()
+	if read := w.server; read != nil {
+		w.mu.Unlock()
+		select {
+		case <-read.done:
+			return read.schedule, read.err
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	read := &scheduleRead{done: make(chan struct{})}
+	w.server = read
+	w.mu.Unlock()
+
+	read.schedule, read.err = pluginUpdatesOn(ctx, c)
+	if read.err != nil {
+		w.mu.Lock()
+		w.server = nil
+		w.mu.Unlock()
+	}
+	close(read.done)
+	return read.schedule, read.err
 }
 
 // decided records that the plugin's Read used server, the schedule it read,

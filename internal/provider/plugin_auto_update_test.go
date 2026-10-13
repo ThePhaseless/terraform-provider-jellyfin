@@ -220,8 +220,8 @@ func TestUnitPluginReadKeepsAPinnedVersionAnUpdateExceeds(t *testing.T) {
 		{"keyword while updates are off", nil, []privateKey{pinnedKey(true)}, "latest", active("13.0.0.0"), "latest", "13.0.0.0", "Active", autoUpdateOff},
 		{
 			"the held version while an update waits for a restart", updatesOn, []privateKey{pinnedKey(true)}, "12.0.0.0",
-			[]client.InstalledPlugin{bookshelfAt("12.0.0.0", "Superceded"), bookshelfAt("13.0.0.0", "Restart")},
-			"12.0.0.0", "12.0.0.0", "Superceded", autoUpdateOn,
+			[]client.InstalledPlugin{bookshelfAt("12.0.0.0", "Superseded"), bookshelfAt("13.0.0.0", "Restart")},
+			"12.0.0.0", "12.0.0.0", "Superseded", autoUpdateOn,
 		},
 		{
 			"a reinstall listed next to the version Jellyfin could not load", updatesOn, []privateKey{pinnedKey(true)}, "12.0.0.0",
@@ -315,6 +315,58 @@ func TestUnitPluginReadRechecksThePlanAfterReadingTheSchedule(t *testing.T) {
 	}
 	if got := privateValue(t, resp.Private, privateAutoUpdate); got != `"off"` {
 		t.Errorf("stored auto_update %s, want \"off\"", got)
+	}
+}
+
+// The refreshes of a walk read the server's schedule once, however many run
+// at the same time.
+func TestUnitPluginReadsTheScheduleOncePerWalk(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakePluginServer{plugins: []client.InstalledPlugin{bookshelfAt("13.0.0.0", "Active")}, pluginUpdateTriggers: updatesOn}
+	r := newFakePluginResource(t, fake)
+	t.Run("refreshes", func(t *testing.T) {
+		for i := range 16 {
+			t.Run(strconv.Itoa(i), func(t *testing.T) {
+				t.Parallel()
+
+				resp := readPlugin(t, r, installedBookshelf("12.0.0.0", "12.0.0.0"), pinnedKey(true))
+				if resp.Diagnostics.HasError() {
+					t.Fatalf("Read: %v", resp.Diagnostics)
+				}
+				if got := privateValue(t, resp.Private, privateAutoUpdate); got != `"on"` {
+					t.Errorf("stored auto_update %s, want \"on\"", got)
+				}
+			})
+		}
+	})
+	if n := fake.scheduledTaskRequests(); n != 1 {
+		t.Errorf("the refreshes sent %d GET /ScheduledTasks, want 1", n)
+	}
+}
+
+// A failed read of the schedule is not kept: the next refresh reads it again.
+func TestUnitPluginReadRetriesAFailedScheduleRead(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakePluginServer{plugins: []client.InstalledPlugin{bookshelfAt("13.0.0.0", "Active")}, pluginUpdateTriggers: updatesOn, tasksStatus: http.StatusInternalServerError}
+	r := newFakePluginResource(t, fake)
+	if resp := readPlugin(t, r, installedBookshelf("12.0.0.0", "12.0.0.0"), pinnedKey(true)); !resp.Diagnostics.HasError() {
+		t.Fatal("Read succeeded while GET /ScheduledTasks fails")
+	}
+	fake.mu.Lock()
+	fake.tasksStatus = 0
+	fake.mu.Unlock()
+
+	resp := readPlugin(t, r, installedBookshelf("12.0.0.0", "12.0.0.0"), pinnedKey(true))
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("Read: %v", resp.Diagnostics)
+	}
+	if got := privateValue(t, resp.Private, privateAutoUpdate); got != `"on"` {
+		t.Errorf("stored auto_update %s, want \"on\"", got)
+	}
+	if n := fake.scheduledTaskRequests(); n != 2 {
+		t.Errorf("the refreshes sent %d GET /ScheduledTasks, want 2", n)
 	}
 }
 
@@ -973,8 +1025,8 @@ func TestUnitPluginCreateChoosesTheVersionToKeep(t *testing.T) {
 			triggers: updatesOn, wantInstalls: []string{"Bookshelf 13.0.0.0"}, wantInstalled: "13.0.0.0", wantStatus: "Restart",
 		},
 		{
-			name:     "a newer Superceded and a newest Restart, updates on",
-			listed:   []client.InstalledPlugin{bookshelfAt("14.0.0.0", "Superceded"), bookshelfAt("15.0.0.0", "Restart")},
+			name:     "a newer Superseded and a newest Restart, updates on",
+			listed:   []client.InstalledPlugin{bookshelfAt("14.0.0.0", "Superseded"), bookshelfAt("15.0.0.0", "Restart")},
 			triggers: updatesOn, wantInstalled: "15.0.0.0", wantStatus: "Restart",
 		},
 		{

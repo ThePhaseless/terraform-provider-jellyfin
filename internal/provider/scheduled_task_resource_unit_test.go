@@ -1032,6 +1032,47 @@ func TestUnitScheduledTaskPlanFindsPluginUpdatesByTaskID(t *testing.T) {
 	}
 }
 
+// A key unknown until apply names no task at plan time. It may name the
+// PluginUpdates task the state holds again, so the schedule is unknown; with
+// no state, as in a replacement's create, or the state of another task,
+// nothing says it names PluginUpdates, and no schedule is planned.
+func TestUnitScheduledTaskPlanWithAnUnknownKey(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		state  *ScheduledTaskResourceModel
+		taskID types.String
+		want   autoUpdate
+	}{
+		"replacing PluginUpdates":                        {state: storedTask(updatePluginsID, types.StringValue(PluginUpdatesTaskKey)), taskID: types.StringNull(), want: autoUpdateUnknown},
+		"replacing PluginUpdates stored in another case": {state: storedTask(updatePluginsID, types.StringValue(strings.ToLower(PluginUpdatesTaskKey))), taskID: types.StringNull(), want: autoUpdateUnknown},
+		"updating PluginUpdates to an unknown task_id":   {state: storedTask(updatePluginsID, types.StringValue(PluginUpdatesTaskKey)), taskID: types.StringUnknown(), want: autoUpdateUnknown},
+		"replacing another task":                         {state: storedTask(scanMediaLibraryID, types.StringValue("RefreshLibrary")), taskID: types.StringNull()},
+		"the create of a replacement":                    {taskID: types.StringNull()},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := &fakeTaskServer{tasks: testTasks()}
+			c := srv.client(t)
+			config := ScheduledTaskResourceModel{ID: types.StringNull(), Key: types.StringUnknown(), TaskID: tc.taskID, Triggers: updateTriggersOn(t)}
+			plan := config
+			plan.ID, plan.TaskID = types.StringUnknown(), types.StringUnknown()
+			if _, resp := planScheduledTask(t, c, config, tc.state, plan); resp.Diagnostics.HasError() {
+				t.Fatalf("ModifyPlan() = %v", resp.Diagnostics)
+			}
+			if n := srv.requestCount(); n != 0 {
+				t.Errorf("ModifyPlan() made %d requests, want none", n)
+			}
+			if got := plannedSchedule(c); got != tc.want {
+				t.Errorf("planned schedule %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // A task_id no task has is Create's to report, but any other failure to read
 // the task fails the plan: planning on could miss a PluginUpdates task the
 // plan changes.

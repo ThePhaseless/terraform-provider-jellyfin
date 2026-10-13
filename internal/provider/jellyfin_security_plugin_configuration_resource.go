@@ -475,12 +475,25 @@ func (r *JellyfinSecurityPluginConfigurationResource) securityPlugin(ctx context
 
 // requireInstalled reports, unless Jellyfin has the JellyfinSecurity plugin
 // installed and can load it, why its configuration cannot be written, and
-// otherwise returns its version.
+// otherwise returns its version: that of the entry securityPlugin selects, or,
+// when Jellyfin does not load that one, of another entry it lists as Active,
+// whose build it has loaded.
 func (r *JellyfinSecurityPluginConfigurationResource) requireInstalled(ctx context.Context, diags *diag.Diagnostics) (version string, ok bool) {
-	p, found, err := r.securityPlugin(ctx)
-	switch {
-	case err != nil:
+	plugins, err := r.client.GetInstalledPlugins(ctx)
+	if err != nil {
 		diags.AddError("Failed to check installed plugins", err.Error())
+		return "", false
+	}
+	p, found := selectInstalledPlugin(plugins, jellyfinSecurityPluginID, "", "")
+	if found && (p.Status == pluginStatusDisabled || p.Status == pluginStatusNotSupported || p.Status == pluginStatusMalfunctioned) {
+		for _, listed := range plugins {
+			if listed.Status == pluginStatusActive && normalizeGUID(listed.ID) == normalizeGUID(jellyfinSecurityPluginID) {
+				p = listed
+				break
+			}
+		}
+	}
+	switch {
 	case !found:
 		diags.AddError(
 			"JellyfinSecurity plugin not installed",

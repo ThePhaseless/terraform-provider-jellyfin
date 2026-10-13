@@ -555,10 +555,28 @@ func TestUnitSecurityPluginApplyChecksThePlugin(t *testing.T) {
 			wantErrors:   []string{"JellyfinSecurity plugin not loaded"},
 		},
 		{
+			// Jellyfin has the Active build loaded, and the configuration
+			// applies to it, so its version is the one checked.
+			name:         "a newer build Jellyfin cannot load next to the loaded one",
+			plugins:      []client.InstalledPlugin{listed(supportedSecurityPluginVersion(), pluginStatusActive), listed(newer, pluginStatusNotSupported)},
+			wantRequests: written,
+		},
+		{
+			name:         "a newer disabled build next to the loaded one",
+			plugins:      []client.InstalledPlugin{listed(newer, pluginStatusDisabled), listed(supportedSecurityPluginVersion(), pluginStatusActive)},
+			wantRequests: written,
+		},
+		{
+			name:         "a newer build that failed to load next to one waiting for a restart",
+			plugins:      []client.InstalledPlugin{listed(supportedSecurityPluginVersion(), "Restart"), listed(newer, pluginStatusMalfunctioned)},
+			wantRequests: []string{"GET /Plugins"},
+			wantErrors:   []string{"JellyfinSecurity plugin not loaded"},
+		},
+		{
 			// The newer version is what jellyfin_plugin reads while it waits
 			// for a restart.
 			name:         "updated, waiting for a restart",
-			plugins:      []client.InstalledPlugin{listed(supportedSecurityPluginVersion(), "Superceded"), listed(newer, "Restart")},
+			plugins:      []client.InstalledPlugin{listed(supportedSecurityPluginVersion(), "Superseded"), listed(newer, "Restart")},
 			wantRequests: written,
 			wantWarnings: []string{"JellyfinSecurity plugin version newer than supported"},
 		},

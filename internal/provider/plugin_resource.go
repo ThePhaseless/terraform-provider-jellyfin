@@ -34,6 +34,8 @@ const (
 
 // Plugin statuses Jellyfin lists in GET /Plugins.
 const (
+	// pluginStatusActive is the status of a version Jellyfin has loaded.
+	pluginStatusActive = "Active"
 	// pluginStatusDeleted is the status of a version Jellyfin could not remove
 	// from disk and deletes at the next restart instead.
 	pluginStatusDeleted = "Deleted"
@@ -152,16 +154,16 @@ func (r *PluginResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"installed_version": schema.StringAttribute{
-				Description:         "The version Jellyfin lists for the plugin, which can be newer than version while Jellyfin's automatic plugin updates are on. While an update waits for a restart Jellyfin lists both versions, and this keeps the one it held before, whose status then reads Superceded or Superseded.",
-				MarkdownDescription: "The version Jellyfin lists for the plugin, which can be newer than `version` while Jellyfin's automatic plugin updates are on. While an update waits for a restart Jellyfin lists both versions, and this keeps the one it held before, whose `status` then reads `Superceded` or `Superseded`.",
+				Description:         "The version Jellyfin lists for the plugin, which can be newer than version while Jellyfin's automatic plugin updates are on. While an update waits for a restart Jellyfin lists both versions, and this keeps the one it held before, whose status then reads Superseded.",
+				MarkdownDescription: "The version Jellyfin lists for the plugin, which can be newer than `version` while Jellyfin's automatic plugin updates are on. While an update waits for a restart Jellyfin lists both versions, and this keeps the one it held before, whose `status` then reads `Superseded`.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"status": schema.StringAttribute{
-				Description:         "The status Jellyfin lists for installed_version: Active once it is loaded; Restart while it waits for a restart to load, as a new install or update does; Superceded or Superseded, depending on the Jellyfin version, while a newer version installed next to it waits for a restart to replace it; Disabled while it is disabled on the Plugins page of the Jellyfin dashboard; NotSupported while it targets a Jellyfin version other than the server's, as after a Jellyfin upgrade, so Jellyfin does not load it; or Malfunctioned once it has failed to load, which the server log explains. A version Jellyfin removes at the next restart (Deleted) is never read. Creating the resource never keeps or adopts a version Jellyfin lists as NotSupported or Malfunctioned: it installs the configured version instead, which fails, naming the version, while no enabled repository offers a build of it for this server. It also fails when Jellyfin lists the version it installed as NotSupported or Malfunctioned; Terraform then keeps the plugin as tainted, and the next apply installs the configured version again, after uninstalling this one unless the resource sets create_before_destroy. Each refresh reads the status, and an update in place keeps it.",
-				MarkdownDescription: "The status Jellyfin lists for `installed_version`: `Active` once it is loaded; `Restart` while it waits for a restart to load, as a new install or update does; `Superceded` or `Superseded`, depending on the Jellyfin version, while a newer version installed next to it waits for a restart to replace it; `Disabled` while it is disabled on the Plugins page of the Jellyfin dashboard; `NotSupported` while it targets a Jellyfin version other than the server's, as after a Jellyfin upgrade, so Jellyfin does not load it; or `Malfunctioned` once it has failed to load, which the server log explains. A version Jellyfin removes at the next restart (`Deleted`) is never read. Creating the resource never keeps or adopts a version Jellyfin lists as `NotSupported` or `Malfunctioned`: it installs the configured version instead, which fails, naming the version, while no enabled repository offers a build of it for this server. It also fails when Jellyfin lists the version it installed as `NotSupported` or `Malfunctioned`; Terraform then keeps the plugin as tainted, and the next apply installs the configured version again, after uninstalling this one unless the resource sets `create_before_destroy`. Each refresh reads the status, and an update in place keeps it.",
+				Description:         "The status Jellyfin lists for installed_version: Active once it is loaded; Restart while it waits for a restart to load, as a new install or update does; Superseded while a newer version installed next to it waits for a restart to replace it; Disabled while it is disabled on the Plugins page of the Jellyfin dashboard; NotSupported while it targets a Jellyfin version other than the server's, as after a Jellyfin upgrade, so Jellyfin does not load it; or Malfunctioned once it has failed to load, which the server log explains. A version Jellyfin removes at the next restart (Deleted) is never read. Creating the resource never keeps or adopts a version Jellyfin lists as NotSupported or Malfunctioned: it installs the configured version instead, which fails, naming the version, while no enabled repository offers a build of it for this server. It also fails when Jellyfin lists the version it installed as NotSupported or Malfunctioned; Terraform then keeps the plugin as tainted, and the next apply installs the configured version again, after uninstalling this one unless the resource sets create_before_destroy. Each refresh reads the status, and an update in place keeps it.",
+				MarkdownDescription: "The status Jellyfin lists for `installed_version`: `Active` once it is loaded; `Restart` while it waits for a restart to load, as a new install or update does; `Superseded` while a newer version installed next to it waits for a restart to replace it; `Disabled` while it is disabled on the Plugins page of the Jellyfin dashboard; `NotSupported` while it targets a Jellyfin version other than the server's, as after a Jellyfin upgrade, so Jellyfin does not load it; or `Malfunctioned` once it has failed to load, which the server log explains. A version Jellyfin removes at the next restart (`Deleted`) is never read. Creating the resource never keeps or adopts a version Jellyfin lists as `NotSupported` or `Malfunctioned`: it installs the configured version instead, which fails, naming the version, while no enabled repository offers a build of it for this server. It also fails when Jellyfin lists the version it installed as `NotSupported` or `Malfunctioned`; Terraform then keeps the plugin as tainted, and the next apply installs the configured version again, after uninstalling this one unless the resource sets `create_before_destroy`. Each refresh reads the status, and an update in place keeps it.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -224,7 +226,9 @@ func (r *PluginResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 	// The schedule decides whether a newer installed version is adopted, and
-	// private state keeps it for a plan that does not refresh.
+	// private state keeps it for a plan that does not refresh. Create reads it
+	// from the server and not from the walk's shared read, because an apply of
+	// a jellyfin_scheduled_task in this walk can change it.
 	schedule, err := pluginUpdatesOn(ctx, r.client)
 	if err != nil {
 		scheduleReadError(&resp.Diagnostics, err)
@@ -371,9 +375,9 @@ func (r *PluginResource) scheduleForRead(ctx context.Context, p client.Installed
 	if planned, ok := walk.plannedFor(id, p.Name); ok {
 		return planned, true
 	}
-	// The walk is not locked while the server answers; decided takes a
-	// schedule a task planned meanwhile over the server's.
-	server, err := pluginUpdatesOn(ctx, r.client)
+	// decided takes a schedule a task planned while the server answered over
+	// the server's.
+	server, err := walk.serverSchedule(ctx, r.client)
 	if err != nil {
 		scheduleReadError(diags, err)
 		return "", false
