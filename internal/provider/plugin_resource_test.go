@@ -178,31 +178,8 @@ resource "jellyfin_plugin" "test" {
 				),
 			},
 			{
-				PreConfig: func() {
-					// A client from before the step is signed out by the
-					// provider's own sign-in, which shares its device ID.
-					c := testAccClient(t)
-					ctx := t.Context()
-					if err := c.InstallPlugin(ctx, pkg.Name, newer, stableRepoURL); err != nil {
-						t.Fatalf("installing %s %s: %v", pkg.Name, newer, err)
-					}
-					if _, err := (&PluginResource{client: c}).waitForPlugin(ctx, pkg.Name, newer, pluginInstallTimeout); err != nil {
-						t.Fatal(err)
-					}
-					listed, err := testAccListedPlugins(ctx, c, pkg.Name)
-					if err != nil {
-						t.Fatalf("listing %s: %v", pkg.Name, err)
-					}
-					for _, p := range listed {
-						if p.Version != older {
-							continue
-						}
-						if err := c.UninstallPluginVersion(ctx, p.ID, p.Version); err != nil {
-							t.Fatalf("uninstalling %s %s: %v", pkg.Name, older, err)
-						}
-					}
-				},
-				Config: config(older),
+				PreConfig: func() { testAccUpdatePluginAsTheTaskWould(t, pkg.Name, older, newer) },
+				Config:    config(older),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
 				},
@@ -469,6 +446,37 @@ func testAccRestorePluginUpdateTriggers(t *testing.T) string {
 	}
 	t.Fatal("scheduled task PluginUpdates not found")
 	return ""
+}
+
+// testAccUpdatePluginAsTheTaskWould installs version newer of the named
+// plugin and uninstalls version older, which leaves Jellyfin listing only
+// newer, as after its Update Plugins task updated the plugin and the server
+// restarted, without the restart.
+func testAccUpdatePluginAsTheTaskWould(t *testing.T, name, older, newer string) {
+	t.Helper()
+
+	// A client from before the step is signed out by the provider's own
+	// sign-in, which shares its device ID.
+	c := testAccClient(t)
+	ctx := t.Context()
+	if err := c.InstallPlugin(ctx, name, newer, stableRepoURL); err != nil {
+		t.Fatalf("installing %s %s: %v", name, newer, err)
+	}
+	if _, err := (&PluginResource{client: c}).waitForPlugin(ctx, name, newer, pluginInstallTimeout); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := testAccListedPlugins(ctx, c, name)
+	if err != nil {
+		t.Fatalf("listing %s: %v", name, err)
+	}
+	for _, p := range listed {
+		if p.Version != older {
+			continue
+		}
+		if err := c.UninstallPluginVersion(ctx, p.ID, p.Version); err != nil {
+			t.Fatalf("uninstalling %s %s: %v", name, older, err)
+		}
+	}
 }
 
 func testAccListedPlugins(ctx context.Context, c *client.Client, name string) ([]client.InstalledPlugin, error) {
