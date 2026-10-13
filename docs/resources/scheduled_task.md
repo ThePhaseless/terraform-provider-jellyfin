@@ -4,14 +4,14 @@ page_title: "jellyfin_scheduled_task Resource - jellyfin"
 subcategory: ""
 description: |-
   Manages triggers for a Jellyfin scheduled task. Destroying the resource, or removing it from the configuration, leaves the task's triggers as last applied; Jellyfin does not restore its defaults.
-  The triggers of the PluginUpdates task (Update Plugins) also decide how jellyfin_plugin reads version: with at least one trigger, Jellyfin updates plugins automatically and version is a minimum, and with none it is exact. Give every jellyfin_plugin a depends_on on the resource that manages PluginUpdates, so Terraform plans and applies the schedule first. A plan fails when it changes whether updates are on after Terraform refreshed a plugin whose plan that changes, or when two resources give PluginUpdates one schedule with triggers and one without; see jellyfin_plugin.
+  The triggers of the PluginUpdates task (Update Plugins) decide how jellyfin_plugin treats version: as a minimum while the task has a trigger, and as exact while it has none. Give every jellyfin_plugin a depends_on on the resource that manages PluginUpdates, so Terraform applies the schedule first; see jellyfin_plugin.
 ---
 
 # jellyfin_scheduled_task (Resource)
 
 Manages triggers for a Jellyfin scheduled task. Destroying the resource, or removing it from the configuration, leaves the task's triggers as last applied; Jellyfin does not restore its defaults.
 
-The triggers of the `PluginUpdates` task (*Update Plugins*) also decide how `jellyfin_plugin` reads `version`: with at least one trigger, Jellyfin updates plugins automatically and `version` is a minimum, and with none it is exact. Give every `jellyfin_plugin` a `depends_on` on the resource that manages `PluginUpdates`, so Terraform plans and applies the schedule first. A plan fails when it changes whether updates are on after Terraform refreshed a plugin whose plan that changes, or when two resources give `PluginUpdates` one schedule with triggers and one without; see `jellyfin_plugin`.
+The triggers of the `PluginUpdates` task (*Update Plugins*) decide how `jellyfin_plugin` treats `version`: as a minimum while the task has a trigger, and as exact while it has none. Give every `jellyfin_plugin` a `depends_on` on the resource that manages `PluginUpdates`, so Terraform applies the schedule first; see `jellyfin_plugin`.
 
 ## Example Usage
 
