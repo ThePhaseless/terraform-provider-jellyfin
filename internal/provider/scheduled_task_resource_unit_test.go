@@ -1073,6 +1073,37 @@ func TestUnitScheduledTaskPlanWithAnUnknownKey(t *testing.T) {
 	}
 }
 
+func TestUnitScheduledTaskPlanWithAnUnknownTaskIDAndNoKey(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		state *ScheduledTaskResourceModel
+		want  autoUpdate
+	}{
+		"PluginUpdates in state":   {state: storedTask(updatePluginsID, types.StringValue(PluginUpdatesTaskKey)), want: autoUpdateUnknown},
+		"another task in state":    {state: storedTask(scanMediaLibraryID, types.StringValue("RefreshLibrary"))},
+		"the create of a new task": {},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := &fakeTaskServer{tasks: testTasks()}
+			c := srv.client(t)
+			config := ScheduledTaskResourceModel{ID: types.StringNull(), Key: types.StringNull(), TaskID: types.StringUnknown(), Triggers: updateTriggersOff(t)}
+			plan := config
+			plan.ID, plan.Key = types.StringUnknown(), types.StringUnknown()
+			if _, resp := planScheduledTask(t, c, config, tc.state, plan); resp.Diagnostics.HasError() {
+				t.Fatalf("ModifyPlan() = %v", resp.Diagnostics)
+			}
+			if got := plannedSchedule(c); got != tc.want {
+				t.Errorf("planned schedule %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // A task_id no task has is Create's to report, but any other failure to read
 // the task fails the plan: planning on could miss a PluginUpdates task the
 // plan changes.

@@ -431,17 +431,20 @@ func (r *ScheduledTaskResource) plannedTaskKey(ctx context.Context, req resource
 	return task.Key, diags
 }
 
-// keyMayNamePluginUpdates reports whether the configured key is unknown until
-// apply and the state holds the PluginUpdates task. Without a state, as in
-// the plan of a replacement's create, nothing says the key names it.
+// keyMayNamePluginUpdates reports whether the task the plan names is unknown
+// until apply, as the configured key is, or the configured task_id with no
+// key, and the state holds the PluginUpdates task. Without a state, as in the
+// plan of a replacement's create, nothing says the task is PluginUpdates.
 func keyMayNamePluginUpdates(ctx context.Context, req resource.ModifyPlanRequest, diags *diag.Diagnostics) bool {
 	if req.State.Raw.IsNull() {
 		return false
 	}
-	var configured, stored types.String
+	var configured, configuredTaskID, stored types.String
 	diags.Append(req.Config.GetAttribute(ctx, path.Root("key"), &configured)...)
+	diags.Append(req.Config.GetAttribute(ctx, path.Root("task_id"), &configuredTaskID)...)
 	diags.Append(req.State.GetAttribute(ctx, path.Root("key"), &stored)...)
-	return !diags.HasError() && configured.IsUnknown() && strings.EqualFold(stored.ValueString(), PluginUpdatesTaskKey)
+	unknownTask := configured.IsUnknown() || configured.IsNull() && configuredTaskID.IsUnknown()
+	return !diags.HasError() && unknownTask && strings.EqualFold(stored.ValueString(), PluginUpdatesTaskKey)
 }
 
 // planTaskForKey plans task_id from a key configured alone (replacing on a

@@ -106,11 +106,12 @@ func TestAccPluginResourceTurningUpdatesOffNeedsDependsOn(t *testing.T) {
 // until apply for a plugin that depends on the task and that the task
 // updated past its pinned version: an unknown schedule counts as on, so the
 // plugin is kept, and once the apply sets the triggers on, the next plan is
-// empty.
+// empty. The server's triggers are cleared before that plan, so only the
+// unknown planned schedule keeps the plugin.
 func TestAccPluginResourceUnknownUpdateScheduleCountsAsOn(t *testing.T) {
 	pkg := testAccFindUninstalledPackage(t, stableRepoURL, 2)
 	older, newer := pkg.Versions[1].Version, pkg.Versions[0].Version
-	testAccRestorePluginUpdateTriggers(t)
+	taskID := testAccRestorePluginUpdateTriggers(t)
 	known := testAccPluginUpdatesConfig(testAccPluginUpdatesDefaultTriggers, "", pkg.Name, older, testAccPluginDependsOnTask)
 
 	resource.Test(t, resource.TestCase{
@@ -129,6 +130,11 @@ func TestAccPluginResourceUnknownUpdateScheduleCountsAsOn(t *testing.T) {
 				},
 			},
 			{
+				PreConfig: func() {
+					if err := testAccClient(t).UpdateScheduledTaskTriggers(t.Context(), taskID, "[]"); err != nil {
+						t.Fatalf("clearing the PluginUpdates triggers: %v", err)
+					}
+				},
 				Config: `
 resource "terraform_data" "triggers" {
   input = ` + testAccPluginUpdatesDefaultTriggers + `
