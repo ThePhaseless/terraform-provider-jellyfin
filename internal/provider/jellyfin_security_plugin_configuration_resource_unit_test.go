@@ -151,6 +151,50 @@ func TestUnitJellyfinSecurityPlugin263FieldsAbsentStayNullAndUnwritten(t *testin
 	}
 }
 
+func TestUnitJellyfinSecurityPlugin264FieldsRoundTrip(t *testing.T) {
+	b := mustWire(t, securityPluginWire)
+	served := map[string]string{
+		"AllowAppPasswordsWhenPasswordLoginDisabled": "true",
+		"GeoProtectionHandledExternally":             "true",
+		"HideTwoFactorSetupForSsoUsers":              "true",
+		"SuspiciousLoginEnabled":                     "false",
+		"TelegramBotToken":                           `"123456:ABC-DEF"`,
+		"TelegramChatId":                             `"-1001234567890"`,
+	}
+	var fixture strings.Builder
+	fixture.WriteString("{")
+	for i, key := range slices.Sorted(maps.Keys(served)) {
+		if i > 0 {
+			fixture.WriteString(",")
+		}
+		fmt.Fprintf(&fixture, "%q:%s", key, served[key])
+	}
+	fixture.WriteString("}")
+
+	data := readWire[JellyfinSecurityPluginConfigurationResourceModel](t, b, fixture.String())
+
+	if !data.AllowAppPasswordsWhenPasswordLoginDisabled.ValueBool() || !data.GeoProtectionHandledExternally.ValueBool() || !data.HideTwoFactorSetupForSSOUsers.ValueBool() {
+		t.Errorf("allow_app_passwords_when_password_login_disabled = %v, geo_protection_handled_externally = %v, hide_two_factor_setup_for_sso_users = %v, want all true",
+			data.AllowAppPasswordsWhenPasswordLoginDisabled, data.GeoProtectionHandledExternally, data.HideTwoFactorSetupForSSOUsers)
+	}
+	if data.SuspiciousLoginEnabled.IsNull() || data.SuspiciousLoginEnabled.ValueBool() {
+		t.Errorf("suspicious_login_enabled = %v, want false", data.SuspiciousLoginEnabled)
+	}
+	if got := data.TelegramBotToken.ValueString(); got != "123456:ABC-DEF" {
+		t.Errorf("telegram_bot_token = %q", got)
+	}
+	if got := data.TelegramChatID.ValueString(); got != "-1001234567890" {
+		t.Errorf("telegram_chat_id = %q", got)
+	}
+
+	base := writeWire(t, b, &data)
+	for key, want := range served {
+		if got := string(base[key]); got != want {
+			t.Errorf("%s = %s, want %s", key, got, want)
+		}
+	}
+}
+
 func TestUnitKeepSameInstant(t *testing.T) {
 	cases := []struct {
 		name   string

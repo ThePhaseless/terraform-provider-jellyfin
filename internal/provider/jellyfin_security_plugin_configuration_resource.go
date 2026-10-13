@@ -50,90 +50,96 @@ type JellyfinSecurityPluginConfigurationResource struct {
 
 // JellyfinSecurityPluginConfigurationResourceModel describes the resource data model.
 type JellyfinSecurityPluginConfigurationResourceModel struct {
-	ID                                 types.String `tfsdk:"id"`
-	PluginID                           types.String `tfsdk:"plugin_id"`
-	Enabled                            types.Bool   `tfsdk:"enabled"`
-	BlockEmptyPasswordLogin            types.Bool   `tfsdk:"block_empty_password_login"`
-	RequireChallengeIPMatch            types.Bool   `tfsdk:"require_challenge_ip_match"`
-	RegisteredDeviceMaxAgeDays         types.Int64  `tfsdk:"registered_device_max_age_days"`
-	BareDeviceIDBypassEnabled          types.Bool   `tfsdk:"bare_device_id_bypass_enabled"`
-	PairDeviceOnSecondScreenApproval   types.Bool   `tfsdk:"pair_device_on_second_screen_approval"`
-	RequireTwoFactorToDisable          types.Bool   `tfsdk:"require_two_factor_to_disable"`
-	SelfServiceStepUpMode              types.String `tfsdk:"self_service_step_up_mode"`
-	StepUpLevel                        types.String `tfsdk:"step_up_level"`
-	StepUpWindowSeconds                types.Int64  `tfsdk:"step_up_window_seconds"`
-	AllowIndefiniteTrust               types.Bool   `tfsdk:"allow_indefinite_trust"`
-	HideBuiltinTwoFactorButton         types.Bool   `tfsdk:"hide_builtin_two_factor_button"`
-	HideBuiltinPasskeyButton           types.Bool   `tfsdk:"hide_builtin_passkey_button"`
-	EnforcementScope                   types.String `tfsdk:"enforcement_scope"`
-	LanBypassEnabled                   types.Bool   `tfsdk:"lan_bypass_enabled"`
-	LanBypassCidrs                     types.List   `tfsdk:"lan_bypass_cidrs"`
-	TrustForwardedFor                  types.Bool   `tfsdk:"trust_forwarded_for"`
-	TrustedProxyCidrs                  types.List   `tfsdk:"trusted_proxy_cidrs"`
-	EmailOtpEnabled                    types.Bool   `tfsdk:"email_otp_enabled"`
-	HibpEnabled                        types.Bool   `tfsdk:"hibp_enabled"`
-	EmailOTPTTLSeconds                 types.Int64  `tfsdk:"email_otp_ttl_seconds"`
-	ChallengeTokenTTLSeconds           types.Int64  `tfsdk:"challenge_token_ttl_seconds"`
-	PairingCodeTTLSeconds              types.Int64  `tfsdk:"pairing_code_ttl_seconds"`
-	MaxFailedAttempts                  types.Int64  `tfsdk:"max_failed_attempts"`
-	LockoutDurationMinutes             types.Int64  `tfsdk:"lockout_duration_minutes"`
-	ExemptAdministratorsFromLockout    types.Bool   `tfsdk:"exempt_administrators_from_lockout"`
-	DisablePasswordLogin               types.Bool   `tfsdk:"disable_password_login"`
-	AllowAdminPasswordLogin            types.Bool   `tfsdk:"allow_admin_password_login"`
-	AllowPasswordLoginOnLan            types.Bool   `tfsdk:"allow_password_login_on_lan"`
-	PasswordLoginExemptCidrs           types.List   `tfsdk:"password_login_exempt_cidrs"`
-	EnablePasswordRecovery             types.Bool   `tfsdk:"enable_password_recovery"`
-	HideBuiltinForgotPassword          types.Bool   `tfsdk:"hide_builtin_forgot_password"`
-	LoginLinksBelowQuickConnect        types.Bool   `tfsdk:"login_links_below_quick_connect"`
-	AuditLogMaxEntries                 types.Int64  `tfsdk:"audit_log_max_entries"`
-	NtfyURL                            types.String `tfsdk:"ntfy_url"`
-	NtfyTopic                          types.String `tfsdk:"ntfy_topic"`
-	NtfyToken                          types.String `tfsdk:"ntfy_token"`
-	NtfyUsername                       types.String `tfsdk:"ntfy_username"`
-	NtfyPassword                       types.String `tfsdk:"ntfy_password"`
-	GotifyURL                          types.String `tfsdk:"gotify_url"`
-	GotifyAppToken                     types.String `tfsdk:"gotify_app_token"`
-	AllowPrivateNotificationTargets    types.Bool   `tfsdk:"allow_private_notification_targets"`
-	NotifyEmailAddresses               types.List   `tfsdk:"notify_email_addresses"`
-	SMTPHost                           types.String `tfsdk:"smtp_host"`
-	SMTPPort                           types.Int64  `tfsdk:"smtp_port"`
-	SMTPUseSsl                         types.Bool   `tfsdk:"smtp_use_ssl"`
-	SMTPUsername                       types.String `tfsdk:"smtp_username"`
-	SMTPPassword                       types.String `tfsdk:"smtp_password"`
-	SMTPFromAddress                    types.String `tfsdk:"smtp_from_address"`
-	SMTPFromName                       types.String `tfsdk:"smtp_from_name"`
-	UserEmails                         types.List   `tfsdk:"user_emails"`
-	TotpIssuerName                     types.String `tfsdk:"totp_issuer_name"`
-	DefaultLanguage                    types.String `tfsdk:"default_language"`
-	PreVerifyWindowSeconds             types.Int64  `tfsdk:"pre_verify_window_seconds"`
-	TrustCookieTTLDays                 types.Int64  `tfsdk:"trust_cookie_ttl_days"`
-	NatHairpinSelfIPBypass             types.Bool   `tfsdk:"nat_hairpin_self_ip_bypass"`
-	DefaultMaxConcurrentSessions       types.Int64  `tfsdk:"default_max_concurrent_sessions"`
-	EnrollmentDeadline                 types.String `tfsdk:"enrollment_deadline"`
-	WebhookURL                         types.String `tfsdk:"webhook_url"`
-	WebhookSecret                      types.String `tfsdk:"webhook_secret"`
-	WebhookHeaders                     types.List   `tfsdk:"webhook_headers"`
-	GeoIPAsnDbPath                     types.String `tfsdk:"geo_ip_asn_db_path"`
-	GeoIPCountryDbPath                 types.String `tfsdk:"geo_ip_country_db_path"`
-	WebauthnRpID                       types.String `tfsdk:"webauthn_rp_id"`
-	WebauthnOrigins                    types.List   `tfsdk:"webauthn_origins"`
-	PublicBaseURL                      types.String `tfsdk:"public_base_url"`
-	BypassForExternalAuthProviders     types.Bool   `tfsdk:"bypass_for_external_auth_providers"`
-	OidcProviders                      types.List   `tfsdk:"oidc_providers"`
-	GeoIPCityDbPath                    types.String `tfsdk:"geo_ip_city_db_path"`
-	IPBanEnabled                       types.Bool   `tfsdk:"ip_ban_enabled"`
-	IPBanFailureThreshold              types.Int64  `tfsdk:"ip_ban_failure_threshold"`
-	IPBanFailureWindowMinutes          types.Int64  `tfsdk:"ip_ban_failure_window_minutes"`
-	IPBanDurationHours                 types.Int64  `tfsdk:"ip_ban_duration_hours"`
-	IPBanExemptCidrs                   types.List   `tfsdk:"ip_ban_exempt_cidrs"`
-	ImpossibleTravelEnabled            types.Bool   `tfsdk:"impossible_travel_enabled"`
-	ImpossibleTravelMaxKmh             types.Int64  `tfsdk:"impossible_travel_max_kmh"`
-	WebhookEd25519PrivateKey           types.String `tfsdk:"webhook_ed25519_private_key"`
-	OnboardingPasswordMinLength        types.Int64  `tfsdk:"onboarding_password_min_length"`
-	OnboardingPasswordRequireUppercase types.Bool   `tfsdk:"onboarding_password_require_uppercase"`
-	OnboardingPasswordRequireLowercase types.Bool   `tfsdk:"onboarding_password_require_lowercase"`
-	OnboardingPasswordRequireDigit     types.Bool   `tfsdk:"onboarding_password_require_digit"`
-	OnboardingPasswordRequireSymbol    types.Bool   `tfsdk:"onboarding_password_require_symbol"`
+	ID                                         types.String `tfsdk:"id"`
+	PluginID                                   types.String `tfsdk:"plugin_id"`
+	Enabled                                    types.Bool   `tfsdk:"enabled"`
+	BlockEmptyPasswordLogin                    types.Bool   `tfsdk:"block_empty_password_login"`
+	RequireChallengeIPMatch                    types.Bool   `tfsdk:"require_challenge_ip_match"`
+	RegisteredDeviceMaxAgeDays                 types.Int64  `tfsdk:"registered_device_max_age_days"`
+	BareDeviceIDBypassEnabled                  types.Bool   `tfsdk:"bare_device_id_bypass_enabled"`
+	PairDeviceOnSecondScreenApproval           types.Bool   `tfsdk:"pair_device_on_second_screen_approval"`
+	RequireTwoFactorToDisable                  types.Bool   `tfsdk:"require_two_factor_to_disable"`
+	SelfServiceStepUpMode                      types.String `tfsdk:"self_service_step_up_mode"`
+	StepUpLevel                                types.String `tfsdk:"step_up_level"`
+	StepUpWindowSeconds                        types.Int64  `tfsdk:"step_up_window_seconds"`
+	AllowIndefiniteTrust                       types.Bool   `tfsdk:"allow_indefinite_trust"`
+	HideBuiltinTwoFactorButton                 types.Bool   `tfsdk:"hide_builtin_two_factor_button"`
+	HideBuiltinPasskeyButton                   types.Bool   `tfsdk:"hide_builtin_passkey_button"`
+	EnforcementScope                           types.String `tfsdk:"enforcement_scope"`
+	LanBypassEnabled                           types.Bool   `tfsdk:"lan_bypass_enabled"`
+	LanBypassCidrs                             types.List   `tfsdk:"lan_bypass_cidrs"`
+	TrustForwardedFor                          types.Bool   `tfsdk:"trust_forwarded_for"`
+	TrustedProxyCidrs                          types.List   `tfsdk:"trusted_proxy_cidrs"`
+	EmailOtpEnabled                            types.Bool   `tfsdk:"email_otp_enabled"`
+	HibpEnabled                                types.Bool   `tfsdk:"hibp_enabled"`
+	EmailOTPTTLSeconds                         types.Int64  `tfsdk:"email_otp_ttl_seconds"`
+	ChallengeTokenTTLSeconds                   types.Int64  `tfsdk:"challenge_token_ttl_seconds"`
+	PairingCodeTTLSeconds                      types.Int64  `tfsdk:"pairing_code_ttl_seconds"`
+	MaxFailedAttempts                          types.Int64  `tfsdk:"max_failed_attempts"`
+	LockoutDurationMinutes                     types.Int64  `tfsdk:"lockout_duration_minutes"`
+	ExemptAdministratorsFromLockout            types.Bool   `tfsdk:"exempt_administrators_from_lockout"`
+	DisablePasswordLogin                       types.Bool   `tfsdk:"disable_password_login"`
+	AllowAdminPasswordLogin                    types.Bool   `tfsdk:"allow_admin_password_login"`
+	AllowPasswordLoginOnLan                    types.Bool   `tfsdk:"allow_password_login_on_lan"`
+	PasswordLoginExemptCidrs                   types.List   `tfsdk:"password_login_exempt_cidrs"`
+	EnablePasswordRecovery                     types.Bool   `tfsdk:"enable_password_recovery"`
+	HideBuiltinForgotPassword                  types.Bool   `tfsdk:"hide_builtin_forgot_password"`
+	LoginLinksBelowQuickConnect                types.Bool   `tfsdk:"login_links_below_quick_connect"`
+	AuditLogMaxEntries                         types.Int64  `tfsdk:"audit_log_max_entries"`
+	NtfyURL                                    types.String `tfsdk:"ntfy_url"`
+	NtfyTopic                                  types.String `tfsdk:"ntfy_topic"`
+	NtfyToken                                  types.String `tfsdk:"ntfy_token"`
+	NtfyUsername                               types.String `tfsdk:"ntfy_username"`
+	NtfyPassword                               types.String `tfsdk:"ntfy_password"`
+	GotifyURL                                  types.String `tfsdk:"gotify_url"`
+	GotifyAppToken                             types.String `tfsdk:"gotify_app_token"`
+	AllowPrivateNotificationTargets            types.Bool   `tfsdk:"allow_private_notification_targets"`
+	NotifyEmailAddresses                       types.List   `tfsdk:"notify_email_addresses"`
+	SMTPHost                                   types.String `tfsdk:"smtp_host"`
+	SMTPPort                                   types.Int64  `tfsdk:"smtp_port"`
+	SMTPUseSsl                                 types.Bool   `tfsdk:"smtp_use_ssl"`
+	SMTPUsername                               types.String `tfsdk:"smtp_username"`
+	SMTPPassword                               types.String `tfsdk:"smtp_password"`
+	SMTPFromAddress                            types.String `tfsdk:"smtp_from_address"`
+	SMTPFromName                               types.String `tfsdk:"smtp_from_name"`
+	UserEmails                                 types.List   `tfsdk:"user_emails"`
+	TotpIssuerName                             types.String `tfsdk:"totp_issuer_name"`
+	DefaultLanguage                            types.String `tfsdk:"default_language"`
+	PreVerifyWindowSeconds                     types.Int64  `tfsdk:"pre_verify_window_seconds"`
+	TrustCookieTTLDays                         types.Int64  `tfsdk:"trust_cookie_ttl_days"`
+	NatHairpinSelfIPBypass                     types.Bool   `tfsdk:"nat_hairpin_self_ip_bypass"`
+	DefaultMaxConcurrentSessions               types.Int64  `tfsdk:"default_max_concurrent_sessions"`
+	EnrollmentDeadline                         types.String `tfsdk:"enrollment_deadline"`
+	WebhookURL                                 types.String `tfsdk:"webhook_url"`
+	WebhookSecret                              types.String `tfsdk:"webhook_secret"`
+	WebhookHeaders                             types.List   `tfsdk:"webhook_headers"`
+	GeoIPAsnDbPath                             types.String `tfsdk:"geo_ip_asn_db_path"`
+	GeoIPCountryDbPath                         types.String `tfsdk:"geo_ip_country_db_path"`
+	WebauthnRpID                               types.String `tfsdk:"webauthn_rp_id"`
+	WebauthnOrigins                            types.List   `tfsdk:"webauthn_origins"`
+	PublicBaseURL                              types.String `tfsdk:"public_base_url"`
+	BypassForExternalAuthProviders             types.Bool   `tfsdk:"bypass_for_external_auth_providers"`
+	OidcProviders                              types.List   `tfsdk:"oidc_providers"`
+	GeoIPCityDbPath                            types.String `tfsdk:"geo_ip_city_db_path"`
+	IPBanEnabled                               types.Bool   `tfsdk:"ip_ban_enabled"`
+	IPBanFailureThreshold                      types.Int64  `tfsdk:"ip_ban_failure_threshold"`
+	IPBanFailureWindowMinutes                  types.Int64  `tfsdk:"ip_ban_failure_window_minutes"`
+	IPBanDurationHours                         types.Int64  `tfsdk:"ip_ban_duration_hours"`
+	IPBanExemptCidrs                           types.List   `tfsdk:"ip_ban_exempt_cidrs"`
+	ImpossibleTravelEnabled                    types.Bool   `tfsdk:"impossible_travel_enabled"`
+	ImpossibleTravelMaxKmh                     types.Int64  `tfsdk:"impossible_travel_max_kmh"`
+	WebhookEd25519PrivateKey                   types.String `tfsdk:"webhook_ed25519_private_key"`
+	OnboardingPasswordMinLength                types.Int64  `tfsdk:"onboarding_password_min_length"`
+	OnboardingPasswordRequireUppercase         types.Bool   `tfsdk:"onboarding_password_require_uppercase"`
+	OnboardingPasswordRequireLowercase         types.Bool   `tfsdk:"onboarding_password_require_lowercase"`
+	OnboardingPasswordRequireDigit             types.Bool   `tfsdk:"onboarding_password_require_digit"`
+	OnboardingPasswordRequireSymbol            types.Bool   `tfsdk:"onboarding_password_require_symbol"`
+	AllowAppPasswordsWhenPasswordLoginDisabled types.Bool   `tfsdk:"allow_app_passwords_when_password_login_disabled"`
+	GeoProtectionHandledExternally             types.Bool   `tfsdk:"geo_protection_handled_externally"`
+	HideTwoFactorSetupForSSOUsers              types.Bool   `tfsdk:"hide_two_factor_setup_for_sso_users"`
+	SuspiciousLoginEnabled                     types.Bool   `tfsdk:"suspicious_login_enabled"`
+	TelegramBotToken                           types.String `tfsdk:"telegram_bot_token"`
+	TelegramChatID                             types.String `tfsdk:"telegram_chat_id"`
 }
 
 var securityPluginWire = sync.OnceValues(func() (*wire.Binding, error) {
@@ -338,22 +344,28 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 					useStateForUnknownByKey([]string{"id"}),
 				},
 			},
-			"geo_ip_city_db_path":                   optionalString("Path to GeoIP city database."),
-			"ip_ban_enabled":                        optionalBool("Enable IP banning."),
-			"ip_ban_failure_threshold":              optionalInt("IP ban failure threshold."),
-			"ip_ban_failure_window_minutes":         optionalInt("IP ban failure window in minutes."),
-			"ip_ban_duration_hours":                 optionalInt("IP ban duration in hours."),
-			"ip_ban_exempt_cidrs":                   optionalStringList("CIDR ranges exempt from IP banning."),
-			"impossible_travel_enabled":             optionalBool("Enable impossible travel detection."),
-			"impossible_travel_max_kmh":             optionalInt("Impossible travel max speed in km/h."),
-			"webhook_ed25519_private_key":           sensitiveString("Webhook Ed25519 private key."),
-			"onboarding_password_min_length":        optionalInt("Onboarding password minimum length."),
-			"onboarding_password_require_uppercase": optionalBool("Require uppercase in onboarding passwords."),
-			"onboarding_password_require_lowercase": optionalBool("Require lowercase in onboarding passwords."),
-			"onboarding_password_require_digit":     optionalBool("Require digit in onboarding passwords."),
-			"onboarding_password_require_symbol":    optionalBool("Require symbol in onboarding passwords."),
-			"pair_device_on_second_screen_approval": optionalBool("Remember a device signed in through a second-screen approval (OIDC device flow or Quick Connect) in the user's paired devices. Requires plugin 2.6.3 or later."),
-			"public_base_url":                       optionalString("Public base URL of the server, used for OIDC redirect URIs, pairing QR codes and password reset links. Empty uses the request host. Requires plugin 2.6.3 or later."),
+			"geo_ip_city_db_path":                              optionalString("Path to GeoIP city database."),
+			"ip_ban_enabled":                                   optionalBool("Enable IP banning."),
+			"ip_ban_failure_threshold":                         optionalInt("IP ban failure threshold."),
+			"ip_ban_failure_window_minutes":                    optionalInt("IP ban failure window in minutes."),
+			"ip_ban_duration_hours":                            optionalInt("IP ban duration in hours."),
+			"ip_ban_exempt_cidrs":                              optionalStringList("CIDR ranges exempt from IP banning."),
+			"impossible_travel_enabled":                        optionalBool("Enable impossible travel detection."),
+			"impossible_travel_max_kmh":                        optionalInt("Impossible travel max speed in km/h."),
+			"webhook_ed25519_private_key":                      sensitiveString("Webhook Ed25519 private key."),
+			"onboarding_password_min_length":                   optionalInt("Onboarding password minimum length."),
+			"onboarding_password_require_uppercase":            optionalBool("Require uppercase in onboarding passwords."),
+			"onboarding_password_require_lowercase":            optionalBool("Require lowercase in onboarding passwords."),
+			"onboarding_password_require_digit":                optionalBool("Require digit in onboarding passwords."),
+			"onboarding_password_require_symbol":               optionalBool("Require symbol in onboarding passwords."),
+			"pair_device_on_second_screen_approval":            optionalBool("Remember a device signed in through a second-screen approval (OIDC device flow or Quick Connect) in the user's paired devices. Requires plugin 2.6.3 or later."),
+			"public_base_url":                                  optionalString("Public base URL of the server, used for OIDC redirect URIs, pairing QR codes and password reset links. Empty uses the request host. Requires plugin 2.6.3 or later."),
+			"allow_app_passwords_when_password_login_disabled": optionalBool("While disable_password_login is on, still let users sign in with one of their app passwords, never the account password, for native apps that ask for a password. An app password keeps working after the identity provider stops letting its user in, until it is revoked. Requires plugin 2.6.4 or later."),
+			"geo_protection_handled_externally":                optionalBool("Geographic checks are done outside the plugin (a WAF, CrowdSec, a firewall): the security score leaves impossible-travel detection out while it is off or has no city database, instead of counting it as failed. Turns no detector on or off. Requires plugin 2.6.4 or later."),
+			"hide_two_factor_setup_for_sso_users":              optionalBool("Hide the plugin's own two-factor setup on the account page from non-administrators with a linked identity provider. A factor the user already has stays visible so it can be removed. A UI gate only. Requires plugin 2.6.4 or later."),
+			"suspicious_login_enabled":                         optionalBool("Run the suspicious-login detector when an ASN or country database is configured. Off keeps the database paths and does not stop impossible-travel alerts. The plugin defaults to on. Requires plugin 2.6.4 or later."),
+			"telegram_bot_token":                               sensitiveString("Telegram bot token from @BotFather. With telegram_chat_id also set, security alerts go to that chat. Requires plugin 2.6.4 or later."),
+			"telegram_chat_id":                                 optionalString("Telegram chat that receives security alerts: a user or group ID (group and channel IDs are negative) or a public channel's @username. Requires plugin 2.6.4 or later."),
 		},
 	}
 }
