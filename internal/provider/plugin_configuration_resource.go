@@ -17,6 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -66,22 +67,12 @@ func (r *PluginConfigurationResource) Schema(_ context.Context, _ resource.Schem
 				},
 			},
 			"configuration_json": schema.StringAttribute{
-				Description: "The plugin configuration as a JSON string. " +
-					"For SSO-Auth, this would include SAML/OIDC configuration. " +
-					"This allows universal configuration of any plugin. " +
-					"Jellyfin replaces the plugin's whole configuration with it, so a key it leaves out takes the plugin's default, " +
-					"and only the keys it names are compared with what the server holds: a key added outside Terraform, " +
-					"such as an SSO provider added on the plugin's page, plans no change, and the next update removes it. " +
-					"An import reads every key.",
-				MarkdownDescription: "The plugin configuration as a JSON string. " +
-					"For SSO-Auth, this would include SAML/OIDC configuration. " +
-					"This allows universal configuration of any plugin. " +
-					"Jellyfin replaces the plugin's whole configuration with it, so a key it leaves out takes the plugin's default, " +
-					"and only the keys it names are compared with what the server holds: a key added outside Terraform, " +
-					"such as an SSO provider added on the plugin's page, plans no change, and the next update removes it. " +
-					"An import reads every key.",
-				Required:   true,
-				CustomType: jsontypes.NormalizedType{},
+				Description:         "A JSON object containing the plugin settings Terraform owns. Objects merge recursively with the current server configuration; undeclared keys are preserved. Arrays, scalars and explicit null replace their entire values. Removing a key releases ownership without resetting its remote value. Empty objects own no child keys. Import initially reads every key; narrow the configuration to release unwanted fields. Destroy leaves the configuration in place. Use one resource per plugin. Jellyfin has no conditional configuration writes, so concurrent external changes during an update can be overwritten. Sensitive values remain in Terraform state.",
+				MarkdownDescription: "A JSON object containing the plugin settings Terraform owns. Objects merge recursively with the current server configuration; undeclared keys are preserved. Arrays, scalars and explicit null replace their entire values. Removing a key releases ownership without resetting its remote value. Empty objects own no child keys. Import initially reads every key; narrow the configuration to release unwanted fields. Destroy leaves the configuration in place. Use one resource per plugin. Jellyfin has no conditional configuration writes, so concurrent external changes during an update can be overwritten. Sensitive values remain in Terraform state.",
+				Sensitive:           true,
+				Validators:          []validator.String{configurationObjectValidator{}},
+				Required:            true,
+				CustomType:          jsontypes.NormalizedType{},
 			},
 		},
 	}
@@ -93,6 +84,9 @@ func (r *PluginConfigurationResource) Configure(_ context.Context, req resource.
 
 func (r *PluginConfigurationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	r.write(ctx, req.Plan, &resp.Diagnostics, &resp.State)
+	if !resp.Diagnostics.HasError() && resp.Private != nil {
+		resp.Diagnostics.Append(saveConfigurationOwnership(ctx, req.Plan, resp.Private)...)
+	}
 }
 
 func (r *PluginConfigurationResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -108,14 +102,39 @@ func (r *PluginConfigurationResource) Read(ctx context.Context, req resource.Rea
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Failed to read plugin configuration", err.Error())
+		resp.Diagnostics.AddError("Failed to read plugin configuration", configurationError(err))
 		return
 	}
 
-	// An import has no configuration yet, and reads the whole of it.
-	served, err := servedConfiguration(configJSON, data.Configuration.ValueString())
+	// Keep ownership independently of observed values: absent fields must not
+	// silently become unmanaged after a refresh-only apply.
+	managed := data.Configuration.ValueString()
+	if resp.Private != nil {
+		mask, diagnostics := resp.Private.GetKey(ctx, configurationOwnershipKey)
+		resp.Diagnostics.Append(diagnostics...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if len(mask) > 0 {
+			managed = string(mask)
+		} else {
+			if managed == "" {
+				managed = configJSON
+			}
+			mask, maskErr := configurationOwnership(managed)
+			if maskErr != nil {
+				resp.Diagnostics.AddError("Invalid configuration ownership", maskErr.Error())
+				return
+			}
+			resp.Diagnostics.Append(resp.Private.SetKey(ctx, configurationOwnershipKey, mask)...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+		}
+	}
+	served, err := servedConfiguration(configJSON, managed)
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to read plugin configuration", err.Error())
+		resp.Diagnostics.AddError("Failed to read plugin configuration", configurationError(err))
 		return
 	}
 
@@ -127,10 +146,12 @@ func (r *PluginConfigurationResource) Read(ctx context.Context, req resource.Rea
 
 func (r *PluginConfigurationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	r.write(ctx, req.Plan, &resp.Diagnostics, &resp.State)
+	if !resp.Diagnostics.HasError() && resp.Private != nil {
+		resp.Diagnostics.Append(saveConfigurationOwnership(ctx, req.Plan, resp.Private)...)
+	}
 }
 
-// write posts the planned configuration and reads back what the server keeps
-// of it.
+// write overlays owned fields on a fresh server document before replacing it.
 func (r *PluginConfigurationResource) write(ctx context.Context, plan tfsdk.Plan, diags *diag.Diagnostics, state *tfsdk.State) {
 	var data PluginConfigurationResourceModel
 	diags.Append(plan.Get(ctx, &data)...)
@@ -138,19 +159,36 @@ func (r *PluginConfigurationResource) write(ctx context.Context, plan tfsdk.Plan
 		return
 	}
 
-	if err := r.client.UpdatePluginConfiguration(ctx, data.PluginID.ValueString(), data.Configuration.ValueString()); err != nil {
-		diags.AddError("Failed to update plugin configuration", err.Error())
+	current, err := r.client.GetPluginConfiguration(ctx, data.PluginID.ValueString())
+	if err != nil {
+		diags.AddError("Failed to read plugin configuration before update", configurationError(err))
 		return
 	}
-
-	configJSON, err := r.client.GetPluginConfiguration(ctx, data.PluginID.ValueString())
+	merged, err := mergeConfiguration(current, data.Configuration.ValueString())
 	if err != nil {
-		diags.AddError("Failed to read plugin configuration after update", err.Error())
+		diags.AddError("Invalid plugin configuration", configurationError(err))
 		return
+	}
+	configJSON := current
+	normalized, err := normalizeJSON(current)
+	if err != nil {
+		diags.AddError("Invalid plugin configuration", configurationError(err))
+		return
+	}
+	if merged != normalized {
+		if err := r.client.UpdatePluginConfiguration(ctx, data.PluginID.ValueString(), merged); err != nil {
+			diags.AddError("Failed to update plugin configuration", configurationError(err))
+			return
+		}
+		configJSON, err = r.client.GetPluginConfiguration(ctx, data.PluginID.ValueString())
+		if err != nil {
+			diags.AddError("Failed to read plugin configuration after update", configurationError(err))
+			return
+		}
 	}
 	served, err := servedConfiguration(configJSON, data.Configuration.ValueString())
 	if err != nil {
-		diags.AddError("Failed to read plugin configuration after update", err.Error())
+		diags.AddError("Failed to read plugin configuration after update", configurationError(err))
 		return
 	}
 	data.Configuration = jsontypes.NewNormalizedValue(served)
@@ -159,21 +197,17 @@ func (r *PluginConfigurationResource) write(ctx context.Context, plan tfsdk.Plan
 	diags.Append(state.Set(ctx, &data)...)
 }
 
-// servedConfiguration returns the normalized configuration served holds,
-// keeping only the keys managed has at each level of its objects. Jellyfin
-// replaces a plugin's whole configuration with the one posted and serves
-// every key back, a key the configuration leaves out with its default, so
-// only the keys the configuration names say whether the server kept it. An
-// empty managed, as on an import, keeps every key.
+// servedConfiguration returns only owned object keys. Arrays are owned whole.
+// An empty managed string is used for the first import read.
 func servedConfiguration(served, managed string) (string, error) {
 	if managed == "" {
 		return normalizeJSON(served)
 	}
-	servedValue, err := decodeJSON(served)
+	servedValue, err := configurationObject(served)
 	if err != nil {
 		return "", fmt.Errorf("parsing the served configuration: %w", err)
 	}
-	managedValue, err := decodeJSON(managed)
+	managedValue, err := configurationObject(managed)
 	if err != nil {
 		return "", fmt.Errorf("parsing the configuration: %w", err)
 	}
@@ -195,7 +229,7 @@ func decodeJSON(raw string) (any, error) {
 }
 
 // keysOf returns served with only the object keys shape has, at any depth,
-// following lists of the same length element by element.
+// treating arrays as atomic values.
 func keysOf(served, shape any) any {
 	switch s := shape.(type) {
 	case map[string]any:
@@ -207,19 +241,14 @@ func keysOf(served, shape any) any {
 		for k, v := range s {
 			if sv, ok := m[k]; ok {
 				out[k] = keysOf(sv, v)
+			} else {
+				// Retain a missing owned key as drift, including when the
+				// next configuration removes it and must release ownership.
+				out[k] = nil
 			}
 		}
 		return out
-	case []any:
-		l, ok := served.([]any)
-		if !ok || len(l) != len(s) {
-			return served
-		}
-		out := make([]any, len(l))
-		for i := range l {
-			out[i] = keysOf(l[i], s[i])
-		}
-		return out
+
 	}
 	return served
 }

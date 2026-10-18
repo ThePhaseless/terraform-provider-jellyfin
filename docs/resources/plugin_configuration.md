@@ -13,8 +13,8 @@ Manages plugin configuration in Jellyfin. Configuration is passed as a JSON stri
 ## Example Usage
 
 ```terraform
-# Configure any plugin using raw JSON. Jellyfin replaces the plugin's whole
-# configuration with it, so a key left out takes the plugin's default.
+# Configure owned plugin settings using JSON. Undeclared object keys are
+# preserved; arrays are replaced whole. Omission releases ownership.
 # This example configures the SSO-Auth plugin, whose OIDC and SAML providers
 # are maps keyed by provider name.
 resource "jellyfin_plugin_repository" "sso" {
@@ -63,7 +63,7 @@ resource "jellyfin_plugin_configuration" "sso_auth" {
 
 ### Required
 
-- `configuration_json` (String) The plugin configuration as a JSON string. For SSO-Auth, this would include SAML/OIDC configuration. This allows universal configuration of any plugin. Jellyfin replaces the plugin's whole configuration with it, so a key it leaves out takes the plugin's default, and only the keys it names are compared with what the server holds: a key added outside Terraform, such as an SSO provider added on the plugin's page, plans no change, and the next update removes it. An import reads every key.
+- `configuration_json` (String, Sensitive) A JSON object containing the plugin settings Terraform owns. Objects merge recursively with the current server configuration; undeclared keys are preserved. Arrays, scalars and explicit null replace their entire values. Removing a key releases ownership without resetting its remote value. Empty objects own no child keys. Import initially reads every key; narrow the configuration to release unwanted fields. Destroy leaves the configuration in place. Use one resource per plugin. Jellyfin has no conditional configuration writes, so concurrent external changes during an update can be overwritten. Sensitive values remain in Terraform state.
 - `plugin_id` (String) The plugin ID (GUID), with or without dashes. Both spellings name the same plugin, so switching between them plans no change.
 
 ### Read-Only

@@ -4,11 +4,14 @@
 package provider
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccPluginConfigurationResource(t *testing.T) {
@@ -75,4 +78,55 @@ resource "jellyfin_plugin_configuration" "test" {
   })
 }
 `, pluginID, rateLimit)
+}
+
+func TestAccPluginConfigurationPartialOwnership(t *testing.T) {
+	testAccPreCheck(t)
+	const id = "8c95c4d2e50c4fb0a4f36c06ff0f9a1a"
+	original, err := testAccClient(t).GetPluginConfiguration(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := testAccClient(t).UpdatePluginConfiguration(context.WithoutCancel(t.Context()), id, original); err != nil {
+			t.Error(err)
+		}
+	})
+	setRemote := func(raw string) {
+		t.Helper()
+		if err := testAccClient(t).UpdatePluginConfiguration(t.Context(), id, raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(rate float64, server string) resource.TestCheckFunc {
+		return func(_ *terraform.State) error {
+			raw, err := testAccClient(t).GetPluginConfiguration(t.Context(), id)
+			if err != nil {
+				return err
+			}
+			var values map[string]any
+			if err := json.Unmarshal([]byte(raw), &values); err != nil {
+				return err
+			}
+			if values["RateLimit"] != rate || values["Server"] != server {
+				return fmt.Errorf("unexpected configuration: %s", raw)
+			}
+			return nil
+		}
+	}
+	config := func(raw string) string {
+		return fmt.Sprintf(`resource "jellyfin_plugin_configuration" "test" {
+ plugin_id = %q
+ configuration_json = %q
+}`, id, raw)
+	}
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{PreConfig: func() { setRemote(`{"Server":"https://outside.example","RateLimit":7,"ReplaceArtistName":false}`) }, Config: config(`{"RateLimit":2}`), Check: check(2, "https://outside.example")},
+			{PreConfig: func() { setRemote(`{"Server":"https://fresh.example","RateLimit":2,"ReplaceArtistName":false}`) }, Config: config(`{"RateLimit":3}`), Check: check(3, "https://fresh.example")},
+			{Config: config(`{}`), Check: check(3, "https://fresh.example")},
+			{Config: config(`{}`), ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()}}},
+		},
+	})
 }

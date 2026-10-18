@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- BREAKING: `jellyfin_plugin_configuration` now preserves undeclared object fields on writes, matching its partial read ownership and the typed configuration resources. Removing a field releases ownership instead of resetting its remote value. Arrays are owned whole, including on refresh; explicit null is a value, not deletion. Configuration must be a JSON object and is now marked sensitive (values still reside in Terraform state). Ownership survives refreshes that return missing or mistyped fields.
+
 - `jellyfin_api_key`: `app_name` is optional and defaults to `Terraform`.
 - `jellyfin_plugin`: `version` is a minimum while Jellyfin's automatic plugin updates are on, that is while its `PluginUpdates` task (*Update Plugins*) has at least one trigger. The next apply no longer reinstalls the pinned version over a plugin the task upgraded. Changing `version` to a value the installed version satisfies only updates state, and creating the resource adopts a newer installed version. With no triggers, `version` stays exact. The `autoUpdate` flag in a plugin's `meta.json` is not read.
 - `jellyfin_plugin`: imported plugins, including every one `jellyfin-import` generates, and pinned plugins in state from 0.6.0 or earlier plan no change after the task upgrades them. In a few cases one plan after an upgrade changes `version` once, in place and only in state, and never downgrades the plugin:

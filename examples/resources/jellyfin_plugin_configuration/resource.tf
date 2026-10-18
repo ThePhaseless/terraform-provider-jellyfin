@@ -1,5 +1,5 @@
-# Configure any plugin using raw JSON. Jellyfin replaces the plugin's whole
-# configuration with it, so a key left out takes the plugin's default.
+# Configure owned plugin settings using JSON. Undeclared object keys are
+# preserved; arrays are replaced whole. Omission releases ownership.
 # This example configures the SSO-Auth plugin, whose OIDC and SAML providers
 # are maps keyed by provider name.
 resource "jellyfin_plugin_repository" "sso" {
