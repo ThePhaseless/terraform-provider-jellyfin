@@ -1,6 +1,6 @@
 module tools
 
-go 1.26.0
+go 1.26.7
 
 replace github.com/hashicorp/copywrite => ./copywrite-patched
 
@@ -23,7 +23,7 @@ require (
 	github.com/bgentry/speakeasy v0.2.0 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.10.3 // indirect
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0 // indirect
-	github.com/cli/go-gh/v2 v2.16.2 // indirect
+	github.com/cli/go-gh/v2 v2.17.0 // indirect
 	github.com/cli/safeexec v1.0.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudflare/circl v1.6.5 // indirect
@@ -47,7 +47,7 @@ require (
 	github.com/hashicorp/hcl v1.0.1-vault-7 // indirect
 	github.com/hashicorp/terraform-exec v0.25.3 // indirect
 	github.com/hashicorp/terraform-json v0.29.0 // indirect
-	github.com/huandu/xstrings v1.6.2 // indirect
+	github.com/huandu/xstrings v1.6.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/knadh/koanf v1.5.0 // indirect
