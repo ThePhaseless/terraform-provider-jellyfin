@@ -1,6 +1,6 @@
 module github.com/hashicorp/copywrite
 
-go 1.26.0
+go 1.26.7
 
 toolchain go1.27.3
 
@@ -47,7 +47,7 @@ require (
 )
 
 require (
-	github.com/cli/go-gh/v2 v2.16.2
+	github.com/cli/go-gh/v2 v2.17.0
 	github.com/samber/lo v1.53.0
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
