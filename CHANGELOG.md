@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-23
+
 ### Added
 
 - `jellyfin_api_key`: import by app name, as long as no other key has that name; the access token still works. `jellyfin-import` writes the app name, and the access token only for keys that share a name, so `imports.tf` usually holds no secrets.
@@ -14,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Supports only Jellyfin 12.3, with JellyfinSecurity plugin 2.6.4.1 (versions tested in CI). Use an earlier provider release for an earlier Jellyfin.
 - `jellyfin_api_key`: `app_name` is optional and defaults to `Terraform`.
 - `jellyfin_plugin`: `version` is a minimum while Jellyfin's automatic plugin updates are on, that is while its `PluginUpdates` task (*Update Plugins*) has at least one trigger. The next apply no longer reinstalls the pinned version over a plugin the task upgraded. Changing `version` to a value the installed version satisfies only updates state, and creating the resource adopts a newer installed version. With no triggers, `version` stays exact. The `autoUpdate` flag in a plugin's `meta.json` is not read.
 - `jellyfin_plugin`: imported plugins, including every one `jellyfin-import` generates, and pinned plugins in state from 0.6.0 or earlier plan no change after the task upgrades them. In a few cases one plan after an upgrade changes `version` once, in place and only in state, and never downgrades the plugin:
