@@ -5,7 +5,7 @@ go 1.26.7
 toolchain go1.27.3
 
 require (
-	github.com/bmatcuk/doublestar/v4 v4.10.3
+	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
 	github.com/google/go-github/v45 v45.2.0
 	github.com/knadh/koanf/parsers/dotenv v1.1.3
