@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": ["local>ThePhaseless/renovate-config"],
   // The repo also allows merge commits, which "auto" could pick.
   "automergeStrategy": "squash",
   "prConcurrentLimit": 20,
@@ -8,8 +8,6 @@
   // bump inside the fork must also tidy tools/, or `make generate` refuses to
   // run.
   "postUpdateOptions": ["gomodTidyAll"],
-  // Security fixes for indirect modules too, as Dependabot raises them.
-  "osvVulnerabilityAlerts": true,
   "customDatasources": {
     // Jellyfin installs a plugin by the four-segment version in its manifest,
     // which the three-segment release tags do not carry.
@@ -41,11 +39,6 @@
     }
   ],
   "packageRules": [
-    {
-      // CI is the gate. Majors stay manual.
-      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
-      "automerge": true
-    },
     {
       // Renovate skips `// indirect` Go modules by default. One grouped PR
       // keeps them current, including fixes such as grpc's.
@@ -86,7 +79,10 @@
       "allowedVersions": "/^\\d+\\.\\d+\\.\\d+\\.1$/",
       "commitMessagePrefix": "chore:",
       "commitMessageTopic": "JellyfinSecurity plugin version",
-      "automerge": true
+      "automerge": true,
+      // The custom manifest datasource carries no release dates, so the
+      // preset's minimumReleaseAge would hold these updates forever.
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
     },
     {
       // Majors automerge too: the acceptance suite boots this Jellyfin version.
