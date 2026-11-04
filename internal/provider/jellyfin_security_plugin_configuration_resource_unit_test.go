@@ -197,10 +197,6 @@ func TestUnitJellyfinSecurityPlugin264FieldsRoundTrip(t *testing.T) {
 
 func TestUnitJellyfinSecurityPlugin265FieldsRoundTrip(t *testing.T) {
 	b := mustWire(t, securityPluginWire)
-	served := map[string]string{
-		"WelcomeEmailEnabled":       "false",
-		"AppPasswordRefusedClients": `["Jellyfin for Android"]`,
-	}
 	data := readWire[JellyfinSecurityPluginConfigurationResourceModel](t, b,
 		`{"WelcomeEmailEnabled":false,"AppPasswordRefusedClients":["Jellyfin for Android"]}`)
 
@@ -212,10 +208,11 @@ func TestUnitJellyfinSecurityPlugin265FieldsRoundTrip(t *testing.T) {
 	}
 
 	base := writeWire(t, b, &data)
-	for key, want := range served {
-		if got := string(base[key]); got != want {
-			t.Errorf("%s = %s, want %s", key, got, want)
-		}
+	if got := string(base["WelcomeEmailEnabled"]); got != "false" {
+		t.Errorf("WelcomeEmailEnabled = %s", got)
+	}
+	if got := string(base["AppPasswordRefusedClients"]); got != `["Jellyfin for Android"]` {
+		t.Errorf("AppPasswordRefusedClients = %s", got)
 	}
 }
 
