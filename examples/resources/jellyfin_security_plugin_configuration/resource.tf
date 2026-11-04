@@ -35,11 +35,17 @@ resource "jellyfin_security_plugin_configuration" "example" {
     preset                          = "authentik"
     discovery_url                   = "https://auth.example.com/application/o/jellyfin/.well-known/openid-configuration"
     client_id                       = "jellyfin"
-    client_secret                   = var.oidc_client_secret
     scopes                          = ["openid", "profile", "email", "groups"]
     admin_groups                    = ["jellyfin-admins"]
     link_existing_users_by_username = true
   }]
+
+  # Write-only (Terraform 1.11+): the secret never reaches state. Bump the
+  # version to send a rotated secret.
+  oidc_client_secrets_wo = {
+    authentik = var.oidc_client_secret
+  }
+  oidc_client_secrets_wo_version = 1
 
   depends_on = [jellyfin_restart.jellyfin_security]
 }
@@ -47,4 +53,5 @@ resource "jellyfin_security_plugin_configuration" "example" {
 variable "oidc_client_secret" {
   type      = string
   sensitive = true
+  ephemeral = true
 }

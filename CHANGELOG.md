@@ -14,6 +14,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `jellyfin_security_plugin_configuration`: `welcome_email_enabled` and `app_password_refused_clients` (JellyfinSecurity 2.6.5).
+- `jellyfin_security_plugin_configuration`: write-only secrets that never reach plan or state, each sent on create and whenever its `*_wo_version` changes (Terraform 1.11+, JellyfinSecurity 2.6.5+):
+  - `smtp_password_wo`, `ntfy_token_wo`, `ntfy_password_wo`, `gotify_app_token_wo`, `telegram_bot_token_wo`, `webhook_secret_wo` and `webhook_ed25519_private_key_wo`, each with its `*_wo_version`;
+  - `webhook_headers_wo`, a map keyed by header name, with `webhook_headers_wo_version`;
+  - `oidc_client_secrets_wo`, a map of OIDC client secrets keyed by provider `id`, with `oidc_client_secrets_wo_version`.
+
+### Deprecated
+
+- `jellyfin_security_plugin_configuration`: the plain secret attributes (`smtp_password`, `ntfy_token`, `ntfy_password`, `gotify_app_token`, `telegram_bot_token`, `webhook_secret`, `webhook_ed25519_private_key`), `webhook_headers` and `oidc_providers[*].client_secret`. Use the `*_wo` attributes instead. They will be removed in the next major release.
+
+### Fixed
+
+- `jellyfin_security_plugin_configuration`: "Provider produced inconsistent result after apply" with JellyfinSecurity 2.6.5, which serves saved secrets as `(saved)`. A configured secret now keeps its configured value in state, an unconfigured one holds `(saved)`, and the plugin keeps any secret the plan leaves unset.
 
 ## [0.8.0] - 2026-10-27
 
