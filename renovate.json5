@@ -4,10 +4,6 @@
   // The repo also allows merge commits, which "auto" could pick.
   "automergeStrategy": "squash",
   "prConcurrentLimit": 20,
-  // tools/go.mod reaches tools/copywrite-patched through a local replace. A
-  // bump inside the fork must also tidy tools/, or `make generate` refuses to
-  // run.
-  "postUpdateOptions": ["gomodTidyAll"],
   "customDatasources": {
     // Jellyfin installs a plugin by the four-segment version in its manifest,
     // which the three-segment release tags do not carry.
@@ -39,23 +35,6 @@
     }
   ],
   "packageRules": [
-    {
-      // Renovate skips `// indirect` Go modules by default. One grouped PR
-      // keeps them current, including fixes such as grpc's.
-      "matchManagers": ["gomod"],
-      "matchDepTypes": ["indirect"],
-      "enabled": true,
-      "groupName": "indirect Go modules"
-    },
-    {
-      // A major Go version is a new module path. Nothing imports the new path
-      // of an indirect module, so `go mod tidy` drops it and the bump never
-      // builds.
-      "matchManagers": ["gomod"],
-      "matchDepTypes": ["indirect"],
-      "matchUpdateTypes": ["major"],
-      "enabled": false
-    },
     {
       // A patched fork of hashicorp/copywrite. Following its dependencies past
       // upstream's majors only widens the diff it carries.
