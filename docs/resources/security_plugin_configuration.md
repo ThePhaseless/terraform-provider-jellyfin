@@ -79,6 +79,7 @@ variable "oidc_client_secret" {
 - `allow_indefinite_trust` (Boolean) Allow indefinite trust for devices.
 - `allow_password_login_on_lan` (Boolean) Allow password login on LAN.
 - `allow_private_notification_targets` (Boolean) Allow private network notification targets.
+- `app_password_refused_clients` (List of String) Client names, matched case-insensitively, that may not sign in with an app password, on top of the always-refused Jellyfin Web. Do not list clients that cannot show the 2FA challenge, or their users lose their only way in. Requires plugin 2.6.5 or later.
 - `audit_log_max_entries` (Number) Max audit log entries.
 - `bare_device_id_bypass_enabled` (Boolean) Enable bypass for bare device IDs.
 - `block_empty_password_login` (Boolean) Block login for users with empty passwords.
@@ -162,6 +163,7 @@ variable "oidc_client_secret" {
 - `webhook_headers` (List of String, Sensitive) Extra webhook headers, one "Name: Value" entry each. Sensitive, as receivers authenticate with a header such as Authorization.
 - `webhook_secret` (String, Sensitive) Webhook signing secret.
 - `webhook_url` (String, Sensitive) Webhook notification URL. Sensitive, as receivers such as Discord and Slack take a token in the URL.
+- `welcome_email_enabled` (Boolean) Send a one-off welcome email the first time a user registers or changes their MFA email address, which also catches a mistyped address. Does nothing unless SMTP is configured. The plugin defaults to on. Requires plugin 2.6.5 or later.
 
 ### Read-Only
 

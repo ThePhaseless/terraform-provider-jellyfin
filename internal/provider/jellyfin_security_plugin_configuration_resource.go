@@ -139,6 +139,8 @@ type JellyfinSecurityPluginConfigurationResourceModel struct {
 	SuspiciousLoginEnabled                     types.Bool   `tfsdk:"suspicious_login_enabled"`
 	TelegramBotToken                           types.String `tfsdk:"telegram_bot_token"`
 	TelegramChatID                             types.String `tfsdk:"telegram_chat_id"`
+	WelcomeEmailEnabled                        types.Bool   `tfsdk:"welcome_email_enabled"`
+	AppPasswordRefusedClients                  types.List   `tfsdk:"app_password_refused_clients"`
 }
 
 var securityPluginWire = sync.OnceValues(func() (*wire.Binding, error) {
@@ -365,6 +367,8 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 			"suspicious_login_enabled":                         optionalBool("Run the suspicious-login detector when an ASN or country database is configured. Off keeps the database paths and does not stop impossible-travel alerts. The plugin defaults to on. Requires plugin 2.6.4 or later."),
 			"telegram_bot_token":                               sensitiveString("Telegram bot token from @BotFather. With telegram_chat_id also set, security alerts go to that chat. Requires plugin 2.6.4 or later."),
 			"telegram_chat_id":                                 optionalString("Telegram chat that receives security alerts: a user or group ID (group and channel IDs are negative) or a public channel's @username. Requires plugin 2.6.4 or later."),
+			"welcome_email_enabled":                            optionalBool("Send a one-off welcome email the first time a user registers or changes their MFA email address, which also catches a mistyped address. Does nothing unless SMTP is configured. The plugin defaults to on. Requires plugin 2.6.5 or later."),
+			"app_password_refused_clients":                     optionalStringList("Client names, matched case-insensitively, that may not sign in with an app password, on top of the always-refused Jellyfin Web. Do not list clients that cannot show the 2FA challenge, or their users lose their only way in. Requires plugin 2.6.5 or later."),
 		},
 	}
 }
