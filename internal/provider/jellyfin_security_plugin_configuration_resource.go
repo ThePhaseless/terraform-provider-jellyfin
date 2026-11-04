@@ -39,6 +39,7 @@ var isoDateTimePattern = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{
 var (
 	_ resource.Resource                = &JellyfinSecurityPluginConfigurationResource{}
 	_ resource.ResourceWithImportState = &JellyfinSecurityPluginConfigurationResource{}
+	_ resource.ResourceWithModifyPlan  = &JellyfinSecurityPluginConfigurationResource{}
 	_ wireBound                        = &JellyfinSecurityPluginConfigurationResource{}
 )
 
@@ -139,6 +140,26 @@ type JellyfinSecurityPluginConfigurationResourceModel struct {
 	SuspiciousLoginEnabled                     types.Bool   `tfsdk:"suspicious_login_enabled"`
 	TelegramBotToken                           types.String `tfsdk:"telegram_bot_token"`
 	TelegramChatID                             types.String `tfsdk:"telegram_chat_id"`
+	WelcomeEmailEnabled                        types.Bool   `tfsdk:"welcome_email_enabled"`
+	AppPasswordRefusedClients                  types.List   `tfsdk:"app_password_refused_clients"`
+	SMTPPasswordWO                             types.String `tfsdk:"smtp_password_wo"`
+	SMTPPasswordWOVersion                      types.Int64  `tfsdk:"smtp_password_wo_version"`
+	NtfyTokenWO                                types.String `tfsdk:"ntfy_token_wo"`
+	NtfyTokenWOVersion                         types.Int64  `tfsdk:"ntfy_token_wo_version"`
+	NtfyPasswordWO                             types.String `tfsdk:"ntfy_password_wo"`
+	NtfyPasswordWOVersion                      types.Int64  `tfsdk:"ntfy_password_wo_version"`
+	GotifyAppTokenWO                           types.String `tfsdk:"gotify_app_token_wo"`
+	GotifyAppTokenWOVersion                    types.Int64  `tfsdk:"gotify_app_token_wo_version"`
+	TelegramBotTokenWO                         types.String `tfsdk:"telegram_bot_token_wo"`
+	TelegramBotTokenWOVersion                  types.Int64  `tfsdk:"telegram_bot_token_wo_version"`
+	WebhookSecretWO                            types.String `tfsdk:"webhook_secret_wo"`
+	WebhookSecretWOVersion                     types.Int64  `tfsdk:"webhook_secret_wo_version"`
+	WebhookEd25519PrivateKeyWO                 types.String `tfsdk:"webhook_ed25519_private_key_wo"`
+	WebhookEd25519PrivateKeyWOVersion          types.Int64  `tfsdk:"webhook_ed25519_private_key_wo_version"`
+	WebhookHeadersWO                           types.Map    `tfsdk:"webhook_headers_wo"`
+	WebhookHeadersWOVersion                    types.Int64  `tfsdk:"webhook_headers_wo_version"`
+	OidcClientSecretsWO                        types.Map    `tfsdk:"oidc_client_secrets_wo"`
+	OidcClientSecretsWOVersion                 types.Int64  `tfsdk:"oidc_client_secrets_wo_version"`
 }
 
 var securityPluginWire = sync.OnceValues(func() (*wire.Binding, error) {
@@ -153,6 +174,7 @@ var securityPluginWire = sync.OnceValues(func() (*wire.Binding, error) {
 		wire.WithCodec("enrollment_deadline", sameInstantCodec{}),
 		wire.ReadMissingAs("enrollment_deadline", types.StringValue("")),
 	}
+	opts = append(opts, securityPluginSecretOptions()...)
 	for attrPath, sep := range oidcDelimited {
 		opts = append(opts, wire.Delimited(attrPath, sep))
 	}
@@ -365,8 +387,11 @@ func (r *JellyfinSecurityPluginConfigurationResource) Schema(_ context.Context, 
 			"suspicious_login_enabled":                         optionalBool("Run the suspicious-login detector when an ASN or country database is configured. Off keeps the database paths and does not stop impossible-travel alerts. The plugin defaults to on. Requires plugin 2.6.4 or later."),
 			"telegram_bot_token":                               sensitiveString("Telegram bot token from @BotFather. With telegram_chat_id also set, security alerts go to that chat. Requires plugin 2.6.4 or later."),
 			"telegram_chat_id":                                 optionalString("Telegram chat that receives security alerts: a user or group ID (group and channel IDs are negative) or a public channel's @username. Requires plugin 2.6.4 or later."),
+			"welcome_email_enabled":                            optionalBool("Send a one-off welcome email the first time a user registers or changes their MFA email address, which also catches a mistyped address. Does nothing unless SMTP is configured. The plugin defaults to on. Requires plugin 2.6.5 or later."),
+			"app_password_refused_clients":                     optionalStringList("Client names, matched case-insensitively, that may not sign in with an app password, on top of the always-refused Jellyfin Web. Do not list clients that cannot show the 2FA challenge, or their users lose their only way in. Requires plugin 2.6.5 or later."),
 		},
 	}
+	addSecurityPluginWriteOnly(resp.Schema.Attributes)
 }
 
 func oidcProviderAttributes(
@@ -435,7 +460,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) Configure(_ context.Contex
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	r.apply(ctx, req.Plan, &resp.State, &resp.Diagnostics)
+	r.apply(ctx, req.Config, req.Plan, nil, &resp.State, &resp.Diagnostics)
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -450,7 +475,7 @@ func (r *JellyfinSecurityPluginConfigurationResource) Read(ctx context.Context, 
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	r.apply(ctx, req.Plan, &resp.State, &resp.Diagnostics)
+	r.apply(ctx, req.Config, req.Plan, &req.State, &resp.State, &resp.Diagnostics)
 }
 
 func (r *JellyfinSecurityPluginConfigurationResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
@@ -523,7 +548,9 @@ func warnIfNewerThanSupported(version string, diags *diag.Diagnostics) {
 	}
 }
 
-func (r *JellyfinSecurityPluginConfigurationResource) apply(ctx context.Context, plan tfsdk.Plan, state *tfsdk.State, diags *diag.Diagnostics) {
+// apply writes plan, sending the write-only values in config that differ from
+// prior, the state before an update, which is nil on create.
+func (r *JellyfinSecurityPluginConfigurationResource) apply(ctx context.Context, config tfsdk.Config, plan tfsdk.Plan, prior, state *tfsdk.State, diags *diag.Diagnostics) {
 	var data JellyfinSecurityPluginConfigurationResourceModel
 	diags.Append(plan.Get(ctx, &data)...)
 	if diags.HasError() {
@@ -533,8 +560,14 @@ func (r *JellyfinSecurityPluginConfigurationResource) apply(ctx context.Context,
 	if !ok {
 		return
 	}
+	requireMaskingPlugin(ctx, config, version, diags)
+	doc := r.document(data.PluginID.ValueString())
+	doc.patch = securityPluginPatch(ctx, config, prior, diags)
+	if diags.HasError() {
+		return
+	}
 	b := wireBinding(diags, securityPluginWire)
-	if b == nil || !r.document(data.PluginID.ValueString()).write(ctx, b, &data, diags) {
+	if b == nil || !doc.write(ctx, b, &data, diags) {
 		return
 	}
 	data.ID = data.PluginID

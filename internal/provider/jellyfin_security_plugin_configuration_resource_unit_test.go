@@ -195,6 +195,27 @@ func TestUnitJellyfinSecurityPlugin264FieldsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestUnitJellyfinSecurityPlugin265FieldsRoundTrip(t *testing.T) {
+	b := mustWire(t, securityPluginWire)
+	data := readWire[JellyfinSecurityPluginConfigurationResourceModel](t, b,
+		`{"WelcomeEmailEnabled":false,"AppPasswordRefusedClients":["Jellyfin for Android"]}`)
+
+	if data.WelcomeEmailEnabled.IsNull() || data.WelcomeEmailEnabled.ValueBool() {
+		t.Errorf("welcome_email_enabled = %v, want false", data.WelcomeEmailEnabled)
+	}
+	if got := data.AppPasswordRefusedClients.String(); got != `["Jellyfin for Android"]` {
+		t.Errorf("app_password_refused_clients = %s", got)
+	}
+
+	base := writeWire(t, b, &data)
+	if got := string(base["WelcomeEmailEnabled"]); got != "false" {
+		t.Errorf("WelcomeEmailEnabled = %s", got)
+	}
+	if got := string(base["AppPasswordRefusedClients"]); got != `["Jellyfin for Android"]` {
+		t.Errorf("AppPasswordRefusedClients = %s", got)
+	}
+}
+
 func TestUnitKeepSameInstant(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -464,6 +485,7 @@ type securityPluginServer struct {
 
 	mu       sync.Mutex
 	config   string
+	posted   string
 	requests []string
 }
 
@@ -492,7 +514,8 @@ func (f *securityPluginServer) client(t *testing.T) *client.Client {
 			if err != nil {
 				t.Error(err)
 			}
-			f.config = cmp.Or(f.afterPost, string(body))
+			f.posted = string(body)
+			f.config = cmp.Or(f.afterPost, f.posted)
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -622,11 +645,11 @@ func TestUnitSecurityPluginApplyChecksThePlugin(t *testing.T) {
 				var diags diag.Diagnostics
 				if op == "create" {
 					resp := resource.CreateResponse{State: tfsdk.State(plan)}
-					r.Create(ctx, resource.CreateRequest{Plan: plan}, &resp)
+					r.Create(ctx, resource.CreateRequest{Config: tfsdk.Config(plan), Plan: plan}, &resp)
 					diags = resp.Diagnostics
 				} else {
 					resp := resource.UpdateResponse{State: tfsdk.State(plan)}
-					r.Update(ctx, resource.UpdateRequest{Plan: plan, State: tfsdk.State(plan)}, &resp)
+					r.Update(ctx, resource.UpdateRequest{Config: tfsdk.Config(plan), Plan: plan, State: tfsdk.State(plan)}, &resp)
 					diags = resp.Diagnostics
 				}
 
@@ -899,4 +922,383 @@ type OidcProviderModel struct {
 	RpInitiatedLogoutEnabled     types.Bool   `tfsdk:"rp_initiated_logout_enabled"`
 	RpInitiatedLogoutRedirectURI types.String `tfsdk:"rp_initiated_logout_redirect_uri"`
 	CreatedAt                    types.String `tfsdk:"created_at"`
+}
+
+func TestUnitSecurityPluginSavedSecretCodec(t *testing.T) {
+	ctx := t.Context()
+	for _, test := range []struct {
+		served string
+		prior  types.String
+		want   types.String
+	}{
+		{`"(saved)"`, types.StringValue("x"), types.StringValue("x")},
+		{`"(saved)"`, types.StringNull(), types.StringValue(maskedMarker)},
+		{`"(saved)"`, types.StringUnknown(), types.StringValue(maskedMarker)},
+		{`"(saved)"`, types.StringValue(""), types.StringValue(maskedMarker)},
+		{`""`, types.StringValue("x"), types.StringValue("")},
+		{`"y"`, types.StringValue("x"), types.StringValue("y")},
+	} {
+		got, d := savedSecretCodec{}.Decode(ctx, json.RawMessage(test.served), test.prior, types.StringType)
+		if d.HasError() || !got.Equal(test.want) {
+			t.Errorf("served %s with prior %s reads %s, want %s (%v)", test.served, test.prior, got, test.want, d)
+		}
+	}
+}
+
+func TestUnitSecurityPluginSavedHeadersCodec(t *testing.T) {
+	ctx := t.Context()
+	list := func(lines ...string) types.List {
+		elems := make([]attr.Value, len(lines))
+		for i, l := range lines {
+			elems[i] = types.StringValue(l)
+		}
+		return types.ListValueMust(types.StringType, elems)
+	}
+	served := `["A: (saved)","B"]`
+	for _, test := range []struct {
+		name  string
+		prior types.List
+		want  types.List
+	}{
+		{"masked lines of the prior ones", list("A: k", "B"), list("A: k", "B")},
+		{"another length", list("A: k"), list("A: (saved)", "B")},
+		{"no prior", types.ListNull(types.StringType), list("A: (saved)", "B")},
+		{"another name", list("C: k", "B"), list("A: (saved)", "B")},
+		{"a line with no value compared as is", list("A: k", "B:"), list("A: (saved)", "B")},
+	} {
+		got, d := savedHeadersCodec{}.Decode(ctx, json.RawMessage(served), test.prior, types.ListType{ElemType: types.StringType})
+		if d.HasError() || !got.Equal(test.want) {
+			t.Errorf("%s: read %s, want %s (%v)", test.name, got, test.want, d)
+		}
+	}
+}
+
+func TestUnitSecurityPluginWriteOnlySchema(t *testing.T) {
+	s := schemaOf(&JellyfinSecurityPluginConfigurationResource{})
+	checkWriteOnly := func(name string, a rschema.Attribute) {
+		t.Helper()
+		if !a.IsWriteOnly() || !a.IsSensitive() || !a.IsOptional() || a.IsComputed() {
+			t.Errorf("%s: write-only %t, sensitive %t, optional %t, computed %t; want write-only, sensitive, optional and not computed",
+				name, a.IsWriteOnly(), a.IsSensitive(), a.IsOptional(), a.IsComputed())
+		}
+		v, ok := s.Attributes[name+"_version"].(rschema.Int64Attribute)
+		if !ok || !v.Optional || v.Computed || v.WriteOnly {
+			t.Errorf("%s_version is %#v, want an optional Int64", name, s.Attributes[name+"_version"])
+		}
+	}
+	checkDeprecated := func(name, msg, replacement string) {
+		t.Helper()
+		if !strings.Contains(msg, "`"+replacement+"`") {
+			t.Errorf("%s deprecation %q does not name %s", name, msg, replacement)
+		}
+	}
+	for _, name := range securityPluginSecrets {
+		a, ok := s.Attributes[name+"_wo"].(rschema.StringAttribute)
+		if !ok {
+			t.Errorf("%s_wo is a %T", name, s.Attributes[name+"_wo"])
+			continue
+		}
+		checkWriteOnly(name+"_wo", a)
+		old, ok := s.Attributes[name].(rschema.StringAttribute)
+		if !ok {
+			t.Fatalf("%s is a %T", name, s.Attributes[name])
+		}
+		checkDeprecated(name, old.DeprecationMessage, name+"_wo")
+	}
+	for _, name := range []string{"webhook_headers_wo", "oidc_client_secrets_wo"} {
+		a, ok := s.Attributes[name].(rschema.MapAttribute)
+		if !ok {
+			t.Errorf("%s is a %T", name, s.Attributes[name])
+			continue
+		}
+		checkWriteOnly(name, a)
+	}
+	headers, ok := s.Attributes["webhook_headers"].(rschema.ListAttribute)
+	if !ok {
+		t.Fatalf("webhook_headers is a %T", s.Attributes["webhook_headers"])
+	}
+	checkDeprecated("webhook_headers", headers.DeprecationMessage, "webhook_headers_wo")
+	providers, ok := s.Attributes["oidc_providers"].(rschema.ListNestedAttribute)
+	if !ok {
+		t.Fatalf("oidc_providers is a %T", s.Attributes["oidc_providers"])
+	}
+	for name, a := range providers.NestedObject.Attributes {
+		if a.IsWriteOnly() {
+			t.Errorf("oidc_providers.%s is write-only, which the framework rejects in a computed list", name)
+		}
+	}
+	secret, ok := providers.NestedObject.Attributes["client_secret"].(rschema.StringAttribute)
+	if !ok {
+		t.Fatalf("oidc_providers.client_secret is a %T", providers.NestedObject.Attributes["client_secret"])
+	}
+	checkDeprecated("oidc_providers.client_secret", secret.DeprecationMessage, "oidc_client_secrets_wo")
+}
+
+// maskedSecurityPluginDoc is what JellyfinSecurity 2.6.5 serves for stored
+// secrets.
+const maskedSecurityPluginDoc = `{"SmtpPassword":"(saved)","WebhookHeaders":["X-Api-Key: (saved)"],"OidcProviders":[{"Id":"a","ClientSecret":"(saved)"},{"Id":"b","ClientSecret":"(saved)"}]}`
+
+type attrAt struct {
+	p path.Path
+	v attr.Value
+}
+
+// securityPluginPlan returns a plan of the resource read from fixture, with
+// the values sets holds.
+func securityPluginPlan(t *testing.T, fixture string, sets ...attrAt) tfsdk.Plan {
+	t.Helper()
+	ctx := t.Context()
+	s := schemaOf(&JellyfinSecurityPluginConfigurationResource{})
+	data := readWire[JellyfinSecurityPluginConfigurationResourceModel](t, mustWire(t, securityPluginWire), fixture)
+	data.PluginID = types.StringValue(jellyfinSecurityPluginID)
+	plan := tfsdk.Plan{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nil)}
+	if d := plan.Set(ctx, &data); d.HasError() {
+		t.Fatal(d)
+	}
+	for _, a := range sets {
+		if d := plan.SetAttribute(ctx, a.p, a.v); d.HasError() {
+			t.Fatal(d)
+		}
+	}
+	return plan
+}
+
+func woVersion(name string, v int64) attrAt {
+	return attrAt{path.Root(name + "_wo_version"), types.Int64Value(v)}
+}
+
+func stringMap(m map[string]string) types.Map {
+	elems := map[string]attr.Value{}
+	for k, v := range m {
+		elems[k] = types.StringValue(v)
+	}
+	return types.MapValueMust(types.StringType, elems)
+}
+
+func TestUnitSecurityPluginModifyPlanWriteOnly(t *testing.T) {
+	ctx := t.Context()
+	r := &JellyfinSecurityPluginConfigurationResource{}
+	nullState := func() tfsdk.State {
+		s := schemaOf(r)
+		return tfsdk.State{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nil)}
+	}
+	modify := func(t *testing.T, state tfsdk.State, plan tfsdk.Plan, config ...attrAt) resource.ModifyPlanResponse {
+		t.Helper()
+		cfg := securityPluginPlan(t, maskedSecurityPluginDoc, config...)
+		resp := resource.ModifyPlanResponse{Plan: plan}
+		r.ModifyPlan(ctx, resource.ModifyPlanRequest{Config: tfsdk.Config(cfg), Plan: plan, State: state}, &resp)
+		return resp
+	}
+	planned := func(t *testing.T, resp resource.ModifyPlanResponse, p path.Path) attr.Value {
+		t.Helper()
+		var v types.String
+		if d := resp.Plan.GetAttribute(ctx, p, &v); d.HasError() {
+			t.Fatal(d)
+		}
+		return v
+	}
+	smtp := path.Root("smtp_password")
+	unknown := types.StringUnknown()
+
+	for _, test := range []struct {
+		name         string
+		create       bool
+		stateValue   string
+		stateVersion int64
+		cfgVersion   int64 // 0 leaves it null
+		want         attr.Value
+	}{
+		{"version unchanged, masked state", false, maskedMarker, 1, 1, types.StringValue(maskedMarker)},
+		{"version unchanged, a stored plaintext", false, "x", 1, 1, unknown},
+		{"version bumped", false, maskedMarker, 1, 2, unknown},
+		{"create", true, maskedMarker, 0, 1, unknown},
+		{"no version configured", false, "x", 1, 0, types.StringValue("x")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			state := tfsdk.State(securityPluginPlan(t, maskedSecurityPluginDoc, attrAt{smtp, types.StringValue(test.stateValue)}, woVersion("smtp_password", test.stateVersion)))
+			if test.create {
+				state = nullState()
+			}
+			plan := securityPluginPlan(t, maskedSecurityPluginDoc, attrAt{smtp, types.StringValue(test.stateValue)}, woVersion("smtp_password", test.stateVersion))
+			var config []attrAt
+			if test.cfgVersion != 0 {
+				config = []attrAt{woVersion("smtp_password", test.cfgVersion), {path.Root("smtp_password_wo"), types.StringValue("v1")}}
+			}
+			resp := modify(t, state, plan, config...)
+			if resp.Diagnostics.HasError() {
+				t.Fatal(resp.Diagnostics)
+			}
+			if got := planned(t, resp, smtp); !got.Equal(test.want) {
+				t.Errorf("planned smtp_password %s, want %s", got, test.want)
+			}
+		})
+	}
+
+	secretOf := func(i int) path.Path { return path.Root("oidc_providers").AtListIndex(i).AtName("client_secret") }
+	secrets := func(m map[string]string) attrAt { return attrAt{path.Root("oidc_client_secrets_wo"), stringMap(m)} }
+	state := tfsdk.State(securityPluginPlan(t, maskedSecurityPluginDoc, woVersion("oidc_client_secrets", 1)))
+
+	t.Run("oidc bump targets the provider by id", func(t *testing.T) {
+		for _, fixture := range []string{
+			maskedSecurityPluginDoc,
+			`{"OidcProviders":[{"Id":"b","ClientSecret":"(saved)"},{"Id":"a","ClientSecret":"(saved)"}]}`,
+		} {
+			plan := securityPluginPlan(t, fixture, woVersion("oidc_client_secrets", 1))
+			cfg := securityPluginPlan(t, fixture, woVersion("oidc_client_secrets", 2), secrets(map[string]string{"a": "v1"}))
+			resp := resource.ModifyPlanResponse{Plan: plan}
+			r.ModifyPlan(ctx, resource.ModifyPlanRequest{Config: tfsdk.Config(cfg), Plan: plan, State: state}, &resp)
+			if resp.Diagnostics.HasError() {
+				t.Fatal(resp.Diagnostics)
+			}
+			a, b := 0, 1
+			if strings.Contains(fixture, `[{"Id":"b"`) {
+				a, b = 1, 0
+			}
+			if got := planned(t, resp, secretOf(a)); !got.IsUnknown() {
+				t.Errorf("%s: a's client_secret plans %s, want unknown", fixture, got)
+			}
+			if got := planned(t, resp, secretOf(b)); !got.Equal(types.StringValue(maskedMarker)) {
+				t.Errorf("%s: b's client_secret plans %s, want it kept", fixture, got)
+			}
+		}
+	})
+
+	t.Run("oidc version unchanged keeps the masked secrets", func(t *testing.T) {
+		plan := securityPluginPlan(t, maskedSecurityPluginDoc, woVersion("oidc_client_secrets", 1))
+		resp := modify(t, state, plan, woVersion("oidc_client_secrets", 1), secrets(map[string]string{"a": "v1"}))
+		if resp.Diagnostics.HasError() {
+			t.Fatal(resp.Diagnostics)
+		}
+		if got := planned(t, resp, secretOf(0)); !got.Equal(types.StringValue(maskedMarker)) {
+			t.Errorf("a's client_secret plans %s, want it kept", got)
+		}
+	})
+
+	t.Run("oidc provider new to the state gets its secret", func(t *testing.T) {
+		onlyB := tfsdk.State(securityPluginPlan(t, `{"OidcProviders":[{"Id":"b","ClientSecret":"(saved)"}]}`, woVersion("oidc_client_secrets", 1)))
+		plan := securityPluginPlan(t, maskedSecurityPluginDoc, woVersion("oidc_client_secrets", 1))
+		resp := modify(t, onlyB, plan, woVersion("oidc_client_secrets", 1), secrets(map[string]string{"a": "v1", "b": "v1"}))
+		if resp.Diagnostics.HasError() {
+			t.Fatal(resp.Diagnostics)
+		}
+		if got := planned(t, resp, secretOf(0)); !got.IsUnknown() {
+			t.Errorf("a's client_secret plans %s, want unknown", got)
+		}
+		if got := planned(t, resp, secretOf(1)); !got.Equal(types.StringValue(maskedMarker)) {
+			t.Errorf("b's client_secret plans %s, want it kept", got)
+		}
+	})
+
+	t.Run("oidc key with no provider", func(t *testing.T) {
+		plan := securityPluginPlan(t, maskedSecurityPluginDoc, woVersion("oidc_client_secrets", 1))
+		resp := modify(t, state, plan, woVersion("oidc_client_secrets", 1), secrets(map[string]string{"a": "v1", "z": "v1"}))
+		want := path.Root("oidc_client_secrets_wo").AtMapKey("z")
+		if len(resp.Diagnostics) != 1 || resp.Diagnostics.ErrorsCount() != 1 {
+			t.Fatalf("diagnostics %v, want one error at %s", resp.Diagnostics, want)
+		}
+		withPath, ok := resp.Diagnostics[0].(diag.DiagnosticWithPath)
+		if !ok || !withPath.Path().Equal(want) {
+			t.Errorf("error %v, want it at %s", resp.Diagnostics[0], want)
+		}
+	})
+}
+
+func TestUnitSecurityPluginApplySendsWriteOnlySecrets(t *testing.T) {
+	ctx := t.Context()
+	// plain reads what the POST carried for the secrets.
+	plain := func(t *testing.T, body string) string {
+		t.Helper()
+		var got struct {
+			SMTPPassword   json.RawMessage `json:"SmtpPassword"`
+			WebhookHeaders json.RawMessage
+			OidcProviders  []struct {
+				ID           string          `json:"Id"`
+				ClientSecret json.RawMessage `json:"ClientSecret"`
+			}
+		}
+		if err := json.Unmarshal([]byte(body), &got); err != nil {
+			t.Fatalf("POST body %q: %v", body, err)
+		}
+		var out strings.Builder
+		fmt.Fprintf(&out, "%s %s", got.SMTPPassword, got.WebhookHeaders)
+		for _, p := range got.OidcProviders {
+			fmt.Fprintf(&out, " %s=%s", p.ID, p.ClientSecret)
+		}
+		return out.String()
+	}
+	versions := func(v int64) []attrAt {
+		return []attrAt{woVersion("smtp_password", v), woVersion("webhook_headers", v), woVersion("oidc_client_secrets", v)}
+	}
+	values := func(v string) []attrAt {
+		return []attrAt{
+			{path.Root("smtp_password_wo"), types.StringValue(v)},
+			{path.Root("webhook_headers_wo"), stringMap(map[string]string{"X-Api-Key": v, "A-Key": "j"})},
+			{path.Root("oidc_client_secrets_wo"), stringMap(map[string]string{"a": v})},
+		}
+	}
+	masked := []attrAt{{path.Root("oidc_providers").AtListIndex(0).AtName("client_secret"), types.StringUnknown()}}
+	sent := []attrAt{
+		{path.Root("smtp_password"), types.StringUnknown()},
+		{path.Root("webhook_headers"), types.ListUnknown(types.StringType)},
+		masked[0],
+	}
+
+	for _, test := range []struct {
+		name       string
+		create     bool
+		cfgVersion int64
+		plan       []attrAt
+		served     string // the masked document unless set
+		want       string
+	}{
+		{"create", true, 1, sent, "", `"v1" ["A-Key: j","X-Api-Key: v1"] a="v1" b="(saved)"`},
+		{"update, versions unchanged", false, 1, masked, "", `"(saved)" ["X-Api-Key: (saved)"] a="(saved)" b="(saved)"`},
+		{"update, versions bumped", false, 2, sent, "", `"v1" ["A-Key: j","X-Api-Key: v1"] a="v1" b="(saved)"`},
+		{"update, a provider the plugin lacks", false, 1, masked, `{"OidcProviders":[{"Id":"b","ClientSecret":"(saved)"}]}`, `"(saved)" ["X-Api-Key: (saved)"] a="v1" b="(saved)"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			srv := &securityPluginServer{version: supportedSecurityPluginVersion(), config: cmp.Or(test.served, maskedSecurityPluginDoc), afterPost: maskedSecurityPluginDoc}
+			r := &JellyfinSecurityPluginConfigurationResource{client: srv.client(t)}
+			prior := securityPluginPlan(t, maskedSecurityPluginDoc, versions(1)...)
+			plan := securityPluginPlan(t, maskedSecurityPluginDoc, append(versions(test.cfgVersion), test.plan...)...)
+			config := tfsdk.Config(securityPluginPlan(t, maskedSecurityPluginDoc, append(versions(test.cfgVersion), values("v1")...)...))
+
+			var diags diag.Diagnostics
+			var state tfsdk.State
+			if test.create {
+				resp := resource.CreateResponse{State: tfsdk.State{Schema: plan.Schema, Raw: tftypes.NewValue(plan.Schema.Type().TerraformType(ctx), nil)}}
+				r.Create(ctx, resource.CreateRequest{Config: config, Plan: plan}, &resp)
+				diags, state = resp.Diagnostics, resp.State
+			} else {
+				resp := resource.UpdateResponse{State: tfsdk.State(prior)}
+				r.Update(ctx, resource.UpdateRequest{Config: config, Plan: plan, State: tfsdk.State(prior)}, &resp)
+				diags, state = resp.Diagnostics, resp.State
+			}
+			if diags.HasError() {
+				t.Fatal(diags)
+			}
+			if got := plain(t, srv.posted); got != test.want {
+				t.Errorf("posted %s, want %s", got, test.want)
+			}
+			var smtp types.String
+			if d := state.GetAttribute(ctx, path.Root("smtp_password"), &smtp); d.HasError() || smtp.ValueString() != maskedMarker {
+				t.Errorf("state smtp_password = %s, want the marker the plugin serves (%v)", smtp, d)
+			}
+		})
+	}
+
+	t.Run("plugin older than 2.6.5", func(t *testing.T) {
+		srv := &securityPluginServer{version: "2.6.3.1", config: maskedSecurityPluginDoc, afterPost: maskedSecurityPluginDoc}
+		r := &JellyfinSecurityPluginConfigurationResource{client: srv.client(t)}
+		plan := securityPluginPlan(t, maskedSecurityPluginDoc, append(versions(1), sent...)...)
+		config := tfsdk.Config(securityPluginPlan(t, maskedSecurityPluginDoc, append(versions(1), values("v1")...)...))
+		resp := resource.CreateResponse{State: tfsdk.State{Schema: plan.Schema, Raw: tftypes.NewValue(plan.Schema.Type().TerraformType(ctx), nil)}}
+		r.Create(ctx, resource.CreateRequest{Config: config, Plan: plan}, &resp)
+		if resp.Diagnostics.ErrorsCount() != 1 {
+			t.Fatalf("diagnostics %v, want one error", resp.Diagnostics)
+		}
+		if srv.posted != "" {
+			t.Errorf("posted %s, want nothing", srv.posted)
+		}
+	})
 }

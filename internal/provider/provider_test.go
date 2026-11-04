@@ -22,6 +22,28 @@ var testAccProtoV6ProviderFactories = map[string]func() (tfprotov6.ProviderServe
 	"jellyfin": providerserver.NewProtocol6WithError(New("test")()),
 }
 
+// TestUnitProviderSchemaValidates serves the schema as Terraform asks for it,
+// so a schema shape the framework rejects, such as a write-only attribute
+// where it does not allow one, fails without an acceptance run.
+func TestUnitProviderSchemaValidates(t *testing.T) {
+	srv, err := providerserver.NewProtocol6WithError(New("test")())()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := srv.GetProviderSchema(t.Context(), &tfprotov6.GetProviderSchemaRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range resp.Diagnostics {
+		if d.Severity == tfprotov6.DiagnosticSeverityError {
+			t.Errorf("%s: %s", d.Summary, d.Detail)
+		}
+	}
+	if _, ok := resp.ResourceSchemas["jellyfin_security_plugin_configuration"]; !ok {
+		t.Error("the provider serves no jellyfin_security_plugin_configuration schema")
+	}
+}
+
 func testAccPreCheck(t *testing.T) {
 	t.Helper()
 

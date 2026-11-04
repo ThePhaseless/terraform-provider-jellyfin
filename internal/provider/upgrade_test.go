@@ -290,7 +290,9 @@ func TestAccSecurityPluginUpgradeFromV038(t *testing.T) {
 	testAccSecurityPluginPreCheck(t)
 	testAccPutBackSecurityPluginConfiguration(t, testAccInstallSecurityPlugin(t))
 
-	testAccUpgradeFromV038(t, testAccSecurityPluginConfigurationConfig(securityPluginTestValues{
+	// 0.3.8 writes back the masked secrets the plugin serves, so it runs with
+	// none set.
+	values := securityPluginTestValues{
 		pluginID:           jellyfinSecurityPluginID,
 		publicBaseURL:      "https://upgrade.example.com",
 		pairDevice:         true,
@@ -298,5 +300,18 @@ func TestAccSecurityPluginUpgradeFromV038(t *testing.T) {
 		enrollmentDeadline: "2032-03-04T05:06:07Z",
 		displayName:        "Upgrade IdP",
 		linkByUsername:     true,
-	}))
+		secrets:            noSecrets,
+	}
+	deprecated := values
+	deprecated.secrets = deprecatedSecrets
+
+	const name = "jellyfin_security_plugin_configuration.test"
+	testAccUpgradeFromV038(t, testAccSecurityPluginConfigurationConfig(values), resource.TestStep{
+		Config: testAccSecurityPluginConfigurationConfig(deprecated),
+		Check: resource.ComposeAggregateTestCheckFunc(
+			resource.TestCheckResourceAttr(name, "smtp_password", "p1"),
+			resource.TestCheckResourceAttr(name, "webhook_headers.0", "X-Api-Key: k"),
+			resource.TestCheckResourceAttr(name, "oidc_providers.0.client_secret", "s3cret"),
+		),
+	})
 }

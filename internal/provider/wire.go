@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -58,11 +59,14 @@ func wireBinding(diags *diag.Diagnostics, bind func() (*wire.Binding, error)) *w
 // document is a Jellyfin JSON document that a resource reads and writes
 // whole through its binding: what names it in messages, get reads it, and put
 // replaces it. gone, when set, handles a document the server does not have.
+// patch, when set, edits doc, the document about to be put, after the binding
+// wrote the plan over served, the document as the server served it.
 type document struct {
-	what string
-	get  func(context.Context) (string, error)
-	put  func(context.Context, string) error
-	gone func(context.Context)
+	what  string
+	get   func(context.Context) (string, error)
+	put   func(context.Context, string) error
+	gone  func(context.Context)
+	patch func(ctx context.Context, served, doc map[string]json.RawMessage) diag.Diagnostics
 }
 
 // write writes model, the plan, over the document the server serves, and
@@ -79,9 +83,17 @@ func (d document) write(ctx context.Context, b *wire.Binding, model any, diags *
 		diags.AddError("Failed to parse current "+d.what, err.Error())
 		return false
 	}
+	served := maps.Clone(base)
 	if o := b.OverlayModel(ctx, base, model); o.HasError() {
 		diags.Append(o...)
 		return false
+	}
+	if d.patch != nil {
+		p := d.patch(ctx, served, base)
+		diags.Append(p...)
+		if p.HasError() {
+			return false
+		}
 	}
 	payload, err := json.Marshal(base)
 	if err != nil {

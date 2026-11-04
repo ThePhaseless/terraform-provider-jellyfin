@@ -17,6 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
+	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 
 	"github.com/ThePhaseless/terraform-provider-jellyfin/internal/client"
 )
@@ -41,7 +42,7 @@ func TestAccSecurityPluginConfigurationResource(t *testing.T) {
 		displayName:        "Terraform IdP",
 		linkByUsername:     true,
 	})
-	updated := testAccSecurityPluginConfigurationConfig(securityPluginTestValues{
+	updatedValues := securityPluginTestValues{
 		pluginID:           jellyfinSecurityPluginID,
 		publicBaseURL:      "https://media.example.com/jellyfin",
 		pairDevice:         false,
@@ -49,11 +50,23 @@ func TestAccSecurityPluginConfigurationResource(t *testing.T) {
 		enrollmentDeadline: "2031-06-01T12:00:00+02:00",
 		displayName:        "Renamed IdP",
 		linkByUsername:     false,
-	})
+	}
+	updated := testAccSecurityPluginConfigurationConfig(updatedValues)
+	cleared, notBumped := updatedValues, updatedValues
+	cleared.smtpPasswordVersion = 2
+	notBumped.smtpPassword, notBumped.smtpPasswordVersion = "p2", 2
+
+	// An import cannot read the versions back, and the write-only values are
+	// never in state.
+	importIgnore := []string{"enrollment_deadline", "webhook_headers_wo_version", "oidc_client_secrets_wo_version"}
+	for _, s := range securityPluginSecrets {
+		importIgnore = append(importIgnore, s+"_wo_version")
+	}
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		TerraformVersionChecks:   []tfversion.TerraformVersionCheck{tfversion.SkipBelow(tfversion.Version1_11_0)},
 		Steps: []resource.TestStep{
 			{
 				Config: created,
@@ -65,7 +78,6 @@ func TestAccSecurityPluginConfigurationResource(t *testing.T) {
 					resource.TestCheckResourceAttr(name, "step_up_window_seconds", "600"),
 					resource.TestCheckResourceAttr(name, "enrollment_deadline", "2030-01-01T00:00:00Z"),
 					resource.TestCheckResourceAttr(name, "trusted_proxy_cidrs.#", "1"),
-					resource.TestCheckResourceAttr(name, "webhook_headers.0", "X-Api-Key: k"),
 					resource.TestCheckResourceAttr(name, "user_emails.0.email", "admin@example.com"),
 					resource.TestCheckResourceAttr(name, "oidc_providers.#", "1"),
 					resource.TestCheckResourceAttr(name, "oidc_providers.0.display_name", "Terraform IdP"),
@@ -73,6 +85,16 @@ func TestAccSecurityPluginConfigurationResource(t *testing.T) {
 					resource.TestCheckResourceAttr(name, "oidc_providers.0.scopes.#", "2"),
 					resource.TestCheckResourceAttr(name, "oidc_providers.0.role_library_mappings.0.library_ids.1", "b"),
 					resource.TestCheckResourceAttrSet(name, "oidc_providers.0.created_at"),
+					// The plugin serves each saved secret masked, and the
+					// write-only values stay out of state.
+					resource.TestCheckResourceAttr(name, "smtp_password", maskedMarker),
+					resource.TestCheckResourceAttr(name, "webhook_headers.0", "X-Api-Key: "+maskedMarker),
+					resource.TestCheckResourceAttr(name, "oidc_providers.0.client_secret", maskedMarker),
+					resource.TestCheckResourceAttr(name, "smtp_password_wo_version", "1"),
+					resource.TestCheckResourceAttr(name, "oidc_client_secrets_wo_version", "1"),
+					resource.TestCheckNoResourceAttr(name, "smtp_password_wo"),
+					resource.TestCheckNoResourceAttr(name, "webhook_headers_wo.%"),
+					resource.TestCheckNoResourceAttr(name, "oidc_client_secrets_wo.%"),
 				),
 			},
 			{
@@ -83,7 +105,7 @@ func TestAccSecurityPluginConfigurationResource(t *testing.T) {
 				// An import has no configured spelling to keep, so it holds the
 				// server's .NET layout of the same instant; the import block step
 				// below shows that this does not plan a change.
-				ImportStateVerifyIgnore: []string{"enrollment_deadline"},
+				ImportStateVerifyIgnore: importIgnore,
 			},
 			{
 				Config: updated,
@@ -103,16 +125,109 @@ func TestAccSecurityPluginConfigurationResource(t *testing.T) {
 					resource.TestCheckResourceAttr(name, "enrollment_deadline", "2031-06-01T12:00:00+02:00"),
 					resource.TestCheckResourceAttr(name, "oidc_providers.0.display_name", "Renamed IdP"),
 					resource.TestCheckResourceAttr(name, "oidc_providers.0.link_existing_users_by_username", "false"),
+					resource.TestCheckResourceAttr(name, "oidc_providers.0.client_secret", maskedMarker),
 				),
 			},
+			// An empty write-only value at a new version clears the secret.
 			{
-				ResourceName:    name,
-				ImportState:     true,
-				ImportStateKind: resource.ImportBlockWithID,
-				ImportStateId:   jellyfinSecurityPluginID,
+				Config: testAccSecurityPluginConfigurationConfig(cleared),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(name, plancheck.ResourceActionUpdate)},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(name, "smtp_password", ""),
+					resource.TestCheckResourceAttr(name, "smtp_password_wo_version", "2"),
+				),
+			},
+			// A new write-only value is not sent until its version changes.
+			{
+				Config: testAccSecurityPluginConfigurationConfig(notBumped),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+			// The versions cannot be imported, so an import block always plans
+			// them in, but it plans no change to the deadline the server
+			// serves in its own layout.
+			{
+				ResourceName:       name,
+				ImportState:        true,
+				ImportStateKind:    resource.ImportBlockWithID,
+				ImportStateId:      jellyfinSecurityPluginID,
+				ExpectNonEmptyPlan: true,
+				ImportPlanChecks: resource.ImportPlanChecks{
+					PreApply: []plancheck.PlanCheck{attributeUnchanged{address: name, attribute: "enrollment_deadline"}},
+				},
 			},
 		},
 	})
+}
+
+// Moving from the deprecated secret arguments to the write-only ones takes the
+// secrets out of state.
+func TestAccSecurityPluginDeprecatedSecrets(t *testing.T) {
+	testAccSecurityPluginPreCheck(t)
+	testAccInstallSecurityPlugin(t)
+
+	const name = "jellyfin_security_plugin_configuration.test"
+	values := securityPluginTestValues{
+		pluginID:           jellyfinSecurityPluginID,
+		publicBaseURL:      "https://deprecated.example.com",
+		pairDevice:         true,
+		stepUpWindow:       600,
+		enrollmentDeadline: "2033-01-01T00:00:00Z",
+		displayName:        "Deprecated IdP",
+		linkByUsername:     true,
+		secrets:            deprecatedSecrets,
+	}
+	writeOnly := values
+	writeOnly.secrets = writeOnlySecrets
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		TerraformVersionChecks:   []tfversion.TerraformVersionCheck{tfversion.SkipBelow(tfversion.Version1_11_0)},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccSecurityPluginConfigurationConfig(values),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(name, "smtp_password", "p1"),
+					resource.TestCheckResourceAttr(name, "webhook_headers.0", "X-Api-Key: k"),
+					resource.TestCheckResourceAttr(name, "oidc_providers.0.client_secret", "s3cret"),
+				),
+			},
+			{
+				Config: testAccSecurityPluginConfigurationConfig(writeOnly),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(name, plancheck.ResourceActionUpdate)},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(name, "smtp_password", maskedMarker),
+					resource.TestCheckResourceAttr(name, "webhook_headers.0", "X-Api-Key: "+maskedMarker),
+					resource.TestCheckResourceAttr(name, "oidc_providers.0.client_secret", maskedMarker),
+				),
+			},
+		},
+	})
+}
+
+// attributeUnchanged checks that the planned change of address leaves
+// attribute as it was.
+type attributeUnchanged struct{ address, attribute string }
+
+func (c attributeUnchanged) CheckPlan(_ context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
+	for _, rc := range req.Plan.ResourceChanges {
+		if rc.Address != c.address || rc.Change == nil {
+			continue
+		}
+		before, _ := rc.Change.Before.(map[string]any)
+		after, _ := rc.Change.After.(map[string]any)
+		if before[c.attribute] == nil || before[c.attribute] != after[c.attribute] {
+			resp.Error = fmt.Errorf("%s: %s planned from %v to %v", c.address, c.attribute, before[c.attribute], after[c.attribute])
+		}
+		return
+	}
+	resp.Error = fmt.Errorf("%s: no planned change", c.address)
 }
 
 // Destroying jellyfin_plugin uninstalls JellyfinSecurity, so this shares the
@@ -149,6 +264,21 @@ resource "jellyfin_plugin" "test" {
 	})
 }
 
+// secretMode picks how a security plugin test configuration sets its
+// secrets.
+type secretMode int
+
+const (
+	// writeOnlySecrets sets the write-only arguments and their versions.
+	writeOnlySecrets secretMode = iota
+	// deprecatedSecrets sets smtp_password, webhook_headers and the OIDC
+	// provider's client_secret.
+	deprecatedSecrets
+	// noSecrets sets none, which provider 0.3.8 can apply against a plugin
+	// that serves saved secrets masked.
+	noSecrets
+)
+
 type securityPluginTestValues struct {
 	pluginID           string
 	publicBaseURL      string
@@ -157,9 +287,39 @@ type securityPluginTestValues struct {
 	enrollmentDeadline string
 	displayName        string
 	linkByUsername     bool
+	secrets            secretMode
+	// smtpPassword and smtpPasswordVersion set smtp_password_wo and its
+	// version under writeOnlySecrets; a zero version stands for "p1" at 1.
+	smtpPassword        string
+	smtpPasswordVersion int
 }
 
 func testAccSecurityPluginConfigurationConfig(v securityPluginTestValues) string {
+	var secrets, clientSecret string
+	switch v.secrets {
+	case writeOnlySecrets:
+		smtp, version := v.smtpPassword, v.smtpPasswordVersion
+		if version == 0 {
+			smtp, version = "p1", 1
+		}
+		secrets = fmt.Sprintf(`
+  smtp_password_wo               = %q
+  smtp_password_wo_version       = %d
+  webhook_headers_wo             = { "X-Api-Key" = "k" }
+  webhook_headers_wo_version     = 1
+  oidc_client_secrets_wo         = { "tf-acc" = "s3cret" }
+  oidc_client_secrets_wo_version = 1
+`, smtp, version)
+	case deprecatedSecrets:
+		secrets = `
+  smtp_password   = "p1"
+  webhook_headers = ["X-Api-Key: k"]
+`
+		clientSecret = `
+    client_secret = "s3cret"`
+	case noSecrets:
+	}
+
 	return fmt.Sprintf(`
 resource "jellyfin_security_plugin_configuration" "test" {
   plugin_id = %[1]q
@@ -169,8 +329,7 @@ resource "jellyfin_security_plugin_configuration" "test" {
   step_up_window_seconds                = %[4]d
   enrollment_deadline                   = %[5]q
   trusted_proxy_cidrs                   = ["10.0.0.0/8"]
-  webhook_headers                       = ["X-Api-Key: k"]
-
+%[8]s
   user_emails = [{
     user_id = "00000000000000000000000000000001"
     email   = "admin@example.com"
@@ -180,8 +339,7 @@ resource "jellyfin_security_plugin_configuration" "test" {
     id                              = "tf-acc"
     display_name                    = %[6]q
     discovery_url                   = "https://idp.example.com/.well-known/openid-configuration"
-    client_id                       = "jellyfin"
-    client_secret                   = "s3cret"
+    client_id                       = "jellyfin"%[9]s
     scopes                          = ["openid", "profile"]
     enabled                         = false
     link_existing_users_by_username = %[7]t
@@ -191,7 +349,7 @@ resource "jellyfin_security_plugin_configuration" "test" {
     }]
   }]
 }
-`, v.pluginID, v.publicBaseURL, v.pairDevice, v.stepUpWindow, v.enrollmentDeadline, v.displayName, v.linkByUsername)
+`, v.pluginID, v.publicBaseURL, v.pairDevice, v.stepUpWindow, v.enrollmentDeadline, v.displayName, v.linkByUsername, secrets, clientSecret)
 }
 
 func testAccSecurityPluginPreCheck(t *testing.T) {

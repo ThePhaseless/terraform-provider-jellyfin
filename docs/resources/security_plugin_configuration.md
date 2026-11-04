@@ -50,11 +50,17 @@ resource "jellyfin_security_plugin_configuration" "example" {
     preset                          = "authentik"
     discovery_url                   = "https://auth.example.com/application/o/jellyfin/.well-known/openid-configuration"
     client_id                       = "jellyfin"
-    client_secret                   = var.oidc_client_secret
     scopes                          = ["openid", "profile", "email", "groups"]
     admin_groups                    = ["jellyfin-admins"]
     link_existing_users_by_username = true
   }]
+
+  # Write-only (Terraform 1.11+): the secret never reaches state. Bump the
+  # version to send a rotated secret.
+  oidc_client_secrets_wo = {
+    authentik = var.oidc_client_secret
+  }
+  oidc_client_secrets_wo_version = 1
 
   depends_on = [jellyfin_restart.jellyfin_security]
 }
@@ -62,6 +68,7 @@ resource "jellyfin_security_plugin_configuration" "example" {
 variable "oidc_client_secret" {
   type      = string
   sensitive = true
+  ephemeral = true
 }
 ```
 
@@ -74,11 +81,14 @@ variable "oidc_client_secret" {
 
 ### Optional
 
+> **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
+
 - `allow_admin_password_login` (Boolean) Allow password login for administrators.
 - `allow_app_passwords_when_password_login_disabled` (Boolean) While disable_password_login is on, still let users sign in with one of their app passwords, never the account password, for native apps that ask for a password. An app password keeps working after the identity provider stops letting its user in, until it is revoked. Requires plugin 2.6.4 or later.
 - `allow_indefinite_trust` (Boolean) Allow indefinite trust for devices.
 - `allow_password_login_on_lan` (Boolean) Allow password login on LAN.
 - `allow_private_notification_targets` (Boolean) Allow private network notification targets.
+- `app_password_refused_clients` (List of String) Client names, matched case-insensitively, that may not sign in with an app password, on top of the always-refused Jellyfin Web. Do not list clients that cannot show the 2FA challenge, or their users lose their only way in. Requires plugin 2.6.5 or later.
 - `audit_log_max_entries` (Number) Max audit log entries.
 - `bare_device_id_bypass_enabled` (Boolean) Enable bypass for bare device IDs.
 - `block_empty_password_login` (Boolean) Block login for users with empty passwords.
@@ -98,7 +108,9 @@ variable "oidc_client_secret" {
 - `geo_ip_city_db_path` (String) Path to GeoIP city database.
 - `geo_ip_country_db_path` (String) Path to GeoIP country database.
 - `geo_protection_handled_externally` (Boolean) Geographic checks are done outside the plugin (a WAF, CrowdSec, a firewall): the security score leaves impossible-travel detection out while it is off or has no city database, instead of counting it as failed. Turns no detector on or off. Requires plugin 2.6.4 or later.
-- `gotify_app_token` (String, Sensitive) Gotify app token.
+- `gotify_app_token` (String, Sensitive, Deprecated) Gotify app token.
+- `gotify_app_token_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only form of `gotify_app_token`, never stored in plan or state. Sent on create and whenever `gotify_app_token_wo_version` changes; otherwise the plugin keeps what it has. An empty string clears it. Terraform cannot read the stored value back, so it does not see a change made outside Terraform. Requires Terraform 1.11 or later and JellyfinSecurity 2.6.5 or later.
+- `gotify_app_token_wo_version` (Number) Change this to send `gotify_app_token_wo` again, for example after rotating the secret.
 - `gotify_url` (String) Gotify notification URL.
 - `hibp_enabled` (Boolean) Enable Have I Been Pwned password check.
 - `hide_builtin_forgot_password` (Boolean) Hide the built-in forgot password link.
@@ -119,11 +131,17 @@ variable "oidc_client_secret" {
 - `max_failed_attempts` (Number) Max failed auth attempts before lockout.
 - `nat_hairpin_self_ip_bypass` (Boolean) Enable NAT hairpin self-IP bypass.
 - `notify_email_addresses` (List of String) Email addresses to notify.
-- `ntfy_password` (String, Sensitive) ntfy password for HTTP Basic auth.
-- `ntfy_token` (String, Sensitive) ntfy access token; takes precedence over ntfy_username/ntfy_password.
+- `ntfy_password` (String, Sensitive, Deprecated) ntfy password for HTTP Basic auth.
+- `ntfy_password_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only form of `ntfy_password`, never stored in plan or state. Sent on create and whenever `ntfy_password_wo_version` changes; otherwise the plugin keeps what it has. An empty string clears it. Terraform cannot read the stored value back, so it does not see a change made outside Terraform. Requires Terraform 1.11 or later and JellyfinSecurity 2.6.5 or later.
+- `ntfy_password_wo_version` (Number) Change this to send `ntfy_password_wo` again, for example after rotating the secret.
+- `ntfy_token` (String, Sensitive, Deprecated) ntfy access token; takes precedence over ntfy_username/ntfy_password.
+- `ntfy_token_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only form of `ntfy_token`, never stored in plan or state. Sent on create and whenever `ntfy_token_wo_version` changes; otherwise the plugin keeps what it has. An empty string clears it. Terraform cannot read the stored value back, so it does not see a change made outside Terraform. Requires Terraform 1.11 or later and JellyfinSecurity 2.6.5 or later.
+- `ntfy_token_wo_version` (Number) Change this to send `ntfy_token_wo` again, for example after rotating the secret.
 - `ntfy_topic` (String) ntfy notification topic.
 - `ntfy_url` (String) ntfy notification URL.
 - `ntfy_username` (String) ntfy username for HTTP Basic auth; used only when ntfy_token is empty.
+- `oidc_client_secrets_wo` (Map of String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only OIDC client secrets keyed by provider `id`, never stored in plan or state. Sent on create, whenever `oidc_client_secrets_wo_version` changes, and for a provider `id` the plugin does not have yet; otherwise the plugin keeps what it has. An empty string clears a provider's secret. Terraform cannot read the stored value back, so it does not see a change made outside Terraform. Requires Terraform 1.11 or later and JellyfinSecurity 2.6.5 or later.
+- `oidc_client_secrets_wo_version` (Number) Change this to send `oidc_client_secrets_wo` again, for example after rotating the secret.
 - `oidc_providers` (Attributes List) List of OIDC provider configurations. (see [below for nested schema](#nestedatt--oidc_providers))
 - `onboarding_password_min_length` (Number) Onboarding password minimum length.
 - `onboarding_password_require_digit` (Boolean) Require digit in onboarding passwords.
@@ -142,14 +160,18 @@ variable "oidc_client_secret" {
 - `smtp_from_address` (String) SMTP from address.
 - `smtp_from_name` (String) SMTP from name.
 - `smtp_host` (String) SMTP server host.
-- `smtp_password` (String, Sensitive) SMTP password.
+- `smtp_password` (String, Sensitive, Deprecated) SMTP password.
+- `smtp_password_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only form of `smtp_password`, never stored in plan or state. Sent on create and whenever `smtp_password_wo_version` changes; otherwise the plugin keeps what it has. An empty string clears it. Terraform cannot read the stored value back, so it does not see a change made outside Terraform. Requires Terraform 1.11 or later and JellyfinSecurity 2.6.5 or later.
+- `smtp_password_wo_version` (Number) Change this to send `smtp_password_wo` again, for example after rotating the secret.
 - `smtp_port` (Number) SMTP server port.
 - `smtp_use_ssl` (Boolean) Use SSL for SMTP.
 - `smtp_username` (String) SMTP username.
 - `step_up_level` (String) Step-up level: Off, Destructive, AllConfigChanges, or Everything.
 - `step_up_window_seconds` (Number) Step-up authentication window in seconds.
 - `suspicious_login_enabled` (Boolean) Run the suspicious-login detector when an ASN or country database is configured. Off keeps the database paths and does not stop impossible-travel alerts. The plugin defaults to on. Requires plugin 2.6.4 or later.
-- `telegram_bot_token` (String, Sensitive) Telegram bot token from @BotFather. With telegram_chat_id also set, security alerts go to that chat. Requires plugin 2.6.4 or later.
+- `telegram_bot_token` (String, Sensitive, Deprecated) Telegram bot token from @BotFather. With telegram_chat_id also set, security alerts go to that chat. Requires plugin 2.6.4 or later.
+- `telegram_bot_token_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only form of `telegram_bot_token`, never stored in plan or state. Sent on create and whenever `telegram_bot_token_wo_version` changes; otherwise the plugin keeps what it has. An empty string clears it. Terraform cannot read the stored value back, so it does not see a change made outside Terraform. Requires Terraform 1.11 or later and JellyfinSecurity 2.6.5 or later.
+- `telegram_bot_token_wo_version` (Number) Change this to send `telegram_bot_token_wo` again, for example after rotating the secret.
 - `telegram_chat_id` (String) Telegram chat that receives security alerts: a user or group ID (group and channel IDs are negative) or a public channel's @username. Requires plugin 2.6.4 or later.
 - `totp_issuer_name` (String) TOTP issuer name.
 - `trust_cookie_ttl_days` (Number) Trust cookie TTL in days.
@@ -158,10 +180,17 @@ variable "oidc_client_secret" {
 - `user_emails` (Attributes List) User email mappings. (see [below for nested schema](#nestedatt--user_emails))
 - `webauthn_origins` (List of String) WebAuthn allowed origins.
 - `webauthn_rp_id` (String) WebAuthn relying party ID.
-- `webhook_ed25519_private_key` (String, Sensitive) Webhook Ed25519 private key.
-- `webhook_headers` (List of String, Sensitive) Extra webhook headers, one "Name: Value" entry each. Sensitive, as receivers authenticate with a header such as Authorization.
-- `webhook_secret` (String, Sensitive) Webhook signing secret.
+- `webhook_ed25519_private_key` (String, Sensitive, Deprecated) Webhook Ed25519 private key.
+- `webhook_ed25519_private_key_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only form of `webhook_ed25519_private_key`, never stored in plan or state. Sent on create and whenever `webhook_ed25519_private_key_wo_version` changes; otherwise the plugin keeps what it has. An empty string clears it. Terraform cannot read the stored value back, so it does not see a change made outside Terraform. Requires Terraform 1.11 or later and JellyfinSecurity 2.6.5 or later.
+- `webhook_ed25519_private_key_wo_version` (Number) Change this to send `webhook_ed25519_private_key_wo` again, for example after rotating the secret.
+- `webhook_headers` (List of String, Sensitive, Deprecated) Extra webhook headers, one "Name: Value" entry each. Sensitive, as receivers authenticate with a header such as Authorization.
+- `webhook_headers_wo` (Map of String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only extra webhook headers, keyed by header name, never stored in plan or state. Sent as `Name: value` lines sorted by name, which replace every header, on create and whenever `webhook_headers_wo_version` changes; otherwise the plugin keeps what it has. It cannot hold two headers with the same name. Terraform cannot read the stored value back, so it does not see a change made outside Terraform. Requires Terraform 1.11 or later and JellyfinSecurity 2.6.5 or later.
+- `webhook_headers_wo_version` (Number) Change this to send `webhook_headers_wo` again, for example after rotating the secret.
+- `webhook_secret` (String, Sensitive, Deprecated) Webhook signing secret.
+- `webhook_secret_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only form of `webhook_secret`, never stored in plan or state. Sent on create and whenever `webhook_secret_wo_version` changes; otherwise the plugin keeps what it has. An empty string clears it. Terraform cannot read the stored value back, so it does not see a change made outside Terraform. Requires Terraform 1.11 or later and JellyfinSecurity 2.6.5 or later.
+- `webhook_secret_wo_version` (Number) Change this to send `webhook_secret_wo` again, for example after rotating the secret.
 - `webhook_url` (String, Sensitive) Webhook notification URL. Sensitive, as receivers such as Discord and Slack take a token in the URL.
+- `welcome_email_enabled` (Boolean) Send a one-off welcome email the first time a user registers or changes their MFA email address, which also catches a mistyped address. Does nothing unless SMTP is configured. The plugin defaults to on. Requires plugin 2.6.5 or later.
 
 ### Read-Only
 
@@ -184,7 +213,7 @@ Optional:
 - `button_text` (String) Login button text.
 - `bypass_plugin_two_fa` (Boolean) Bypass plugin 2FA for this provider.
 - `client_id` (String) OIDC client ID.
-- `client_secret` (String, Sensitive) OIDC client secret.
+- `client_secret` (String, Sensitive, Deprecated) OIDC client secret.
 - `discovery_url` (String) OIDC discovery URL.
 - `display_name` (String) Display name for the provider.
 - `email_claim` (String) JWT claim for email.
