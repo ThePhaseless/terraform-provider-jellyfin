@@ -47,7 +47,7 @@ require (
 	github.com/hashicorp/hcl v1.0.1-vault-7 // indirect
 	github.com/hashicorp/terraform-exec v0.26.0 // indirect
 	github.com/hashicorp/terraform-json v0.29.0 // indirect
-	github.com/huandu/xstrings v1.6.3 // indirect
+	github.com/huandu/xstrings v1.6.4 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/knadh/koanf v1.5.0 // indirect
